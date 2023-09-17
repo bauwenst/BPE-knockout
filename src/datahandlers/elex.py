@@ -16,7 +16,7 @@ from dataclasses import dataclass
 
 from src.datahandlers.morphology import LemmaMorphology
 from src.datahandlers.wordfiles import iterateTxt
-from src.general import *
+from src.auxiliary.paths import *
 from src.visualisation.printing import *
 from src.visualisation.timing import timeit
 
