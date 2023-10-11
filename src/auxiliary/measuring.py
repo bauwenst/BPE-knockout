@@ -2,18 +2,21 @@ import re
 from collections import Counter
 from typing import Callable
 
+from src.auxiliary.paths import PATH_DATA_OUT
 from src.auxiliary.robbert_tokenizer import robbert_tokenizer, tokenizeAsWord
-from src.datahandlers.elex import morphologyGenerator
 from src.datahandlers.morphology import *
 from src.datahandlers.wordfiles import *
 from src.datahandlers.holdout import Holdout
+#####
+# Any function with the same behaviour as morphologyGenerator can be used. Mine pulls its data from e-Lex.
+# Which morphologyGenerator is used controls which weights are extracted below.
+from src.datahandlers.elex import morphologyGenerator
+PATH_RELEVANT_WEIGHTS = PATH_DATA_OUT / f"elex_weights.txt"
+#####
 from src.visualisation.timing import timeit
-
-from src.auxiliary.paths import PATH_DATA_OUT
 
 SPLIT_MARKER = "|"
 SPLIT_MARKER_RE = re.compile(re.escape(SPLIT_MARKER))
-# relevant_weights = PATH_DATA_OUT / f"elex_in_{counts_file.stem}.txt"
 
 
 class SegmentationConfusionMatrix:
@@ -79,7 +82,7 @@ class SegmentationConfusionMatrix:
         return 2*(precision*recall)/(precision+recall)
 
 
-def generateWeights(words_file: Path, filtered_words_file: Path):
+def generateWeights(words_file: Path):
     """
     Weights in e-Lex are often 0, and the max (for "de" and "en") is 250k.
     Weights in OSCAR have max ~250M, which is 1000x more information. According to Zipf's law, all counts should have
@@ -110,15 +113,17 @@ def generateWeights(words_file: Path, filtered_words_file: Path):
                 counter[word] += int(count)
 
     # Write out these filtered counts
-    with open(filtered_words_file, "w", encoding="utf-8") as handle:
+    with open(PATH_RELEVANT_WEIGHTS, "w", encoding="utf-8") as handle:
         for word, count in counter.items():
             handle.write(f"{word} {count}\n")
 
+    return PATH_RELEVANT_WEIGHTS
 
-def main_compareMorphologyWithTokenisation(morphology_method: Callable[[LemmaMorphology], str],
-                                           tokenizer=robbert_tokenizer, name="RobBERT",
-                                           do_write_errors=False, do_confusion_matrix=False,
-                                           word_counts: Counter=None, holdout: Holdout=None):
+
+def morphologyVersusTokenisation(morphology_method: Callable[[LemmaMorphology], str],
+                                 tokenizer=robbert_tokenizer, name="RobBERT",
+                                 do_write_errors=False, do_confusion_matrix=False,
+                                 word_counts: Counter=None, holdout: Holdout=None):
     # Optional stuff
     weighted = word_counts is not None
     if do_write_errors:
@@ -188,12 +193,12 @@ def main_compareMorphologyWithTokenisation(morphology_method: Callable[[LemmaMor
 
 
 @timeit
-def test_tokenizers_batch(tkzrs: list):
+def test_tokenizers_batch(tkzrs: list, lemma_weights_path: Path=None):
     """
     Generates, for each given tokeniser, 12 metrics:
         - Morph split unweighted and weighted precision, recall, F1 of split positions vs. e-Lex;
         - Lemmatic split unweighted and weighted precision, recall, F1 of split positions vs. e-Lex;
-    The weights come from OSCAR.
+    If no weights are given, the weighted metrics are dropped.
 
     The elements of the given list must have a method .tokenize(str) -> List[str].
     """
@@ -201,10 +206,11 @@ def test_tokenizers_batch(tkzrs: list):
     import time
 
     # Load weights
-    if not relevant_weights.exists():
-        generateWeights()
-    with open(relevant_weights, "r", encoding="utf-8") as handle:
-        counter = wordsFileToCounter(handle)
+    if lemma_weights_path is not None and lemma_weights_path.is_file():
+        with open(lemma_weights_path, "r", encoding="utf-8") as handle:
+            lemma_weights = wordsFileToCounter(handle)
+    else:
+        lemma_weights = None
 
     # Evaluation loop
     for t in tkzrs:
@@ -220,11 +226,11 @@ def test_tokenizers_batch(tkzrs: list):
         print("|V|:", size)
         print("\tMorph split accuracy:")
         time.sleep(0.01)
-        main_compareMorphologyWithTokenisation(LemmaMorphology.morphSplit, tokenizer=t, do_write_errors=False, name=name,
-                                               word_counts=counter)
+        morphologyVersusTokenisation(LemmaMorphology.morphSplit, tokenizer=t, do_write_errors=False, name=name,
+                                     word_counts=lemma_weights)
 
         print("\tLemmatic split accuracy:")
         time.sleep(0.01)
-        main_compareMorphologyWithTokenisation(LemmaMorphology.lexemeSplit, tokenizer=t, do_write_errors=False, name=name,
-                                               word_counts=counter)
+        morphologyVersusTokenisation(LemmaMorphology.lexemeSplit, tokenizer=t, do_write_errors=False, name=name,
+                                     word_counts=lemma_weights)
         print()

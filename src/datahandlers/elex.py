@@ -22,7 +22,7 @@ from src.visualisation.timing import timeit
 
 PATH_ELEX = PATH_DATA_RAW / "e-Lex_1.1.1" / "Data"
 infilepath = PATH_ELEX / "e-Lex-1.1.xml"
-outfilepath_morphologies = PATH_DATA_COMPRESSED / "elex_morfologie.txt"
+outfilepath_morphologies = PATH_DATA_COMPRESSED / "elex_morphology.txt"
 outfilepath_lemmata      = PATH_DATA_COMPRESSED / "elex_lemmata.txt"
 SEP = "\t"
 
@@ -74,15 +74,6 @@ class WordForm:
     @xml_handle_element("freq")
     def get_count(self, node):
         self.count = int(node.text)
-
-
-def test_iterate():
-    with open(infilepath, "rb") as input_handle:
-        for item in Parser(input_handle).iter_from(LemmaEntry):
-            item: LemmaEntry
-            if item.morphology is not None:
-                # print(item)
-                print(item.lemma, "has", len(item.forms), "forms")
 
 
 @timeit
@@ -221,6 +212,18 @@ def morphologyGenerator():
         for line in iterateTxt(handle):
             lemma, morphological_tag = line.split(SEP)
             yield LemmaMorphology(lemma=lemma, elex_entry=morphological_tag)
+
+
+############
+
+
+def test_iterate():
+    with open(infilepath, "rb") as input_handle:
+        for item in Parser(input_handle).iter_from(LemmaEntry):
+            item: LemmaEntry
+            if item.morphology is not None:
+                # print(item)
+                print(item.lemma, "has", len(item.forms), "forms")
 
 
 @timeit

@@ -1,10 +1,32 @@
 import re
 from collections import Counter
-from typing import TextIO
+from typing import Iterable, TextIO
 from tqdm.auto import tqdm
 
-from src.general import *
+from src.auxiliary.paths import *
 from src.visualisation.timing import timeit
+
+
+def iterableToWordsFile(line_iterable: Iterable[str], output_file: TextIO):
+    """
+    Compresses the given string iterable to an output file, with the result
+    containing every unique word exactly once in the format
+        word1 count1
+        word2 count2
+        word3 count3
+        ...
+
+    Simplified from get_vocab() at https://github.com/rsennrich/subword-nmt/blob/master/subword_nmt/learn_bpe.py.
+    """
+    word_types = Counter()
+
+    for line in line_iterable:
+        for word in line.strip('\r\n ').split(' '):
+            if word:
+                word_types[word] += 1
+
+    for key, f in sorted(word_types.items(), key=lambda x: x[1], reverse=True):
+        output_file.write(key + " " + str(f) + "\n")
 
 
 def iterateTxt(open_file_handle: TextIO):
@@ -54,11 +76,14 @@ def trimWordFile(words_path: Path, minimum: int):
     Removes all words with count < minimum.
     For OSCAR, setting minimum = 10 eliminates about 80% of all words to iterate over, greatly speeding up BPE.
     """
-    with open(generatePathForTrimmedFile(words_path), "w", encoding="utf-8") as out_handle:
+    new_path = generatePathForTrimmedFile(words_path)
+    with open(new_path, "w", encoding="utf-8") as out_handle:
         with open(words_path, "r", encoding="utf-8") as in_handle:
             for w,c in iterateWordsFile(in_handle):
                 if int(c) >= minimum:
                     out_handle.write(f"{w} {c}\n")
+
+    return new_path
 
 
 @timeit
@@ -115,8 +140,9 @@ def cleanWordFile(words_path: Path):
     CONTAINS_DISJUNCT_DIGITS = re.compile(r"[A-z]+[0-9]+[A-z]+[0-9]+[A-z0-9]*")
     # CAPITAL_CHARACTERS = re.compile(r"[A-Z]")
 
+    new_path = generatePathForCleanedFile(words_path)
     removed = 0
-    with open(generatePathForCleanedFile(words_path), "w", encoding="utf-8") as out_handle:
+    with open(new_path, "w", encoding="utf-8") as out_handle:
         with open(words_path, "r", encoding="utf-8") as in_handle:
             for raw_word, raw_count in iterateWordsFile(in_handle):
                 if len(raw_word) > MAX_LENGTH:
@@ -134,6 +160,7 @@ def cleanWordFile(words_path: Path):
                 out_handle.write(f"{raw_word} {raw_count}\n")
 
     print("Removed", removed, "words from the count file.")
+    return new_path
 
 
 CHINESE_CHARACTERS = re.compile(r"[\u4e00-\u9fff]")  # https://stackoverflow.com/a/34587623/9352077
@@ -172,9 +199,3 @@ def generatePathForCleanedFile(path: Path):
 
 def generatePathForTrimmedFile(path: Path):
     return path.with_stem(path.stem + "_trimmed")
-
-
-if __name__ == "__main__":
-    from src.datahandlers.hf_corpora import PATH_WORDS_OSCAR
-    # cleanWordFile(PATH_WORDS_OSCAR)
-    trimWordFile(generatePathForCleanedFile(PATH_WORDS_OSCAR), minimum=10)
