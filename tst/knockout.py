@@ -1,17 +1,19 @@
 """
-TODO
-    Three experiments to do:
-      x Repeat the experiment mentioned in the text, but for morphemic knockout.
-      x What if you leave out the trivial merges? Is there a difference between M and L?
-      - Tuning of annealing parameter
-      - Holdout of the best knockout-annealing combos
-      - Learning with weighted lemmata.
+TODO:
+    - Three experiments to do:
+          x Repeat the experiment mentioned in the text, but for morphemic knockout.
+          x What if you leave out the trivial merges? Is there a difference between M and L?
+          - Tuning of annealing parameter
+          - Holdout of the best knockout-annealing combos
+          - Learning with weighted lemmata (right now, each lemma in e-Lex has equal contribution to the blame ratio).
 """
 import itertools
 
 from src.auxiliary.robbert_tokenizer import tokenizeAsWord
-from src.knockout.algorithm import *
-from src.auxiliary.measuring import SegmentationConfusionMatrix, test_tokenizers_batch
+from src.knockout.knockout import *
+from src.auxiliary.measuring import SegmentationConfusionMatrix, test_tokenizers_batch, PATH_RELEVANT_WEIGHTS
+
+TRIVIAL_THRESHOLD = 4
 
 
 def assert_equal_applyBPE():
@@ -53,7 +55,7 @@ def print_knockout():
     print("Deleted:", len(blame_ratios))
 
 
-def print_mending():
+def print_annealing():
     bte = BTE(modes=("",""))
     ratios = bte.getGoodNewMerges()
 
@@ -71,8 +73,6 @@ def visualise():
 
 
 def test_trivial_knockout():
-    THRESHOLD = 4
-
     tkzs = []
     modes = ["l", "m"]
     for mode in modes:
@@ -85,14 +85,13 @@ def test_trivial_knockout():
         solid_merges = []
         trivial_merges = []
         for _, total, merge in sorted(blame_ratios, key=lambda t: (t[1],t[0])):
-            if not all([len(part) >= THRESHOLD for part in merge.parts]):
+            if not all([len(part) >= TRIVIAL_THRESHOLD for part in merge.parts]):
                 solid_merges.append(merge)
             else:
                 print(total, merge)
                 trivial_merges.append(merge)
         print("Of which trivial:", len(trivial_merges))
-        print(trivial_merges)
-        quit()
+        # print(trivial_merges)
 
         for merge in tqdm(solid_merges, desc="PRUNING GRAPH"):
             bte.merge_graph.knockout("".join(merge.parts))
@@ -100,7 +99,7 @@ def test_trivial_knockout():
 
         tkzs.append(bte)
 
-    test_tokenizers_batch(tkzs)
+    test_tokenizers_batch(tkzs, PATH_RELEVANT_WEIGHTS)
 
 
 ##############################################################################
@@ -154,6 +153,10 @@ def main_tokenDiffs():
 
 
 def main_mergestats():
+    """
+    Histogram of the IDs of the knocked-out merges
+    + Histogram of the length of each left and right type.
+    """
     from src.visualisation.graphing import Histogram, MultiHistogram
 
     modes = ["l", "m"]
@@ -198,9 +201,10 @@ def main_vocabstats():
                             x_lims=(0, 15))
 
 
-def main_test_bte():
+def main_intrinsic_evaluation():
     """
-    Test all combinations of annealing and knockout on Pr-Re-F1.
+    Test all combinations of annealing and knockout
+    on intrinsic metrics (morphological Pr-Re-F1).
     """
     modesets = list(itertools.product(("","m","l"), ("","m","l")))
     fullsets = []
@@ -217,7 +221,24 @@ def main_test_bte():
     print("===== CONSTRUCTING", len(fullsets), "BTE TOKENISERS =====")
     print("Expected wait time:", 2*total_stages, "minutes.")
     tkzrs = [BTE(modes=(m1, m2), do_swap_stages=m3) for m1, m2, m3 in fullsets]
-    test_tokenizers_batch(tkzrs)
+    test_tokenizers_batch(tkzrs, PATH_RELEVANT_WEIGHTS)
+
+
+def main_partial_evaluation():
+    """
+    Intrinsic evaluation, except you use holdout and/or trivial merge exclusion to get a more nuanced view of the
+    metrics.
+    """
+    # Trivials
+    bte_notrivial_M = BTE(modes=("m",""), keep_long_merges=True)
+    bte_notrivial_L = BTE(modes=("l",""), keep_long_merges=True)
+    test_tokenizers_batch([bte_notrivial_M, bte_notrivial_L], PATH_RELEVANT_WEIGHTS)
+
+    # Holdout
+    holdout = Holdout(80)
+    bte_holdout_M = BTE(modes=("m",""), keep_long_merges=False, holdout=holdout)
+    bte_holdout_L = BTE(modes=("l",""), keep_long_merges=False, holdout=holdout)
+    test_tokenizers_batch([bte_holdout_M, bte_holdout_L], PATH_RELEVANT_WEIGHTS, holdout)  # FIXME: Holdout isn't yet being accepted by the batch function, but it is by the actual tester.
 
 
 if __name__ == "__main__":
@@ -226,12 +247,10 @@ if __name__ == "__main__":
     # tokenizer = BTE(do_prune=False)
     # print(tokenizer.segment_as_is_diagnostic("Ġmasterthesistitelbladzijdeachtergrondfiguur"))
 
-    print_knockout()
-    # print_mending()
-    # BTE(modes=("m", "m"), do_swap_stages=True)
-    # test_bte()
+    # print_knockout()
     # visualise()
-    # main_mergestats()
-    # test_trivial_knockout()
-    # main_tokenDiffs()
-    # main_vocabstats()
+
+    main_tokenDiffs()
+    main_mergestats()
+    main_vocabstats()
+    main_intrinsic_evaluation()

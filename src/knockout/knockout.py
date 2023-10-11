@@ -171,13 +171,17 @@ class BTE:
     }
     KNOCKOUT_REL_THRESHOLD = 0.5
     ANNEAL_ABS_THRESHOLD   = 25
+    LONGPART_THRESHOLD = 4
 
-    def __init__(self, modes=("",""), do_swap_stages=False, holdout: Holdout=None,
+    def __init__(self, modes=("",""), do_swap_stages=False, keep_long_merges=False, holdout: Holdout=None,
                  starting_vocab: Dict[str,int]=None, starting_mergelist: List[str]=None,
                  autorun_modes=True):
         """
         :param methods: knockout and annealing mode. Each can be empty, M (morphSplit) or L (lexemeSplit).
         :param swap_stages: whether to instead to mending first and then knockout.
+        :param keep_long_merges: whether to skip knockout for merges with relatively long parts (because they likely
+                                 form compounds; these need to be removed from the vocab, but by not doing so, you can
+                                 measure their effect on intrinsic evaluation metrics).
         :param autorun_modes: whether to actually run the given modes, or only set their segmentation function.
                               swap_stages has no effect when this is true.
         """
@@ -188,6 +192,7 @@ class BTE:
         # Modes
         self.knockout_segmentation = BTE.METHODS.get(modes[0].lower(), None)
         self.anneal_segmentation   = BTE.METHODS.get(modes[1].lower(), None)
+        self.do_prune_trivials = not keep_long_merges
         do_prune = self.knockout_segmentation is not None
         do_anneal = self.anneal_segmentation is not None
         self.name = "BTE" \
@@ -240,14 +245,15 @@ class BTE:
     @timeit
     def prune(self):
         print("Knockout...")
-        merges_to_remove = self.getBadOldMerges(threshold=BTE.KNOCKOUT_REL_THRESHOLD)
+        merges_to_remove = self.getBadOldMerges(relative_blame_threshold=BTE.KNOCKOUT_REL_THRESHOLD,
+                                                except_if_all_parts_longer_than=BTE.LONGPART_THRESHOLD if not self.do_prune_trivials else 100)
         for ratio, total, merge in tqdm(merges_to_remove, desc="PRUNING GRAPH"):
             self.merge_graph.knockout("".join(merge.parts))
 
     @timeit
     def anneal(self):
         print("Annealing...")
-        merges_to_add = self.getGoodNewMerges(BTE.ANNEAL_ABS_THRESHOLD)
+        merges_to_add = self.getGoodNewMerges(absolute_threshold=BTE.ANNEAL_ABS_THRESHOLD)
         for ratio, total, merge in tqdm(merges_to_add, desc="ANNEALING GRAPH"):
             self.merge_graph.add(merge)
 
@@ -316,12 +322,15 @@ class BTE:
 
         return buffer[1:-1].split(" "), mergepoint_to_mergeid
 
-    def getBadOldMerges(self, threshold=0.5):
+    def getBadOldMerges(self, relative_blame_threshold=0.5, except_if_all_parts_longer_than=100):
         """
         Compares BPE tokenisation to morphological tokenisation, and records the amount of times each BPE merge is used as
         well as the amount of times each merge makes a split disappear that the morphological tokenisation mandates.
 
-        All merges above the given threshold are returned.
+        All merges with blame fraction above the given threshold are returned.
+        The second threshold excludes merges with really long parts. A low threshold means that many merges are not
+        returned, and since the results of this method are used for knockout, a low threshold implies less pruning.
+        You shouldn't want that unless you want to play around with metrics.
 
         Can be repeated before and after knockout; there will always be merges to blame.
         """
@@ -364,13 +373,19 @@ class BTE:
                 blame[merge_id] += 1
                 prnt("\t", f"Blamed: space after '{lemma[index]}' merged by", merge_lookup[merge_ids[index]])
 
+        # Calculate ratios
         blame_ratios = dict()
         for idx in range(len(blame)):
-            blame_ratios[idx] = blame[idx]/total[idx] if total[idx] != 0 else 0  # Protect against DBZ.
+            blame_ratios[idx] = blame[idx]/total[idx] \
+                                if total[idx] != 0 else 0  # Protect against DBZ.
 
+        # Filter
         filtered_results = [(ratio, total[idx], merge_lookup[idx]) for idx, ratio in blame_ratios.items()
-                            if ratio >= threshold]
+                            if ratio >= relative_blame_threshold
+                            and not all([len(part) >= except_if_all_parts_longer_than
+                                         for part in merge_lookup[idx].parts])]
         filtered_results.sort(reverse=True)
+
         return filtered_results
 
     def getGoodNewMerges(self, absolute_threshold=25):
@@ -466,4 +481,3 @@ class BTE:
                    if amenability_count[merge] >= absolute_threshold]
         results.sort(reverse=True)
         return results
-
