@@ -17,7 +17,7 @@ import re
 from typing import List, Tuple, Dict, Any
 from transformers import PreTrainedTokenizer
 
-from src.knockout.knockout import BTE
+from src.knockout.knockout import BTE, BteInitConfig, RefMode
 
 Whitespace = re.compile(r"\s")
 
@@ -78,7 +78,7 @@ class BTEk_HuggingFace(PreTrainedTokenizer):
 
 
 def constructHuggingFaceBPEknockout():
-    return BTEk_HuggingFace(BTE(modes=("m", "")))
+    return BTEk_HuggingFace(BTE(BteInitConfig(knockout=RefMode.MORPHEMIC)))
 
 
 if __name__ == "__main__":

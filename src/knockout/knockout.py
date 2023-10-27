@@ -13,12 +13,14 @@ TODO:
     - I was wondering if you could use e-Lex morphologies themselves to induce segmentation rules; don't look at the
       character-level patterns, but at the morph-level patterns. This is hard though, because morphologies show you how
       to split, yet BPE is based on merging, not splitting.
-
-TODO: Cache getMerges, because it returns the same thing anyway.
 """
+import dataclasses
+from enum import Enum
+from typing import List, Dict, Callable
+import json
+import time
 from collections import Counter
-from dataclasses import dataclass
-from typing import List, Dict
+from pathlib import Path
 from tqdm.auto import tqdm
 
 from src.datahandlers.holdout import Holdout
@@ -32,7 +34,7 @@ from src.visualisation.printing import doPrint, PrintTable
 from src.visualisation.timing import timeit
 
 
-@dataclass
+@dataclasses.dataclass
 class Merge:
     priority: int
     parts: List[str]
@@ -66,6 +68,10 @@ class MergeGraph:
             self.add(raw_merge)
 
     def add(self, merge_to_add: str):
+        """
+        Adds arcs to the merge graph, and the resulting type if necessary.
+        :param merge_to_add: Space-separated merge, e.g. "ab cd e".
+        """
         parts = merge_to_add.split(" ")
         if not all([p in self.vocab for p in parts]):
             raise ValueError(f"The merge '{merge_to_add}' contains types not in the vocab yet.")
@@ -160,45 +166,70 @@ class MergeGraph:
         print("Parents and their spouses:", len(parental_spouses), parental_spouses)
 
 
+class RefMode(str, Enum):  # The str parent allows JSON serialisation: https://stackoverflow.com/a/51976841/9352077
+    NONE      = 1
+    LEXEMIC   = 2
+    MORPHEMIC = 3
+
+    @staticmethod
+    def toMethod(mode: "RefMode") -> Callable:
+        if mode == RefMode.LEXEMIC:
+            return LemmaMorphology.lexemeSplit
+        elif mode == RefMode.MORPHEMIC:
+            return LemmaMorphology.morphSplit
+
+    @staticmethod
+    def toLetter(mode: "RefMode") -> str:
+        if mode == RefMode.LEXEMIC:
+            return "l"
+        elif mode == RefMode.MORPHEMIC:
+            return "m"
+        elif mode == RefMode.NONE:
+            return ""
+
+
+@dataclasses.dataclass
+class BteInitConfig:
+    """
+    :param do_swap_stages: whether to instead to mending first and then knockout.
+    :param keep_long_merges: whether to skip knockout for merges with relatively long parts (because they likely
+                             form compounds; these need to be removed from the vocab, but by not doing so, you can
+                             measure their effect on intrinsic evaluation metrics).
+    """
+    knockout: RefMode = RefMode.NONE
+    anneal  : RefMode = RefMode.NONE
+    do_swap_stages: bool   = False
+    keep_long_merges: bool = False
+
+
 class BTE:
     """
     Byte-tuple encoding (BTE): implementation of BPE that can deal with merges of more than 2 parts.
     """
 
-    METHODS = {
-        "m": LemmaMorphology.morphSplit,
-        "l": LemmaMorphology.lexemeSplit
-    }
     KNOCKOUT_REL_THRESHOLD = 0.5
     ANNEAL_ABS_THRESHOLD   = 25
     LONGPART_THRESHOLD = 4
 
-    def __init__(self, modes=("",""), do_swap_stages=False, keep_long_merges=False, holdout: Holdout=None,
+    def __init__(self, init_config: BteInitConfig,
                  starting_vocab: Dict[str,int]=None, starting_mergelist: List[str]=None,
-                 autorun_modes=True):
+                 autorun_modes=True, holdout: Holdout=None):
         """
-        :param methods: knockout and annealing mode. Each can be empty, M (morphSplit) or L (lexemeSplit).
-        :param swap_stages: whether to instead to mending first and then knockout.
-        :param keep_long_merges: whether to skip knockout for merges with relatively long parts (because they likely
-                                 form compounds; these need to be removed from the vocab, but by not doing so, you can
-                                 measure their effect on intrinsic evaluation metrics).
         :param autorun_modes: whether to actually run the given modes, or only set their segmentation function.
                               swap_stages has no effect when this is true.
         """
-        if starting_vocab is None or starting_mergelist is None:
-            starting_vocab     = robbert_tokenizer.get_vocab()
-            starting_mergelist = getMergeList_RobBERT()
+        self.config = init_config
 
         # Modes
-        self.knockout_segmentation = BTE.METHODS.get(modes[0].lower(), None)
-        self.anneal_segmentation   = BTE.METHODS.get(modes[1].lower(), None)
-        self.do_prune_trivials = not keep_long_merges
+        self.knockout_segmentation = RefMode.toMethod(self.config.knockout)
+        self.anneal_segmentation   = RefMode.toMethod(self.config.anneal)
+        self.do_prune_trivials = not self.config.keep_long_merges
         do_prune = self.knockout_segmentation is not None
         do_anneal = self.anneal_segmentation is not None
         self.name = "BTE" \
-                    + ("-knockout-" + modes[0])*(do_prune and not do_swap_stages)\
-                    + ("-anneal-" + modes[1])*do_anneal \
-                    + ("-knockout-" + modes[0])*(do_prune and do_swap_stages)
+                    + ("-knockout-" + RefMode.toLetter(self.config.knockout))*(do_prune and not self.config.do_swap_stages)\
+                    + ("-anneal-"   + RefMode.toLetter(self.config.anneal))  * do_anneal \
+                    + ("-knockout-" + RefMode.toLetter(self.config.knockout))*(do_prune and self.config.do_swap_stages)
         print("Instantiating", self.name, "...")
 
         # Training regime
@@ -207,14 +238,17 @@ class BTE:
         self.holdout = holdout
 
         # Graph
-        self.padded_merge_rules   = None
-        self.merges_starting_with = None
-
+        if starting_vocab is None or starting_mergelist is None:
+            starting_vocab     = robbert_tokenizer.get_vocab()
+            starting_mergelist = getMergeList_RobBERT()
         self.merge_graph = MergeGraph(starting_vocab, starting_mergelist)
+
+        self.padded_merge_rules   = None  # Will be synchronised with the graph
+        self.merges_starting_with = None  # idem
         self.syncWithGraph()
 
         if autorun_modes:
-            if not do_swap_stages:
+            if not self.config.do_swap_stages:
                 if self.knockout_segmentation is not None:
                     self.prune()
                     self.syncWithGraph()
@@ -236,6 +270,10 @@ class BTE:
         return self.merge_graph.vocab
 
     def syncWithGraph(self):
+        """
+        Synchronise the class's caching structures with the merge graph, which is the actual knowledge representation of
+        the tokeniser's functionality.
+        """
         self.padded_merge_rules   = self.merge_graph.getPaddedMerges()
         self.merges_starting_with = {t: [] for t in self.merge_graph.vocab}
         for m in self.padded_merge_rules:
@@ -481,3 +519,36 @@ class BTE:
                    if amenability_count[merge] >= absolute_threshold]
         results.sort(reverse=True)
         return results
+
+    @staticmethod
+    def load(path: Path) -> "BTE":
+        with open(path, "r", encoding="utf-8") as handle:
+            tkz_as_dict = json.load(handle)
+
+        init_config = BteInitConfig(
+            knockout=RefMode(tkz_as_dict["init-metadata"]["knockout"]),
+            anneal=RefMode(tkz_as_dict["init-metadata"]["anneal"]),
+            do_swap_stages=tkz_as_dict["init-metadata"]["do_swap_stages"],
+            keep_long_merges=tkz_as_dict["init-metadata"]["keep_long_merges"]
+        )
+
+        return BTE(init_config,
+                   starting_vocab=tkz_as_dict["tokeniser"]["types"],
+                   starting_mergelist=tkz_as_dict["tokeniser"]["merges"], autorun_modes=False)
+
+    def save(self, folder: Path) -> Path:
+        if not folder.is_dir():
+            raise ValueError(f"Cannot find directory {folder.as_posix()}")
+
+        data = {
+            "init-metadata": dataclasses.asdict(self.config),
+            "tokeniser": {
+                "types": {k:v for k,v in sorted(self.merge_graph.vocab.items(), key=lambda item: item[1])},
+                "merges": [" ".join(merge.parts) for merge in self.merge_graph.merges]
+            }
+        }
+
+        out_path = folder / time.strftime("BTE_%Y-%m-%d_%H%M%S.json")
+        with open(out_path, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, indent=4)
+        return out_path

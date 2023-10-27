@@ -22,7 +22,7 @@ def assert_equal_applyBPE():
     Without pruning, BTE and applyBPE should be identical.
     """
     print("Starting assertion...")
-    bte_tokenizer = BTE(modes=("",""))
+    bte_tokenizer = BTE(BteInitConfig())
 
     for obj in morphologyGenerator():
         lemma = obj.morphtext
@@ -41,12 +41,12 @@ def ex():
 
     print(robbert_tokenizer.tokenize(" " + s))
 
-    tokenizer = BTE()
+    tokenizer = BTE(BteInitConfig())
     print(tokenizer.segment_as_is("Ġ" + s))
 
 
 def print_knockout():
-    bte = BTE(modes=("l",""), autorun_modes=False)
+    bte = BTE(BteInitConfig(knockout=RefMode.LEXEMIC), autorun_modes=False)
 
     blame_ratios = bte.getBadOldMerges()
     table = PrintTable()
@@ -56,7 +56,7 @@ def print_knockout():
 
 
 def print_annealing():
-    bte = BTE(modes=("",""))
+    bte = BTE(BteInitConfig())
     ratios = bte.getGoodNewMerges()
 
     table = PrintTable()
@@ -74,10 +74,10 @@ def visualise():
 
 def test_trivial_knockout():
     tkzs = []
-    modes = ["l", "m"]
+    modes = [RefMode.LEXEMIC, RefMode.MORPHEMIC]
     for mode in modes:
-        bte = BTE(modes=(mode, ""), autorun_modes=False)
-        bte.name = "Testing knockout-" + mode
+        bte = BTE(BteInitConfig(knockout=mode), autorun_modes=False)
+        bte.name = "Testing knockout-" + RefMode.toLetter(mode)
 
         blame_ratios = bte.getBadOldMerges()
         print("Proposed deletions:", len(blame_ratios))
@@ -100,6 +100,17 @@ def test_trivial_knockout():
         tkzs.append(bte)
 
     test_tokenizers_batch(tkzs, PATH_RELEVANT_WEIGHTS)
+
+
+def test_save_and_load():
+    from src.auxiliary.paths import PATH_DATA_TEMP
+
+    bte = BTE(init_config=BteInitConfig(knockout=RefMode.MORPHEMIC), autorun_modes=True)
+    print(len(bte.get_vocab()))
+    out_path = bte.save(PATH_DATA_TEMP)
+
+    bte = BTE.load(out_path)
+    print(len(bte.get_vocab()))
 
 
 ##############################################################################
@@ -125,13 +136,13 @@ def main_tokenDiffs():
 
     bpe = robbert_tokenizer
 
-    modes = ["l", "m"]
+    modes = [RefMode.LEXEMIC, RefMode.MORPHEMIC]
     for mode in modes:
-        print("THE BELOW HOLDS FOR KNOCKOUT MODE:", mode)
-        bte = BTE(modes=(mode,""))
+        print("THE BELOW HOLDS FOR KNOCKOUT MODE:", RefMode.toLetter(mode))
+        bte = BTE(BteInitConfig(knockout=mode))
 
         cm = SegmentationConfusionMatrix()
-        histo = Histogram(f"knockout_tokendiffs_{mode}")
+        histo = Histogram(f"knockout_tokendiffs_{RefMode.toLetter(mode)}")
         for obj in morphologyGenerator():
             lemma = obj.morphtext
 
@@ -159,13 +170,13 @@ def main_mergestats():
     """
     from src.visualisation.graphing import Histogram, MultiHistogram
 
-    modes = ["l", "m"]
+    modes = [RefMode.LEXEMIC, RefMode.MORPHEMIC]
     for mode in modes:
-        bte = BTE(modes=(mode,""), autorun_modes=False)
+        bte = BTE(BteInitConfig(knockout=mode), autorun_modes=False)
         blamed_merges = bte.getBadOldMerges()
 
-        ids     = Histogram(f"knockout_ids_{mode}")
-        lengths = MultiHistogram(f"knockout_lengths_{mode}")
+        ids     = Histogram(f"knockout_ids_{RefMode.toLetter(mode)}")
+        lengths = MultiHistogram(f"knockout_lengths_{RefMode.toLetter(mode)}")
         for _,_, merge in blamed_merges:
             ids.add(merge.priority)
 
@@ -187,7 +198,7 @@ def main_vocabstats():
     Histogram of the original RobBERT tokeniser's merge type lengths.
     """
     from src.visualisation.graphing import MultiHistogram
-    bte = BTE(modes=("", ""))
+    bte = BTE(BteInitConfig())
 
     lengths = MultiHistogram(f"robbert-merge-lengths")
     for merge in bte.merge_graph.merges:
@@ -206,13 +217,14 @@ def main_intrinsic_evaluation():
     Test all combinations of annealing and knockout
     on intrinsic metrics (morphological Pr-Re-F1).
     """
-    modesets = list(itertools.product(("","m","l"), ("","m","l")))
+    modesets = list(itertools.product((RefMode.NONE,RefMode.MORPHEMIC,RefMode.LEXEMIC),
+                                      (RefMode.NONE,RefMode.MORPHEMIC,RefMode.LEXEMIC)))
     fullsets = []
     total_stages = 0
     for modeset in modesets:
         if "" in modeset:  # You only do one stage; no point in swapping stages.
             fullsets.append(modeset + (False,))
-            total_stages += 2 - modeset.count("")
+            total_stages += 2 - modeset.count(RefMode.NONE)
         else:
             fullsets.append(modeset + (False,))
             fullsets.append(modeset + (True,))
@@ -220,7 +232,7 @@ def main_intrinsic_evaluation():
 
     print("===== CONSTRUCTING", len(fullsets), "BTE TOKENISERS =====")
     print("Expected wait time:", 2*total_stages, "minutes.")
-    tkzrs = [BTE(modes=(m1, m2), do_swap_stages=m3) for m1, m2, m3 in fullsets]
+    tkzrs = [BTE(BteInitConfig(knockout=m1, anneal=m2, do_swap_stages=m3)) for m1, m2, m3 in fullsets]
     test_tokenizers_batch(tkzrs, PATH_RELEVANT_WEIGHTS)
 
 
@@ -230,14 +242,14 @@ def main_partial_evaluation():
     metrics.
     """
     # Trivials
-    bte_notrivial_M = BTE(modes=("m",""), keep_long_merges=True)
-    bte_notrivial_L = BTE(modes=("l",""), keep_long_merges=True)
-    test_tokenizers_batch([bte_notrivial_M, bte_notrivial_L], PATH_RELEVANT_WEIGHTS)
+    bte_only_nontrivial_M = BTE(BteInitConfig(knockout=RefMode.MORPHEMIC, keep_long_merges=True))
+    bte_only_nontrivial_L = BTE(BteInitConfig(knockout=RefMode.LEXEMIC,   keep_long_merges=True))
+    test_tokenizers_batch([bte_only_nontrivial_M, bte_only_nontrivial_L], PATH_RELEVANT_WEIGHTS)
 
     # Holdout
     holdout = Holdout(80)
-    bte_holdout_M = BTE(modes=("m",""), keep_long_merges=False, holdout=holdout)
-    bte_holdout_L = BTE(modes=("l",""), keep_long_merges=False, holdout=holdout)
+    bte_holdout_M = BTE(BteInitConfig(knockout=RefMode.MORPHEMIC, keep_long_merges=False), holdout=holdout)
+    bte_holdout_L = BTE(BteInitConfig(knockout=RefMode.LEXEMIC,   keep_long_merges=False), holdout=holdout)
     test_tokenizers_batch([bte_holdout_M, bte_holdout_L], PATH_RELEVANT_WEIGHTS, holdout)  # FIXME: Holdout isn't yet being accepted by the batch function, but it is by the actual tester.
 
 
