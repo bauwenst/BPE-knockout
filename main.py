@@ -19,3 +19,4 @@ weights = cleanWordFile(weights)
 weights = trimWordFile(weights, minimum=10)
 weights = generateWeights(weights)
 
+# TODO: The rest of the visualisations.

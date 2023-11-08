@@ -152,10 +152,10 @@ def morphologyVersusTokenisation(morphology_method: Callable[[LemmaMorphology], 
         reference_segmentation = morphology_method(obj)
 
         # Compare
-        tp, _, relevant, _ = cm.add(bpe_segmentation, reference_segmentation)
+        tp, _, relevant, _ = cm.add(candidate=bpe_segmentation, reference=reference_segmentation)
         if weighted:
             amplification = word_counts.get(lemma, 1)
-            cm_w.add(bpe_segmentation, reference_segmentation, amplification)
+            cm_w.add(candidate=bpe_segmentation, reference=reference_segmentation, weight=amplification)
 
         # FIXME: The precision and recall are fine, but the .write condition below is a bit too sensitive at the
         #        moment w.r.t. interfices and prepositions [P] or adverbs [B]. Perhaps need to allow two lexeme
@@ -193,7 +193,7 @@ def morphologyVersusTokenisation(morphology_method: Callable[[LemmaMorphology], 
 
 
 @timeit
-def test_tokenizers_batch(tkzrs: list, lemma_weights_path: Path=None):
+def test_tokenizers_batch(tkzrs: list, lemma_weights_path: Path=None, holdout: Holdout=None):
     """
     Generates, for each given tokeniser, 12 metrics:
         - Morph split unweighted and weighted precision, recall, F1 of split positions vs. e-Lex;
@@ -227,10 +227,10 @@ def test_tokenizers_batch(tkzrs: list, lemma_weights_path: Path=None):
         print("\tMorph split accuracy:")
         time.sleep(0.01)
         morphologyVersusTokenisation(LemmaMorphology.morphSplit, tokenizer=t, do_write_errors=False, name=name,
-                                     word_counts=lemma_weights)
+                                     word_counts=lemma_weights, holdout=holdout)
 
         print("\tLemmatic split accuracy:")
         time.sleep(0.01)
         morphologyVersusTokenisation(LemmaMorphology.lexemeSplit, tokenizer=t, do_write_errors=False, name=name,
-                                     word_counts=lemma_weights)
+                                     word_counts=lemma_weights, holdout=holdout)
         print()

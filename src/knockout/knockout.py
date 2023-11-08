@@ -16,7 +16,7 @@ TODO:
 """
 import dataclasses
 from enum import Enum
-from typing import List, Dict, Callable
+from typing import List, Dict, Callable, Tuple
 import json
 import time
 from collections import Counter
@@ -33,6 +33,7 @@ from src.auxiliary.robbert_tokenizer import robbert_tokenizer, getMergeList_RobB
 from src.visualisation.printing import doPrint, PrintTable
 from src.visualisation.timing import timeit
 
+MergeAsTuple = Tuple[int, str, str]
 
 @dataclasses.dataclass
 class Merge:
@@ -41,6 +42,18 @@ class Merge:
 
     def __lt__(self, other):
         return self.priority < other.priority
+
+    def asTuple(self) -> MergeAsTuple:
+        """
+        Returns a 3-tuple of the merge's priority, the string of what its parts
+        look like when separated by spaces, and the string of what they look like
+        joined together. Both of the latter are padded by spaces.
+        """
+        return (
+            self.priority,
+            " " + " ".join(self.parts) + " ",
+            " " + "".join(self.parts) + " "
+        )
 
 
 class MergeGraph:
@@ -130,9 +143,8 @@ class MergeGraph:
                 if merge_to_edit not in self.merges_with[t]:
                     self.merges_with[t].append(merge_to_edit)
 
-    def getPaddedMerges(self):
-        return [(merge.priority, " " + " ".join(merge.parts) + " ", " " + "".join(merge.parts) + " ")
-                for merge in self.merges]
+    def getPaddedMerges(self) -> List[MergeAsTuple]:
+        return [merge.asTuple() for merge in self.merges]
 
     def getSurroundingGraph(self, t: str):
         """
@@ -168,8 +180,8 @@ class MergeGraph:
 
 class RefMode(str, Enum):  # The str parent allows JSON serialisation: https://stackoverflow.com/a/51976841/9352077
     NONE      = 1
-    LEXEMIC   = 2
-    MORPHEMIC = 3
+    MORPHEMIC = 2
+    LEXEMIC   = 3
 
     @staticmethod
     def toMethod(mode: "RefMode") -> Callable:
@@ -243,8 +255,8 @@ class BTE:
             starting_mergelist = getMergeList_RobBERT()
         self.merge_graph = MergeGraph(starting_vocab, starting_mergelist)
 
-        self.padded_merge_rules   = None  # Will be synchronised with the graph
-        self.merges_starting_with = None  # idem
+        self.padded_merge_rules: List[MergeAsTuple]        = None  # Will be synchronised with the graph
+        self.merges_starting_with: Dict[str, MergeAsTuple] = None  # idem
         self.syncWithGraph()
 
         if autorun_modes:
@@ -276,9 +288,9 @@ class BTE:
         """
         self.padded_merge_rules   = self.merge_graph.getPaddedMerges()
         self.merges_starting_with = {t: [] for t in self.merge_graph.vocab}
-        for m in self.padded_merge_rules:
-            head = m[1][1:-1].split(" ")[0]
-            self.merges_starting_with[head].append(m)
+        for tup in self.padded_merge_rules:
+            head = tup[1][1:-1].split(" ")[0]
+            self.merges_starting_with[head].append(tup)
 
     @timeit
     def prune(self):
