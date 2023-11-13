@@ -9,6 +9,7 @@ from typing import List, Tuple
 from dataclasses import dataclass
 
 from src.datahandlers.hf_corpora import normalizer
+from src.datahandlers.wordfiles import iterateTxt
 from src.visualisation.printing import PrintTable, warn
 
 DO_WARNINGS = False
@@ -432,3 +433,18 @@ def viterbiLaTeX(trellis: list, lemma: str, morphemes: str, trace: list):
     print(arrow_string.strip())
     print(r"\end{scope}")
     print(r"\end{tikzpicture}")
+
+##################################################################################
+
+from src.auxiliary.paths import PATH_DATA_COMPRESSED
+outfilepath_morphologies = PATH_DATA_COMPRESSED / "elex_morphology.txt"
+SEP = "\t"
+def morphologyGenerator(verbose=True):
+    """
+    Generator to be used by every script that needs morphological objects.
+    """
+    with open(outfilepath_morphologies, "r", encoding="utf-8") as handle:
+        for line in iterateTxt(handle, verbose=verbose):
+            lemma, morphological_tag = line.split(SEP)
+            yield LemmaMorphology(lemma=lemma, elex_entry=morphological_tag)
+

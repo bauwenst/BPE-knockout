@@ -11,7 +11,7 @@ from src.datahandlers.holdout import Holdout
 #####
 # Any function with the same behaviour as morphologyGenerator can be used. Mine pulls its data from e-Lex.
 # Which morphologyGenerator is used controls which weights are extracted below.
-from src.datahandlers.elex import morphologyGenerator
+from src.datahandlers.morphology import morphologyGenerator
 PATH_RELEVANT_WEIGHTS = PATH_DATA_OUT / f"elex_weights.txt"
 #####
 from src.visualisation.timing import timeit

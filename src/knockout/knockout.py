@@ -24,8 +24,7 @@ from pathlib import Path
 from tqdm.auto import tqdm
 
 from src.datahandlers.holdout import Holdout
-from src.datahandlers.morphology import LemmaMorphology
-from src.datahandlers.elex import morphologyGenerator
+from src.datahandlers.morphology import LemmaMorphology, morphologyGenerator
 
 from src.auxiliary.measuring import SPLIT_MARKER_RE, SPLIT_MARKER
 from src.auxiliary.robbert_tokenizer import robbert_tokenizer, getMergeList_RobBERT

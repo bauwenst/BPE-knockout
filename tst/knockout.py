@@ -117,9 +117,6 @@ def time_iterators():
     iterating with different bodies automatically displays the time taken to
     generate the iterator + whatever time the body takes.
     """
-    from src.knockout.knockout import BTE, BteInitConfig
-    from src.datahandlers.elex import morphologyGenerator
-    from src.auxiliary.robbert_tokenizer import tokenizeAsWord, robbert_tokenizer
     bte_tokenizer = BTE(BteInitConfig())
     print()
 
