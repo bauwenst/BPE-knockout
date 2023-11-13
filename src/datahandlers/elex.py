@@ -204,12 +204,12 @@ def main_extraction():
     print("   Total words in e-Lex:", total_forms)
 
 
-def morphologyGenerator():
+def morphologyGenerator(verbose=True):
     """
     Generator to be used by every script that needs morphological objects.
     """
     with open(outfilepath_morphologies, "r", encoding="utf-8") as handle:
-        for line in iterateTxt(handle):
+        for line in iterateTxt(handle, verbose=verbose):
             lemma, morphological_tag = line.split(SEP)
             yield LemmaMorphology(lemma=lemma, elex_entry=morphological_tag)
 

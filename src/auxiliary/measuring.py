@@ -1,6 +1,7 @@
 import re
 from collections import Counter
 from typing import Callable
+from dataclasses import dataclass
 
 from src.auxiliary.paths import PATH_DATA_OUT
 from src.auxiliary.robbert_tokenizer import robbert_tokenizer, tokenizeAsWord
@@ -53,6 +54,12 @@ class SegmentationConfusionMatrix:
                 f"actual +\t {tp}\t {fn}\n" +\
                 f"       -\t {fp}\t {tn}"
         print(string)
+
+    def computeAndDisplay(self, indent=0):
+        P, R, F1 = self.compute()
+        print("\t"*indent + "Precision:", P)
+        print("\t"*indent + "Recall:   ", R)
+        print("\t"*indent + "F1:       ", F1)
 
     @staticmethod
     def compareSplits(candidate: str, reference: str):
@@ -122,21 +129,20 @@ def generateWeights(words_file: Path):
 
 def morphologyVersusTokenisation(morphology_method: Callable[[LemmaMorphology], str],
                                  tokenizer=robbert_tokenizer, name="RobBERT",
-                                 do_write_errors=False, do_confusion_matrix=False,
+                                 do_write_errors=False, quiet=False, display_confusion_matrix=False,
                                  word_counts: Counter=None, holdout: Holdout=None):
     # Optional stuff
     weighted = word_counts is not None
     if do_write_errors:
         log = open(PATH_DATA_OUT / f"{name}_boundary_violations_{morphology_method.__name__}.txt", "w", encoding="utf-8")
 
-    cm = SegmentationConfusionMatrix()
-    if weighted:
-        cm_w = SegmentationConfusionMatrix()
+    cm   = SegmentationConfusionMatrix()
+    cm_w = SegmentationConfusionMatrix() if weighted else None
 
     if holdout is None:
         holdout = Holdout(0.0)  # 0% is in the training set, 100% in the test set.
 
-    for obj in holdout(morphologyGenerator(), test=True):
+    for obj in holdout(morphologyGenerator(verbose=not quiet), test=True):
         lemma = obj.morphtext
 
         # Get space-segmented word from the tokeniser. This is more difficult than expected, since you need to
@@ -174,25 +180,35 @@ def morphologyVersusTokenisation(morphology_method: Callable[[LemmaMorphology], 
     if do_write_errors:
         log.close()
 
-    P, R, F1 = cm.compute()
-    print("\t\tPrecision:", P)
-    print("\t\tRecall:   ", R)
-    print("\t\tF1:       ", F1)
-    if weighted:
-        P, R, F1 = cm_w.compute()
-        print("\t\tPrecision (weighted):", P)
-        print("\t\tRecall (weighted):   ", R)
-        print("\t\tF1 (weighted):       ", F1)
-
-    if do_confusion_matrix:
-        print("Confusion matrix:")
-        cm.display()
+    if not quiet:
+        # Pr, Re, F1
+        cm.computeAndDisplay(indent=2)
         if weighted:
-            print("Weighted confusion matrix:")
-            cm_w.display()
+            print("Weighted:")
+            cm_w.computeAndDisplay(indent=2)
+
+        # Confusion matrices (TP, FP, FN, TN).
+        if display_confusion_matrix:
+            print("Confusion matrix:")
+            cm.display()
+            if weighted:
+                print("Weighted confusion matrix:")
+                cm_w.display()
+
+    return cm, cm_w
 
 
-@timeit
+@dataclass
+class TokeniserEvaluation:
+    name: str
+    vocabsize: int
+    cm_morph: SegmentationConfusionMatrix
+    cm_morph_w: SegmentationConfusionMatrix
+    cm_lex: SegmentationConfusionMatrix
+    cm_lex_w: SegmentationConfusionMatrix
+
+
+# @timeit
 def test_tokenizers_batch(tkzrs: list, lemma_weights_path: Path=None, holdout: Holdout=None):
     """
     Generates, for each given tokeniser, 12 metrics:
@@ -213,6 +229,7 @@ def test_tokenizers_batch(tkzrs: list, lemma_weights_path: Path=None, holdout: H
         lemma_weights = None
 
     # Evaluation loop
+    results = []
     for t in tkzrs:
         try:
             name = t.getName()
@@ -222,15 +239,21 @@ def test_tokenizers_batch(tkzrs: list, lemma_weights_path: Path=None, holdout: H
             size = len(t.get_vocab())
         except:
             size = "NA"
+
         print(name)
         print("|V|:", size)
         print("\tMorph split accuracy:")
         time.sleep(0.01)
-        morphologyVersusTokenisation(LemmaMorphology.morphSplit, tokenizer=t, do_write_errors=False, name=name,
-                                     word_counts=lemma_weights, holdout=holdout)
+        cm1, cm1_w = morphologyVersusTokenisation(LemmaMorphology.morphSplit, tokenizer=t, do_write_errors=False, name=name,
+                                                  word_counts=lemma_weights, holdout=holdout)
 
         print("\tLemmatic split accuracy:")
         time.sleep(0.01)
-        morphologyVersusTokenisation(LemmaMorphology.lexemeSplit, tokenizer=t, do_write_errors=False, name=name,
-                                     word_counts=lemma_weights, holdout=holdout)
+        cm2, cm2_w = morphologyVersusTokenisation(LemmaMorphology.lexemeSplit, tokenizer=t, do_write_errors=False, name=name,
+                                                  word_counts=lemma_weights, holdout=holdout)
         print()
+
+        results.append(TokeniserEvaluation(name=name, vocabsize=size,
+                                           cm_morph=cm1, cm_morph_w=cm1_w,
+                                           cm_lex=cm2, cm_lex_w=cm2_w))
+    return results

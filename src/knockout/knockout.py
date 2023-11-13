@@ -68,7 +68,7 @@ class MergeGraph:
                           In vanilla BPE or BPE with just knockout, this list always has length 1 due to original functional sin.
     """
 
-    def __init__(self, vocab: Dict[str,int], raw_merges: List[str]):
+    def __init__(self, vocab: Dict[str,int], raw_merges: List[str], quiet=True):
         self.next_type  = 0  # == 1 + max(self.vocab.values()), not always len(self.vocab) due to knockout.
         self.next_merge = 0  # == 1 + max([m.priority for m in self.merges]), not always len(self.merges) due to knockout.
 
@@ -77,8 +77,12 @@ class MergeGraph:
         self.merges_with: Dict[str, List[Merge]] = {t: [] for t in self.vocab}
         self.merges_of: Dict[str, List[Merge]]   = {t: [] for t in self.vocab}
 
-        for raw_merge in tqdm(raw_merges, desc="CONSTRUCTING GRAPH"):
-            self.add(raw_merge)
+        if quiet:
+            for raw_merge in raw_merges:
+                self.add(raw_merge)
+        else:
+            for raw_merge in tqdm(raw_merges, desc="CONSTRUCTING GRAPH"):
+                self.add(raw_merge)
 
     def add(self, merge_to_add: str):
         """
@@ -99,7 +103,7 @@ class MergeGraph:
             self.merges_with[new_type] = []
             self.merges_of[new_type]   = []
         self.merges.append(new_merge)
-        for part in parts:
+        for part in set(parts):  # set() in case there is a duplicate part.
             self.merges_with[part].append(new_merge)
         self.merges_of[new_type].append(new_merge)
 
@@ -122,11 +126,11 @@ class MergeGraph:
         # Remove from vocab.
         self.vocab.pop(type_to_delete)
 
-        # Remove the merge that created this type.
+        # Remove the merge(s, if OFS doesn't hold) that created this type.
         deleted_merges_of = self.merges_of.pop(type_to_delete)
         for deleted_merge in deleted_merges_of:
-            self.merges.remove(deleted_merge)
-            for t in deleted_merge.parts:
+            self.merges.remove(deleted_merge)    # Remove the merge itself from the set of merges.
+            for t in set(deleted_merge.parts):   # Make the merge's parts forget they were part of it. NOTE: must be a set, otherwise merges like a+a try to make the same type forget it twice!
                 self.merges_with[t].remove(deleted_merge)
 
         # Remove all merges emanating from this type, and instead make its children involved.
@@ -134,9 +138,14 @@ class MergeGraph:
         affected_merges = self.merges_with.pop(type_to_delete)
         for merge_to_edit in affected_merges:
             # In the affected merge, replace the deleted type by its parts.
-            for i in range(len(merge_to_edit.parts)):
-                if merge_to_edit.parts[i] == type_to_delete:
-                    merge_to_edit.parts[i:i+1] = replacement_types
+            new_parts = []
+            for part in merge_to_edit.parts:
+                if part == type_to_delete:
+                    new_parts.extend(replacement_types)
+                    # No "break" statement here because a type can appear multiple times in one merge.
+                else:
+                    new_parts.append(part)
+            merge_to_edit.parts = new_parts
 
             # Now make the replacement types aware that they are part of this merge.
             for t in replacement_types:
@@ -225,7 +234,7 @@ class BTE:
 
     def __init__(self, init_config: BteInitConfig,
                  starting_vocab: Dict[str,int]=None, starting_mergelist: List[str]=None,
-                 autorun_modes=True, holdout: Holdout=None):
+                 autorun_modes=True, holdout: Holdout=None, quiet=False):
         """
         :param autorun_modes: whether to actually run the given modes, or only set their segmentation function.
                               swap_stages has no effect when this is true.
@@ -242,7 +251,9 @@ class BTE:
                     + ("-knockout-" + RefMode.toLetter(self.config.knockout))*(do_prune and not self.config.do_swap_stages)\
                     + ("-anneal-"   + RefMode.toLetter(self.config.anneal))  * do_anneal \
                     + ("-knockout-" + RefMode.toLetter(self.config.knockout))*(do_prune and self.config.do_swap_stages)
-        print("Instantiating", self.name, "...")
+
+        if not quiet:
+            print("Instantiating", self.name, "...")
 
         # Training regime
         if holdout is None:
@@ -253,7 +264,7 @@ class BTE:
         if starting_vocab is None or starting_mergelist is None:
             starting_vocab     = robbert_tokenizer.get_vocab()
             starting_mergelist = getMergeList_RobBERT()
-        self.merge_graph = MergeGraph(starting_vocab, starting_mergelist)
+        self.merge_graph = MergeGraph(starting_vocab, starting_mergelist, quiet=quiet)
 
         self.padded_merge_rules: List[MergeAsTuple]        = None  # Will be synchronised with the graph
         self.merges_starting_with: Dict[str, MergeAsTuple] = None  # idem

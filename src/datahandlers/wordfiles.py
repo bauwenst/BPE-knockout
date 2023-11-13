@@ -29,7 +29,7 @@ def iterableToWordsFile(line_iterable: Iterable[str], output_file: TextIO):
         output_file.write(key + " " + str(f) + "\n")
 
 
-def iterateTxt(open_file_handle: TextIO):
+def iterateTxt(open_file_handle: TextIO, verbose=True):
     """
     Here's how this function works:
         - Python recognises that a 'yield' is used and not a 'return'. Hence, when you call the function, all that is
@@ -37,16 +37,20 @@ def iterateTxt(open_file_handle: TextIO):
         - When you iterate over the result of the function call, the first iteration will run until the yield and
           return its result. The next iteration, it will continue running past that yield until it encounters it again.
     """
-    # Count total lines
     open_file_handle.seek(0)
-    total_lines = 0
-    for _ in open_file_handle:
-        total_lines += 1
-    open_file_handle.seek(0)
+    if verbose:
+        # Count total lines
+        total_lines = 0
+        for _ in open_file_handle:
+            total_lines += 1
+        open_file_handle.seek(0)
 
-    # Now generate each line whilst updating a progress bar.
-    for line in tqdm(open_file_handle, total=total_lines, desc=Path(open_file_handle.name).name):
-        yield line.rstrip()
+        # Now generate each line whilst updating a progress bar.
+        for line in tqdm(open_file_handle, total=total_lines, desc=Path(open_file_handle.name).name):
+            yield line.rstrip()
+    else:
+        for line in open_file_handle:
+            yield line.rstrip()
 
 
 def iterateWordsFile(open_file_handle: TextIO, sep=" "):
