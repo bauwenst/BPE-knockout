@@ -437,7 +437,7 @@ def viterbiLaTeX(trellis: list, lemma: str, morphemes: str, trace: list):
 ##################################################################################
 
 from src.auxiliary.paths import PATH_DATA_COMPRESSED
-outfilepath_morphologies = PATH_DATA_COMPRESSED / "elex_morphology.txt"
+outfilepath_morphologies = PATH_DATA_COMPRESSED / "celex_morphology_nl.txt"
 SEP = "\t"
 def morphologyGenerator(verbose=True):
     """
