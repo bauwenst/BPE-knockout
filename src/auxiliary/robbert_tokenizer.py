@@ -46,3 +46,7 @@ def getMergeList_RobBERT(do_2022=False):
 
     merge_list = config["model"]["merges"]
     return merge_list
+
+
+if __name__ == "__main__":
+    getMergeList_RobBERT(do_2022=False)

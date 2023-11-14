@@ -12,6 +12,9 @@ There are two possible interfaces to implement here:
         _convert_token_to_id()
         _convert_id_to_token()
         _tokenize()
+TODO: Apparently the parent class of transformers.PreTrainedTokenizer has 10 unimplemented methods of which 2 are left:
+        get_vocab()
+        save_vocabulary()
 """
 import re
 from typing import List, Tuple, Dict, Any
@@ -83,5 +86,9 @@ def constructHuggingFaceBPEknockout():
 
 if __name__ == "__main__":
     sentence = "Energie-efficiëntie, i.e. zuinig omgaan met stroomverbruik, wordt steeds belangrijker bij het trainen van transformer-architecturen – zoveel is zeker!"
+
+    # from src.auxiliary.robbert_tokenizer import robbert_tokenizer
+    # print(robbert_tokenizer.tokenize(text=sentence))
+
     knockout = constructHuggingFaceBPEknockout()
     print(knockout.tokenize(text=sentence))

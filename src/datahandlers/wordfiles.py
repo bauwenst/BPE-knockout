@@ -1,5 +1,5 @@
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 from typing import Iterable, TextIO
 from tqdm.auto import tqdm
 
@@ -7,7 +7,7 @@ from src.auxiliary.paths import *
 from src.visualisation.timing import timeit
 
 
-def iterableToWordsFile(line_iterable: Iterable[str], output_file: TextIO):
+def iterableToWordsFile(line_iterable: Iterable[str], output_file: Path):
     """
     Compresses the given string iterable to an output file, with the result
     containing every unique word exactly once in the format
@@ -25,8 +25,11 @@ def iterableToWordsFile(line_iterable: Iterable[str], output_file: TextIO):
             if word:
                 word_types[word] += 1
 
-    for key, f in sorted(word_types.items(), key=lambda x: x[1], reverse=True):
-        output_file.write(key + " " + str(f) + "\n")
+    with open(output_file, "w", encoding="utf-8") as handle:
+        for key, f in sorted(word_types.items(), key=lambda x: x[1], reverse=True):
+            handle.write(key + " " + str(f) + "\n")
+
+    return output_file
 
 
 def iterateTxt(open_file_handle: TextIO, verbose=True):
@@ -68,10 +71,11 @@ def iterateWordsFile(open_file_handle: TextIO, sep=" "):
         yield sep.join(parts[0:-1]), parts[-1]
 
 
-def wordsFileToCounter(open_file_handle: TextIO, sep=" ") -> Counter:
+def wordsFileToDict(words_path: Path, sep=" ") -> Counter:
     c = Counter()
-    for word, count in iterateWordsFile(open_file_handle, sep):
-        c[word] = int(count)
+    with open(words_path, "r", encoding="utf-8") as handle:
+        for word, count in iterateWordsFile(handle, sep):
+            c[word] = int(count)
     return c
 
 

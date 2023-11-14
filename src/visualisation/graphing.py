@@ -448,10 +448,10 @@ class MergedLineGraph(Diagram):
     """
 
     def __init__(self, g1: LineGraph, g2: LineGraph,
-                 use_cached: bool):
+                 caching: CacheMode=CacheMode.NONE):
         self.g1 = g1
         self.g2 = g2
-        super().__init__(name=self.makeName(), use_cached=use_cached)
+        super().__init__(name=self.makeName(), caching=caching)
 
     def makeName(self):
         return self.g1.name + "+" + self.g2.name

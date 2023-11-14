@@ -24,7 +24,7 @@ from pathlib import Path
 from tqdm.auto import tqdm
 
 from src.datahandlers.holdout import Holdout
-from src.datahandlers.morphology import LemmaMorphology, morphologyGenerator
+from src.datahandlers.morphology import morphologyGenerator, LexSplit, MorphSplit
 
 from src.auxiliary.measuring import SPLIT_MARKER_RE, SPLIT_MARKER
 from src.auxiliary.robbert_tokenizer import robbert_tokenizer, getMergeList_RobBERT
@@ -194,9 +194,9 @@ class RefMode(str, Enum):  # The str parent allows JSON serialisation: https://s
     @staticmethod
     def toMethod(mode: "RefMode") -> Callable:
         if mode == RefMode.LEXEMIC:
-            return LemmaMorphology.lexemeSplit
+            return LexSplit()
         elif mode == RefMode.MORPHEMIC:
-            return LemmaMorphology.morphSplit
+            return MorphSplit()
 
     @staticmethod
     def toLetter(mode: "RefMode") -> str:
@@ -401,7 +401,7 @@ class BTE:
         total = [0 for _ in merge_lookup]
 
         for obj in self.holdout(morphologyGenerator(), train=True):
-            lemma = obj.morphtext
+            lemma = obj.lemma()
             prnt(lemma)
 
             # Get morphological split
@@ -468,7 +468,7 @@ class BTE:
         total_count       = Counter()
 
         for obj in self.holdout(morphologyGenerator(), train=True):
-            lemma = obj.morphtext
+            lemma = obj.lemma()
             prnt(lemma)
 
             # Get morphological split

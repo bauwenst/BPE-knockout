@@ -16,7 +16,7 @@ def test_parsing():
     }
 
     for annotation, lemma in examples:
-        o = LemmaMorphology(annotation, lemma=lemma)
+        o = CelexLemmaMorphology(annotation, lemma=lemma)
         print(o)
         print(o.lexemeSplit())
         print(o.morphSplit())
@@ -60,8 +60,8 @@ def test_morphsplits():
 
     for lemma, morphemes in examples:
         print(lemma, "   with morphemes   ", morphemes)
-        print(LemmaMorphology._morphSplit_greedy(lemma, morphemes))
-        print(LemmaMorphology._morphSplit_viterbi(lemma, morphemes))
+        print(CelexLemmaMorphology._morphSplit_greedy(lemma, morphemes))
+        print(CelexLemmaMorphology._morphSplit_viterbi(lemma, morphemes))
         print()
 
 
@@ -73,7 +73,7 @@ def test_alignments():
         ("zisolementspositie", "(((isoleer)[V],(ement)[N|V.])[N],(s)[N|N.N],(((pose)[N],(eer)[V|N.])[V],(itie)[N|V.])[N])[N]"),
     ]
     for l, m in examples:
-        o = LemmaMorphology(m, l)
+        o = CelexLemmaMorphology(m, l)
         o.printAlignments()
         print(o.lexemeSplit())
         print(o.morphSplit())
@@ -87,7 +87,7 @@ def test_all():
     with open(outfilepath_morphologies, "r", encoding="utf-8") as handle:
         for line in handle:
             word,morphology = line.strip().split(SEP)
-            o = LemmaMorphology(morphology, word)
+            o = CelexLemmaMorphology(morphology, word)
             # if " " in o.lexemeSplit():
             # if not o.isNNC():
             table.print(word, "L: " + o.lexemeSplit(), "M: " + o.morphSplit(), "M'eme: " + o.morphemeSplit())
@@ -103,7 +103,7 @@ def test_wtf():
           string. When you call the morphSplit on the constructed object, it gives you an empty string because that's
           what Viterbi receives the second time.
     """
-    o = LemmaMorphology("((geprefabriceerd)[V])[A]", "prefab")
+    o = CelexLemmaMorphology("((geprefabriceerd)[V])[A]", "prefab")
     print("Morphemes:")
     print("\t", o.morphemeSplit())
     print("Morphs:")
@@ -111,7 +111,7 @@ def test_wtf():
 
     print()
     # Also gotta test single-morph words that DO have a matching morpheme, now.
-    o = LemmaMorphology("(être)[N]", "être")
+    o = CelexLemmaMorphology("(être)[N]", "être")
     print("Morphemes:")
     print("\t", o.morphemeSplit())
     print("Morphs:")
@@ -127,4 +127,4 @@ if __name__ == "__main__":
     # print(MorphologicalSplit._morphSplit_viterbi("accumulatief", "accumuleer atie ief"))   # tie between  accumul at ief  and   accumul atie f. The latter arrives at the end.
     # print(MorphologicalSplit._morphSplit_viterbi("acceptatiegraad", "accept eer atie graad"))  # acceptati egr aad
     # print(LemmaMorphology._morphSplit_viterbi("isolementspositie", "isoleer ement s pose eer itie"))  # acceptati egr aad
-    print(LemmaMorphology._morphSplit_viterbi("kolencentrale", "kool en centrum aal e"))  # acceptati egr aad
+    print(CelexLemmaMorphology._morphSplit_viterbi("kolencentrale", "kool en centrum aal e"))  # acceptati egr aad

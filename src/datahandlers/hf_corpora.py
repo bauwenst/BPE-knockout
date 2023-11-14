@@ -3,6 +3,7 @@ from torch.utils.data import DataLoader
 import tokenizers.normalizers as tn
 import tokenizers.pre_tokenizers as tp
 
+from src.datahandlers.wordfiles import *
 from src.visualisation.printing import *
 
 
@@ -22,12 +23,12 @@ def preprocess(line: str):
     return " ".join([w for w,_ in pretokens])
 
 
-def generateDataloader_Oscar_NL() -> DataLoader:
+def generateDataloader_Oscar(lang: str="nl") -> DataLoader:
     """
     Note that the DataLoader is an iteraBLE, not an iteraTOR. It can be iterated over multiple times.
     """
-    logger("Loading dataset... (takes about 5 minutes)")
-    data = load_dataset(path="oscar", name="unshuffled_deduplicated_nl", split="train")
+    logger("Loading dataset... (takes about 5 minutes for NL)")
+    data = load_dataset(path="oscar", name="unshuffled_deduplicated_" + lang, split="train")
     logger("Finished loading.")
     data = data.remove_columns(["id"])
 
@@ -40,3 +41,10 @@ def generateDataloader_Oscar_NL() -> DataLoader:
         return preprocess([example["text"] for example in batched_example][0])
 
     return DataLoader(data, shuffle=False, collate_fn=dictionaryProcessor)
+
+
+def dataloaderToWeights(dataloader: DataLoader, output_stem: str):
+    path = iterableToWordsFile(dataloader, PATH_DATA_COMPRESSED / (output_stem + ".txt"))  # For OSCAR, this call ran from 14:56 to 20:52, which is ~6 hours.  TODO: Add caching somewhere here ("if file doesn't exist, ..."). But you should know which file!
+    path = cleanWordFile(path)
+    path = trimWordFile(path, minimum=10)
+    return path

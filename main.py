@@ -1,22 +1,15 @@
 """
-Runs and caches all functions required to reproduce the paper, similar to an RMarkdown notebook.
-
-# TODO: There should ideally be a central place somewhere where you give (morphology file, weight file) and that's it.
-        Currently, it is done separately in measuring.py and morphology.py.
-        Also, for the German test, we additionally need a control for the BPE files on which BTE is based.
+Runs all functions (which then cache themselves) required to reproduce the paper.
+This file sits at the top of the import hierarchy: nothing can be imported from it.
 """
-### GENERATE LEMMA WEIGHTS ###
-from src.auxiliary.paths import *
-PATH_WORDS_OSCAR = PATH_DATA_COMPRESSED / "oscar_words.txt"
+if __name__ == "__main__":
+    from src.auxiliary.config import *
+    Pℛ𝒪𝒥ℰ𝒞𝒯.config = setupDutch()  # Here is where you set the language for all the runs below.
 
-from src.datahandlers.hf_corpora import generateDataloader_Oscar_NL
-from src.datahandlers.wordfiles import *
-from src.auxiliary.measuring import generateWeights
-
-# This first call ran from 14:56 to 20:52, which is ~6 hours.  TODO: Add caching to this block. Also, should be in 1 function.
-weights = iterableToWordsFile(generateDataloader_Oscar_NL(), PATH_WORDS_OSCAR)
-weights = cleanWordFile(weights)
-weights = trimWordFile(weights, minimum=10)
-weights = generateWeights(weights)
-
-# TODO: The rest of the visualisations.
+    from tst.knockout import main_tokenDiffs, main_deleteRandomMerges, main_intrinsic_evaluation, main_partial_evaluation, main_mergestats, main_vocabstats
+    main_mergestats()
+    main_vocabstats()
+    main_tokenDiffs()
+    main_deleteRandomMerges()
+    main_partial_evaluation()
+    main_intrinsic_evaluation()

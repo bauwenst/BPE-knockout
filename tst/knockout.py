@@ -1,18 +1,14 @@
 """
 TODO:
-    - Three experiments to do:
-          x Repeat the experiment mentioned in the text, but for morphemic knockout.
-          x What if you leave out the trivial merges? Is there a difference between M and L?
-          - Tuning of annealing parameter
-          x Holdout of the best knockout-annealing combos
-          - Learning with weighted lemmata (right now, each lemma in e-Lex has equal contribution to the blame ratio).
+    - Learning blame with weighted lemmata (right now, each lemma in e-Lex has equal contribution to the blame ratio).
 """
 import itertools
 
-from src.auxiliary.robbert_tokenizer import tokenizeAsWord
+from src.visualisation.graphing import *
 from src.knockout.knockout import *
 from src.auxiliary.measuring import *
-from src.visualisation.graphing import *
+from src.auxiliary.robbert_tokenizer import tokenizeAsWord
+from src.auxiliary.config import Pℛ𝒪𝒥ℰ𝒞𝒯
 
 TRIVIAL_THRESHOLD = 4
 untrained_bte = BTE(BteInitConfig())
@@ -26,7 +22,7 @@ def assert_equal_applyBPE():
     print("Starting assertion...")
 
     for obj in morphologyGenerator():
-        lemma = obj.morphtext
+        lemma = obj.lemma()
 
         tokens1 = tokenizeAsWord(lemma, tokenizer=robbert_tokenizer)
         tokens2 = tokenizeAsWord(lemma, tokenizer=untrained_bte)
@@ -97,7 +93,7 @@ def test_trivial_knockout():
 
         tkzs.append(bte)
 
-    test_tokenizers_batch(tkzs, PATH_RELEVANT_WEIGHTS)
+    test_tokenizers_batch(tkzs, reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
 
 
 def test_save_and_load():
@@ -126,7 +122,7 @@ def time_iterators():
 
     # Time to generate objects + tokenise fast: 21s - 13s = 8s
     for morpho in morphologyGenerator():
-        " ".join(tokenizeAsWord(morpho.morphtext, tokenizer=robbert_tokenizer))[1:].strip()
+        " ".join(tokenizeAsWord(morpho.lemma(), tokenizer=robbert_tokenizer))[1:].strip()
 
     # Time to generate objects + get morph split: 24s - 13s = 11s
     for morpho in morphologyGenerator():
@@ -134,12 +130,12 @@ def time_iterators():
 
     # Time to generate objects + tokenise slow: 1m35s - 13s = 1m22s  (more than 10x difference with fast tokenizer)
     for morpho in morphologyGenerator():
-        " ".join(tokenizeAsWord(morpho.morphtext, tokenizer=bte_tokenizer))[1:].strip()
+        " ".join(tokenizeAsWord(morpho.lemma(), tokenizer=bte_tokenizer))[1:].strip()
 
     # Time to generate objects + get morph split + tokenise fast: 34s
     for morpho in morphologyGenerator():
         morpho.morphSplit()
-        " ".join(tokenizeAsWord(morpho.morphtext))[1:].strip()
+        " ".join(tokenizeAsWord(morpho.lemma()))[1:].strip()
 
 
 ##############################################################################
@@ -156,7 +152,7 @@ def main_tokenDiffs():
         cm = SegmentationConfusionMatrix()
         histo = Histogram(f"knockout_tokendiffs_{RefMode.toLetter(mode)}", caching=CacheMode.NONE)
         for obj in morphologyGenerator():
-            lemma = obj.morphtext
+            lemma = obj.lemma()
 
             tokens_bpe = tokenizeAsWord(lemma, tokenizer=bpe)
             tokens_bte = tokenizeAsWord(lemma, tokenizer=bte)
@@ -242,7 +238,7 @@ def main_intrinsic_evaluation():
         print("===== CONSTRUCTING", len(fullsets), "BTE TOKENISERS =====")
         print("Expected wait time:", 2*total_stages, "minutes.")
         tkzrs = [BTE(BteInitConfig(knockout=m1, anneal=m2, do_swap_stages=m3)) for m1, m2, m3 in fullsets]
-        results = test_tokenizers_batch(tkzrs, PATH_RELEVANT_WEIGHTS)
+        results = test_tokenizers_batch(tkzrs, reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
 
         # Format results
         for tokeniser in results:
@@ -281,13 +277,13 @@ def main_partial_evaluation():
     # Trivials
     bte_only_nontrivial_M = BTE(BteInitConfig(knockout=RefMode.MORPHEMIC, keep_long_merges=True))
     bte_only_nontrivial_L = BTE(BteInitConfig(knockout=RefMode.LEXEMIC,   keep_long_merges=True))
-    test_tokenizers_batch([bte_only_nontrivial_M, bte_only_nontrivial_L], PATH_RELEVANT_WEIGHTS)
+    test_tokenizers_batch([bte_only_nontrivial_M, bte_only_nontrivial_L], reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
 
     # Holdout
     holdout = Holdout(80)
     bte_holdout_M = BTE(BteInitConfig(knockout=RefMode.MORPHEMIC, keep_long_merges=False), holdout=holdout)
     bte_holdout_L = BTE(BteInitConfig(knockout=RefMode.LEXEMIC,   keep_long_merges=False), holdout=holdout)
-    test_tokenizers_batch([bte_holdout_M, bte_holdout_L], PATH_RELEVANT_WEIGHTS, holdout)
+    test_tokenizers_batch([bte_holdout_M, bte_holdout_L], reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=holdout)
 
 
 def main_deleteRandomMerges():
@@ -320,7 +316,7 @@ def main_deleteRandomMerges():
             bte.syncWithGraph()
 
             # Evaluate
-            cm, cm_w = morphologyVersusTokenisation(LemmaMorphology.morphSplit, bte, name=bte.name, quiet=True)
+            cm, cm_w = morphologyVersusTokenisation(MorphSplit(), bte, name=bte.name, quiet=True)
             pr, re, f1 = cm.compute()
             return pr, re, f1
 

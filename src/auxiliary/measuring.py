@@ -1,24 +1,21 @@
 import re
 from collections import Counter
-from typing import Callable
+from typing import Callable, Dict, Optional
 from dataclasses import dataclass
 
-from src.auxiliary.paths import PATH_DATA_OUT
-from src.auxiliary.robbert_tokenizer import robbert_tokenizer, tokenizeAsWord
+from src.visualisation.timing import timeit
 from src.datahandlers.morphology import *
 from src.datahandlers.wordfiles import *
 from src.datahandlers.holdout import Holdout
-#####
-# Any function with the same behaviour as morphologyGenerator can be used. Mine pulls its data from e-Lex.
-# Which morphologyGenerator is used controls which weights are extracted below.
+from src.auxiliary.paths import *
+from src.auxiliary.config import Pℛ𝒪𝒥ℰ𝒞𝒯
+from src.auxiliary.robbert_tokenizer import robbert_tokenizer, tokenizeAsWord
 from src.datahandlers.morphology import morphologyGenerator
-PATH_RELEVANT_WEIGHTS = PATH_DATA_OUT / f"elex_weights.txt"
-#####
-from src.visualisation.timing import timeit
 
+
+# Segmentation kernel
 SPLIT_MARKER = "|"
 SPLIT_MARKER_RE = re.compile(re.escape(SPLIT_MARKER))
-
 
 class SegmentationConfusionMatrix:
 
@@ -28,7 +25,7 @@ class SegmentationConfusionMatrix:
         self.total_relevant = 0
         self.total = 0
 
-    def add(self, candidate: str, reference: str, weight: int=1):
+    def add(self, candidate: str, reference: str, weight: float=1):
         tp, predicted, relevant, total = SegmentationConfusionMatrix.compareSplits(candidate, reference)
         self.total_tp        += weight*tp
         self.total_predicted += weight*predicted
@@ -89,14 +86,15 @@ class SegmentationConfusionMatrix:
         return 2*(precision*recall)/(precision+recall)
 
 
-def generateWeights(words_file: Path):
+# Weight setup
+def intersectLexiconCounts() -> Optional[Counter]:
     """
-    Weights in e-Lex are often 0, and the max (for "de" and "en") is 250k.
-    Weights in OSCAR have max ~250M, which is 1000x more information. According to Zipf's law, all counts should have
+    Frequencies in e-Lex are often 0, and the max (for "de" and "en") is 250k.
+    Frequencies in OSCAR have max ~250M, which is 1000x more information. According to Zipf's law, all counts should have
     increased proportionally, meaning their relative contribution is the same (~ 1/rank), so any weighting done with
     a larger corpus shouldn't skew towards the higher frequencies.
 
-    Here's what we do:
+    Here's what we could do:
         1. Collect all surface forms for a lemma in e-Lex that has morphology.
         2. Use OSCAR's cleaned frequencies to assign those counts.
         3. Sum the counts per lemma and store that as lemma weights.
@@ -107,32 +105,39 @@ def generateWeights(words_file: Path):
         2. Use that frequency.
     Note that this approach neglects all verb conjugations and all plural nouns.
     """
-    counter = Counter()
+    if Pℛ𝒪𝒥ℰ𝒞𝒯.config.lemma_weights is None:  # Impossible to identify which cache file it would be.
+        return None
 
-    # Collect lemmata with morphologies
-    for obj in morphologyGenerator():
-        counter[obj.morphtext] = 1  # We effectively add the lexicon to the corpus.
+    cache_path = PATH_DATA_TEMP / f"{Pℛ𝒪𝒥ℰ𝒞𝒯.config.lemma_weights.stem} (x) {Pℛ𝒪𝒥ℰ𝒞𝒯.config.morphologies.stem}.txt"  # Path depends on the two files it intersects, otherwise it would be used even if you switched languages.
+    if not cache_path.exists():
+        if not Pℛ𝒪𝒥ℰ𝒞𝒯.config.lemma_weights.exists():  # Impossible to fill the cache.
+            return None
 
-    # Look up their counts
-    with open(words_file, "r", encoding="utf-8") as handle:
-        for word, count in iterateWordsFile(handle):
-            if word in counter:
-                counter[word] += int(count)
+        counter = Counter()
 
-    # Write out these filtered counts
-    with open(PATH_RELEVANT_WEIGHTS, "w", encoding="utf-8") as handle:
-        for word, count in counter.items():
-            handle.write(f"{word} {count}\n")
+        # Collect lemmata with morphologies
+        for obj in morphologyGenerator():
+            counter[obj.lemma()] = 1  # We effectively add the lexicon to the corpus.
 
-    return PATH_RELEVANT_WEIGHTS
+        # Look up their counts
+        with open(Pℛ𝒪𝒥ℰ𝒞𝒯.config.lemma_weights, "r", encoding="utf-8") as handle:
+            for word, count in iterateWordsFile(handle):
+                if word in counter:
+                    counter[word] += int(count)
+
+        # Cache these filtered counts
+        with open(cache_path, "w", encoding="utf-8") as handle:
+            for word, count in counter.items():
+                handle.write(f"{word} {count}\n")
+
+    return wordsFileToDict(cache_path)
 
 
-def morphologyVersusTokenisation(morphology_method: Callable[[LemmaMorphology], str],
-                                 tokenizer=robbert_tokenizer, name="RobBERT",
-                                 do_write_errors=False, quiet=False, display_confusion_matrix=False,
-                                 word_counts: Counter=None, holdout: Holdout=None):
+def morphologyVersusTokenisation(morphology_method: MorphologyVisitor, tokenizer=robbert_tokenizer,  # Compared
+                                 weights: Dict[str, float]=None, holdout: Holdout=None,  # Experimental parameters
+                                 do_write_errors=False, quiet=False, display_confusion_matrix=False, name="RobBERT"):  # Display
     # Optional stuff
-    weighted = word_counts is not None
+    weighted = weights is not None
     if do_write_errors:
         log = open(PATH_DATA_OUT / f"{name}_boundary_violations_{morphology_method.__name__}.txt", "w", encoding="utf-8")
 
@@ -143,7 +148,7 @@ def morphologyVersusTokenisation(morphology_method: Callable[[LemmaMorphology], 
         holdout = Holdout(0.0)  # 0% is in the training set, 100% in the test set.
 
     for obj in holdout(morphologyGenerator(verbose=not quiet), test=True):
-        lemma = obj.morphtext
+        lemma = obj.lemma()
 
         # Get space-segmented word from the tokeniser. This is more difficult than expected, since you need to
         # make sure the BPE merges use the start-of-word merge, and at the same time map that start-of-word
@@ -151,7 +156,7 @@ def morphologyVersusTokenisation(morphology_method: Callable[[LemmaMorphology], 
         # tokeniser to tokeniser.
         # The implementation below is to remove the SoW from the tokenisation and if that causes a space to
         # appear, remove the space. The converse -- adding a SoW to the lexemic split -- could cause an unfair
-        # drop in precision when the tokenizer puts a space after the SoW.
+        # drop in precision when the tokeniser puts a space after the SoW.
         bpe_segmentation = " ".join(tokenizeAsWord(lemma, tokenizer=tokenizer))[1:].strip()  # Remove RobBERT's start-of-word character Ġ.
 
         # Generate lexemic split
@@ -160,8 +165,8 @@ def morphologyVersusTokenisation(morphology_method: Callable[[LemmaMorphology], 
         # Compare
         tp, _, relevant, _ = cm.add(candidate=bpe_segmentation, reference=reference_segmentation)
         if weighted:
-            amplification = word_counts.get(lemma, 1)
-            cm_w.add(candidate=bpe_segmentation, reference=reference_segmentation, weight=amplification)
+            amplification = weights.get(lemma, 1)
+            cm_w.add(candidate=bpe_segmentation, reference=reference_segmentation, weight=amplification)  # TODO: This is slow. You are re-checking all the split positions, just to get the same exact TP, FP, FN, TN, which are just weighted differently.
 
         # FIXME: The precision and recall are fine, but the .write condition below is a bit too sensitive at the
         #        moment w.r.t. interfices and prepositions [P] or adverbs [B]. Perhaps need to allow two lexeme
@@ -174,7 +179,7 @@ def morphologyVersusTokenisation(morphology_method: Callable[[LemmaMorphology], 
         #           voor hoofd	    tokenised as	voorhoofd
         #           weg nemen	    tokenised as	wegnemen
         #           wiel er baan    tokenised as	wieler baan
-        if do_write_errors and tp != relevant:
+        if do_write_errors and tp != relevant:  # This condition means "if you merged somewhere you shouldn't have". It ignores errors of excess tokenisation (tp != predicted).
             log.write(reference_segmentation + "\t->\t" + bpe_segmentation + "\n")
 
     if do_write_errors:
@@ -209,28 +214,32 @@ class TokeniserEvaluation:
 
 
 # @timeit
-def test_tokenizers_batch(tkzrs: list, lemma_weights_path: Path=None, holdout: Holdout=None):
+def test_tokenizers_batch(tkzrs: list, reweighting_function: Callable[[float],float]=None, holdout: Holdout=None) -> List[TokeniserEvaluation]:
     """
     Generates, for each given tokeniser, 12 metrics:
         - Morph split unweighted and weighted precision, recall, F1 of split positions vs. e-Lex;
         - Lemmatic split unweighted and weighted precision, recall, F1 of split positions vs. e-Lex;
-    If no weights are given, the weighted metrics are dropped.
 
-    The elements of the given list must have a method .tokenize(str) -> List[str].
+    :param tkzrs: The elements of the given list must have a method .tokenize(str) -> List[str].
+    :param reweighting_function: Applied to lemma frequencies. If no function is given, the weighted metrics are dropped
+                                 (rather than applying the identity function to the frequencies).
     """
     print("===== EVALUATION SETUP =====")
     import time
 
     # Load weights
-    if lemma_weights_path is not None and lemma_weights_path.is_file():
-        with open(lemma_weights_path, "r", encoding="utf-8") as handle:
-            lemma_weights = wordsFileToCounter(handle)
-    else:
-        lemma_weights = None
+    lemma_weights = None
+    if reweighting_function is not None:  # If it is None, this is used as a signal to say "I don't want weighting".
+        lemma_weights = intersectLexiconCounts()
+        if lemma_weights is not None:  # Possible if there was no weights file found.
+            lemma_weights = dict(lemma_weights)
+            for word, frequency in lemma_weights.items():
+                lemma_weights[word] = reweighting_function(frequency)  # Note that it's only disallowed to ADD items, not change them.
 
     # Evaluation loop
     results = []
     for t in tkzrs:
+        # Get metadata
         try:
             name = t.getName()
         except:
@@ -240,17 +249,18 @@ def test_tokenizers_batch(tkzrs: list, lemma_weights_path: Path=None, holdout: H
         except:
             size = "NA"
 
+        # Print and evaluate
         print(name)
         print("|V|:", size)
         print("\tMorph split accuracy:")
         time.sleep(0.01)
-        cm1, cm1_w = morphologyVersusTokenisation(LemmaMorphology.morphSplit, tokenizer=t, do_write_errors=False, name=name,
-                                                  word_counts=lemma_weights, holdout=holdout)
+        cm1, cm1_w = morphologyVersusTokenisation(MorphSplit(), tokenizer=t, do_write_errors=False, name=name,
+                                                  weights=lemma_weights, holdout=holdout)
 
         print("\tLemmatic split accuracy:")
         time.sleep(0.01)
-        cm2, cm2_w = morphologyVersusTokenisation(LemmaMorphology.lexemeSplit, tokenizer=t, do_write_errors=False, name=name,
-                                                  word_counts=lemma_weights, holdout=holdout)
+        cm2, cm2_w = morphologyVersusTokenisation(LexSplit(), tokenizer=t, do_write_errors=False, name=name,
+                                                  weights=lemma_weights, holdout=holdout)
         print()
 
         results.append(TokeniserEvaluation(name=name, vocabsize=size,

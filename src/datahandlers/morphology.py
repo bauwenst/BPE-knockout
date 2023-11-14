@@ -1,12 +1,15 @@
 """
 Object-oriented model for morphologically split lemmas.
 
-Relies quite heavily on the format of e-Lex's morphological decomposition.
-Contains several splitting algorithms that are more general, however.
+Contains a general interface for any dataset format, and an
+implementation specific to CELEX/e-Lex; the morphSplit algorithm
+is more general though, and can likely be repurposed.
 """
 import re
-from typing import List, Tuple
+from typing import List, Tuple, Iterable
 from dataclasses import dataclass
+from abc import ABC, abstractmethod
+from pathlib import Path
 
 from src.datahandlers.hf_corpora import normalizer
 from src.datahandlers.wordfiles import iterateTxt
@@ -15,6 +18,53 @@ from src.visualisation.printing import PrintTable, warn
 DO_WARNINGS = False
 
 
+### INTERFACE ###
+class LemmaMorphology(ABC):
+
+    @abstractmethod
+    def lemma(self) -> str:
+        pass
+
+    @abstractmethod
+    def morphSplit(self) -> str:
+        pass
+
+    @abstractmethod
+    def lexemeSplit(self) -> str:
+        pass
+
+    @staticmethod  # Can't make it abstract, but you should implement this.
+    def generator(file: Path) -> Iterable["LemmaMorphology"]:
+        pass
+
+
+### VISITORS ###
+class MorphologyVisitor(ABC):
+    """
+    In many tests in the code base, we want to have ONE procedure where a method of the above class
+    is called but should be readily interchangeable. Without inheritance, this is possible just by
+    passing the method itself as an argument and calling that on an object of the class (e.g. pass in
+    method = LemmaMorphology.morphsplit and then call method(obj), which is equivalent to obj.morphSplit()).
+
+    With inheritance, however, Python won't use the overridden version of the method dynamically, so all that is
+    executed is the 'pass' body. The solution is a visitor design pattern.
+    """
+    @abstractmethod
+    def __call__(self, morphology: LemmaMorphology):
+        pass
+
+
+class MorphSplit(MorphologyVisitor):
+    def __call__(self, morphology: LemmaMorphology):
+        return morphology.morphSplit()
+
+
+class LexSplit(MorphologyVisitor):
+    def __call__(self, morphology: LemmaMorphology):
+        return morphology.lexemeSplit()
+
+
+### CELEX-SPECIFIC ###
 @dataclass
 class AlignmentStack:
     current_morpheme: int
@@ -22,7 +72,13 @@ class AlignmentStack:
     morphs: List[str]
 
 
-class LemmaMorphology:
+@dataclass
+class ViterbiNode:
+    best_count: int = -1  # Ensures that the backpointer is initialised by the first node that talks to this node.
+    backpointer: Tuple[int, int] = None
+
+
+class CelexLemmaMorphology(LemmaMorphology):
 
     POS_TAG = re.compile(r"\[[^\]]+\]")
 
@@ -44,18 +100,18 @@ class LemmaMorphology:
 
         self.raw = elex_entry
         if lemma:
-            morphological_split = LemmaMorphology.POS_TAG.sub("", elex_entry)\
+            morphological_split = CelexLemmaMorphology.POS_TAG.sub("", elex_entry)\
                                                             .replace(" ", "")\
                                                             .replace("(", "")\
                                                             .replace(")", "")\
                                                             .replace(",", " ")
-            morph_split,alignment = LemmaMorphology._morphSplit_viterbi(lemma, morphological_split)
+            morph_split,alignment = CelexLemmaMorphology._morphSplit_viterbi(lemma, morphological_split)
             morph_stack = AlignmentStack(current_morpheme=0, morpheme_indices=alignment, morphs=morph_split.split(" "))
             if DO_WARNINGS and len(morph_split.split(" ")) != len(morphological_split.split(" ")):
                 warn("Morphemes dropped:", lemma, "--->", elex_entry, "--->", morphological_split, "----->", morph_split)
 
-        raw_body, self.pos, child_strings = LemmaMorphology.parse(elex_entry)
-        self.children = [LemmaMorphology(sub_elex, morph_stack=morph_stack) for sub_elex in child_strings]
+        raw_body, self.pos, child_strings = CelexLemmaMorphology.parse(elex_entry)
+        self.children = [CelexLemmaMorphology(sub_elex, morph_stack=morph_stack) for sub_elex in child_strings]
         if self.children:
             self.morphemetext = "+".join([c.morphemetext for c in self.children])
             self.morphtext    =  "".join([c.morphtext    for c in self.children])
@@ -74,6 +130,9 @@ class LemmaMorphology:
                     self.morphtext += morph_stack.morphs.pop(0)  # Assign the actual i'th morph.
 
             morph_stack.current_morpheme += 1
+
+    def lemma(self) -> str:
+        return self.morphtext
 
     def __repr__(self):  # This is some juicy recursion right here
         lines = [self.morphtext + self.pos]
@@ -156,7 +215,7 @@ class LemmaMorphology:
             return self.morphemetext
 
     ### LEXEMES ###
-    def lexemeSplit(self):
+    def lexemeSplit(self) -> str:
         """
         Not all morphemes have their own lexeme.
 
@@ -172,7 +231,7 @@ class LemmaMorphology:
         """
         return self._lexemeSplit().replace("  ", " ").replace("  ", " ").strip()
 
-    def _lexemeSplit(self):
+    def _lexemeSplit(self) -> str:
         """
         Doing a recursive concatenation became too difficult, so here's a different approach: assume the leaves (which
         are all morphemes) are the final splits. If a leaf is an affix, then it requires its relevant *sibling* to merge
@@ -203,7 +262,7 @@ class LemmaMorphology:
         return s
 
     ### MORPHS ###
-    def morphSplit(self):
+    def morphSplit(self) -> str:
         """
         Splits into morphs rather than morphemes. That is: removing spaces from the result will produce the lemma.
         For the lemma "kolencentrale":
@@ -242,10 +301,10 @@ class LemmaMorphology:
             - (((centrum)[N],(aal)[A|N.])[A],(Aziatisch)[A])[A]  centraal-Aziatisch
         For hyphenation, the hyphen is stuck to the previous word. TODO: Might not be the best way to go.
         """
-        return LemmaMorphology._morphSplit_viterbi(self.morphtext, self.morphemeSplit())[0]
+        return CelexLemmaMorphology._morphSplit_viterbi(self.morphtext, self.morphemeSplit())[0]
 
     @staticmethod
-    def _morphSplit_greedy(lemma: str, morphemes: str) -> Tuple[str,list]:
+    def _morphSplit_greedy(lemma: str, morphemes: str) -> str:
         """
         The greedy approach sometimes outputs the wrong split, namely when a morpheme's tail looks like the next morpheme.
         An example is "élégance -> ((elegant)[A],(nce)[N|A.])[N]", where the "n" in "élégance" supposedly does not come
@@ -291,7 +350,7 @@ class LemmaMorphology:
         return result
 
     @staticmethod
-    def _morphSplit_viterbi(lemma: str, morphemes: str):
+    def _morphSplit_viterbi(lemma: str, morphemes: str) -> Tuple[str, List[int]]:
         """
         Iterative Viterbi algorithm with the same optimal results as the recursive bruteforce, except the problem goes
         from completely intractable (several minutes, running out of memory) to trivial (0 seconds and a small table).
@@ -391,60 +450,24 @@ class LemmaMorphology:
         alignment.reverse()
         return morph_split, alignment
 
-
-@dataclass
-class ViterbiNode:
-    best_count: int = -1  # Ensures that the backpointer is initialised by the first node that talks to this node.
-    backpointer: Tuple[int, int] = None
-
-
-def printTrellis(trellis: list):
-    for vertical_idx in range(len(trellis[0])):
-        for horizontal_idx in range(len(trellis)):
-            print(trellis[horizontal_idx][vertical_idx].best_count, end="\t")
-        print()
+    @staticmethod
+    def generator(file: Path, verbose=True) -> Iterable[LemmaMorphology]:
+        """
+        Generator to be used by every script that needs morphological objects.
+        Has access to the project config.
+        """
+        with open(file, "r", encoding="utf-8") as handle:
+            for line in iterateTxt(handle, verbose=verbose):
+                lemma, morphological_tag = line.split("\t")
+                yield CelexLemmaMorphology(lemma=lemma, elex_entry=morphological_tag)
 
 
-def viterbiLaTeX(trellis: list, lemma: str, morphemes: str, trace: list):
-    matrix_string = ""
-    arrow_string  = ""
-
-    print(trace)
-    morphemes = morphemes.split(" ") + [" "]
-
-    matrix_string += "\t& " + "".join(r" & " + c for c in list(lemma)) + r"\\" + "\n"
-    for vertical_idx in range(len(trellis[0])):
-        matrix_string += r"\textsl{" + morphemes[vertical_idx] + "}\t"
-        for horizontal_idx in range(len(trellis)):
-            node = trellis[horizontal_idx][vertical_idx]
-            matrix_string += f" & {node.best_count}"
-            if node.backpointer and (horizontal_idx,vertical_idx) in trace:
-                x,y = node.backpointer
-                arrow_string += f"\draw (A-{vertical_idx+2}-{horizontal_idx+2})--(A-{y+2}-{x+2});\n"
-        matrix_string += r"\\" + "\n"
-
-    print(r"\begin{tikzpicture}[>=stealth]")
-    print(r"\matrix (A) [matrix of nodes, row sep=3mm, column sep=3mm, nodes in empty cells, column 1/.style={anchor=base east}] {")
-    print(matrix_string.strip())
-    print("};")
-    print(f"\draw ([xshift=-2mm]A-1-2.north west)--([xshift=-1mm]A-{len(morphemes)+1}-2.south west);")
-    print(f"\draw ([yshift=2mm]A-2-1.north west)--([yshift=2mm]A-2-{len(lemma)+2}.north east);")
-    print(r"\begin{scope}[thick,red,->]")
-    print(arrow_string.strip())
-    print(r"\end{scope}")
-    print(r"\end{tikzpicture}")
-
-##################################################################################
-
-from src.auxiliary.paths import PATH_DATA_COMPRESSED
-outfilepath_morphologies = PATH_DATA_COMPRESSED / "celex_morphology_nl.txt"
-SEP = "\t"
-def morphologyGenerator(verbose=True):
+def morphologyGenerator(**kwargs) -> Iterable[LemmaMorphology]:
     """
-    Generator to be used by every script that needs morphological objects.
-    """
-    with open(outfilepath_morphologies, "r", encoding="utf-8") as handle:
-        for line in iterateTxt(handle, verbose=verbose):
-            lemma, morphological_tag = line.split(SEP)
-            yield LemmaMorphology(lemma=lemma, elex_entry=morphological_tag)
+    Alias for LemmaMorphology.generator that automatically uses the project's file path.
+    Without this, you would need to repeat the below statement everywhere you iterate over morphologies.
 
+    TODO: Could put this in config.py
+    """
+    from src.auxiliary.config import Pℛ𝒪𝒥ℰ𝒞𝒯
+    return Pℛ𝒪𝒥ℰ𝒞𝒯.config.parser.generator(Pℛ𝒪𝒥ℰ𝒞𝒯.config.morphologies, **kwargs)  # https://discuss.python.org/t/difference-between-return-generator-vs-yield-from-generator/2997
