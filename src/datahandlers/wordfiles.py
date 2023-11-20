@@ -20,10 +20,9 @@ def iterableToWordsFile(line_iterable: Iterable[str], output_file: Path):
     """
     word_types = Counter()
 
-    for line in line_iterable:
+    for line in line_iterable:  # TODO: Add a progress bar and cache every so-often...
         for word in line.strip('\r\n ').split(' '):
-            if word:
-                word_types[word] += 1
+            word_types[word] += 1  # Note that the empty word is also counted with this; we can't have an "if word" check because branching is slow!
 
     with open(output_file, "w", encoding="utf-8") as handle:
         for key, f in sorted(word_types.items(), key=lambda x: x[1], reverse=True):
