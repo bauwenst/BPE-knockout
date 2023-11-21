@@ -35,7 +35,7 @@ class LemmaMorphology(ABC):
 
     @staticmethod  # Can't make it abstract, but you should implement this.
     def generator(file: Path) -> Iterable["LemmaMorphology"]:
-        pass
+        raise NotImplementedError()
 
 
 ### VISITORS ###
@@ -82,12 +82,12 @@ class CelexLemmaMorphology(LemmaMorphology):
 
     POS_TAG = re.compile(r"\[[^\]]+\]")
 
-    def __init__(self, elex_entry: str, lemma: str="", morph_stack: AlignmentStack=None):
+    def __init__(self, celex_struclab: str, lemma: str= "", morph_stack: AlignmentStack=None):
         """
-        Tree representation of a morphologically decomposed lemma in the e-Lex lexicon.
+        Tree representation of a morphologically decomposed lemma in the CELEX lexicon.
         No guarantees if the input doesn't abide by the specification below.
 
-        :param elex_entry: morphological tag, e.g. "((kool)[N],(en)[N|N.N],(((centrum)[N],(aal)[A|N.])[A],(e)[N|A.])[N])[N]"
+        :param celex_struclab: morphological tag, e.g. "((kool)[N],(en)[N|N.N],(((centrum)[N],(aal)[A|N.])[A],(e)[N|A.])[N])[N]"
                            These are built hierarchically through the BNF
                                 M ::= `(`M,M(,M)*`)`[T]
                            with T something like a PoS tag.
@@ -98,23 +98,27 @@ class CelexLemmaMorphology(LemmaMorphology):
         if not lemma and not morph_stack:  # This is a very good sanity check that indicates many bugs with the splitter.
             raise ValueError("You can't construct a morphological split without either a lemma or a list of stems for the children to use.")
 
-        self.raw = elex_entry
+        self.raw = celex_struclab
         if lemma:
-            morphological_split = CelexLemmaMorphology.POS_TAG.sub("", elex_entry)\
-                                                            .replace(" ", "")\
-                                                            .replace("(", "")\
-                                                            .replace(")", "")\
-                                                            .replace(",", " ")
+            morphological_split = CelexLemmaMorphology.POS_TAG.sub("", celex_struclab)\
+                                                              .replace(" ", "")\
+                                                              .replace("(", "")\
+                                                              .replace(")", "")\
+                                                              .replace(",", " ")
             morph_split,alignment = CelexLemmaMorphology._morphSplit_viterbi(lemma, morphological_split)
             morph_stack = AlignmentStack(current_morpheme=0, morpheme_indices=alignment, morphs=morph_split.split(" "))
             if DO_WARNINGS and len(morph_split.split(" ")) != len(morphological_split.split(" ")):
-                warn("Morphemes dropped:", lemma, "--->", elex_entry, "--->", morphological_split, "----->", morph_split)
+                warn("Morphemes dropped:", lemma, "--->", celex_struclab, "--->", morphological_split, "----->", morph_split)
 
-        raw_body, self.pos, child_strings = CelexLemmaMorphology.parse(elex_entry)
-        self.children = [CelexLemmaMorphology(sub_elex, morph_stack=morph_stack) for sub_elex in child_strings]
+        raw_body, self.pos, child_strings = CelexLemmaMorphology.parse(celex_struclab)
+        self.is_prefix = "|." in self.pos or self.pos == "[P]"
+        self.is_suffix = ".]" in self.pos
+        self.is_interfix = not self.is_prefix and not self.is_suffix and "." in self.pos
+        self.children = [CelexLemmaMorphology(sub_celex, morph_stack=morph_stack) for sub_celex in child_strings]
         if self.children:
             self.morphemetext = "+".join([c.morphemetext for c in self.children])
             self.morphtext    =  "".join([c.morphtext    for c in self.children])
+            self.retagInterfices()
         else:
             self.morphemetext = raw_body
             self.morphtext = ""  # The concatenation of all morph texts should be the top lemma, so in doubt, set empty.
@@ -167,13 +171,34 @@ class CelexLemmaMorphology(LemmaMorphology):
             t.print(*rows[1])
 
     def isNNC(self):
-        return len(self.children) == 2 and self.children[0].pos == "[N]" and self.children[1].pos == "[N]"
+        return len(self.children) == 2 and self.children[0].pos == "[N]" and self.children[1].pos == "[N]" \
+            or len(self.children) == 3 and self.children[0].pos == "[N]" and self.children[1].is_interfix and self.children[2].pos == "[N]"
 
-    def isPrefix(self):
-        return "|." in self.pos or self.pos == "[P]"
+    def retagInterfices(self):
+        """
+        Very rarely, an interfix is followed by a suffix. Whereas we normally split an interfix off of anything else no
+        matter the splitting method, it effectively behaves like a suffix in such cases and should be merged leftward if this is desired for suffices.
 
-    def isSuffix(self):
-        return ".]" in self.pos
+        An example in e-Lex:
+            koppotigen	((kop)[N],(poot)[N],(ig)[N|NN.x],(e)[N|NNx.])[N]
+        An example in German CELEX:
+            gerechtigkeit  (((ge)[A|.N],((recht)[A])[N])[A],(ig)[N|A.x],(keit)[N|Ax.])[N]
+
+        Note that if the suffix following an interfix is part of a different parent (which is never the case in e-Lex),
+        that interfix will not be reclassified as suffix.
+
+        Design note: there are two possible implementations to deal with this.
+            1. Add an extra base-case condition
+                    if not_second_to_last and self.children[i+1].isInterfix() and self.children[i+2].isSuffix()
+               and a method for checking interfices.
+            2. Precompute in each CelexLemmaMorphology whether an interfix appears left of a suffix, and store
+               in its node that it then IS a suffix.
+        """
+        i = 0
+        while i < len(self.children)-1:
+            if self.children[i].is_interfix and self.children[i+1].is_suffix:
+                self.children[i].is_suffix = True
+            i += 1
 
     @staticmethod
     def parse(s: str):
@@ -247,18 +272,16 @@ class CelexLemmaMorphology(LemmaMorphology):
             return self.morphtext
 
         s = ""
-        for i,c in enumerate(self.children):
+        for i,child in enumerate(self.children):  # For each child, do a recursive call.
             not_first = i > 0
-            not_last = i < len(self.children)-1
-            if (not_first and self.children[i-1].isPrefix()) or (not_last and self.children[i+1].isSuffix()):
-                s += c.morphtext
+            not_last  = i < len(self.children)-1
+            if (not_first and self.children[i-1].is_prefix) or (not_last and self.children[i+1].is_suffix):  # The boolean flags protect against out-of-bounds errors.
+                s += child.morphtext  # Recursive base case: collapse the entire child without spaces.
             else:
-                # In the alternative case, you recursively split and add spaces around the result. However, there is an
-                # obvious pitfall: if the current child is itself a pre-/suffix, then you should not add a space before
-                # (suffix) or after (prefix) it. There are two ways to code this:
-                #   - You check whether the current child is a pre-/suffix, and put spaces around the current child like that.
-                #   - Only the next child can put a space in front of itself.
-                s += " "*(not_first and not c.isSuffix()) + c._lexemeSplit() + " " * (not_last and not c.isPrefix())
+                # In the alternative case, you (1) recursively split and (2) add spaces around the result.
+                # This is not a hard rule, however, because if the current child is a prefix/suffix, then obviously
+                # (2) is wrong. In particular: you should not add a space before a suffix or after a prefix.
+                s += " "*(not_first and not child.is_suffix) + child._lexemeSplit() + " "*(not_last and not child.is_prefix)
         return s
 
     ### MORPHS ###
@@ -363,6 +386,8 @@ class CelexLemmaMorphology(LemmaMorphology):
         the search graph, a node is a pair of (substring, available vocab), where 'available vocab' is the start of the
         sublist of morphemes left out of all morphemes available.
         """
+        # Normalising does not change the amount of characters in the strings. We normalise to compute the alignment and
+        # then, at the end, use substring length to read from the unnormalised string.
         lemma_normed     = normalizer.normalize_str(lemma).lower()
         morphemes_normed = normalizer.normalize_str(morphemes).lower()
 
@@ -459,15 +484,4 @@ class CelexLemmaMorphology(LemmaMorphology):
         with open(file, "r", encoding="utf-8") as handle:
             for line in iterateTxt(handle, verbose=verbose):
                 lemma, morphological_tag = line.split("\t")
-                yield CelexLemmaMorphology(lemma=lemma, elex_entry=morphological_tag)
-
-
-def morphologyGenerator(**kwargs) -> Iterable[LemmaMorphology]:
-    """
-    Alias for LemmaMorphology.generator that automatically uses the project's file path.
-    Without this, you would need to repeat the below statement everywhere you iterate over morphologies.
-
-    TODO: Could put this in config.py
-    """
-    from src.auxiliary.config import Pℛ𝒪𝒥ℰ𝒞𝒯
-    return Pℛ𝒪𝒥ℰ𝒞𝒯.config.parser.generator(Pℛ𝒪𝒥ℰ𝒞𝒯.config.morphologies, **kwargs)  # https://discuss.python.org/t/difference-between-return-generator-vs-yield-from-generator/2997
+                yield CelexLemmaMorphology(lemma=lemma, celex_struclab=morphological_tag)

@@ -10,7 +10,7 @@ It itself cannot run anything. Imputation should only be done by calling its
 functions.
 """
 from dataclasses import dataclass
-from typing import Callable, Type, Optional
+from typing import Callable, Type, Optional, Iterable, Dict
 
 from src.auxiliary.paths import *
 from src.datahandlers.morphology import LemmaMorphology  # Very careful importing here.
@@ -49,14 +49,14 @@ def setupDutch() -> ProjectConfig:
     ###
 
     # Impute missing data
-    if not DUTCH_CONFIG.lemma_weights.exists():
+    if DUTCH_CONFIG.lemma_weights is not None and not DUTCH_CONFIG.lemma_weights.exists():
         from src.datahandlers.hf_corpora import dataloaderToWeights
         from src.datahandlers.hf_corpora import generateDataloader_Oscar
-        weights = dataloaderToWeights(generateDataloader_Oscar("nl"), "words_oscar-nl")
+        weights = dataloaderToWeights(generateDataloader_Oscar("nl"), "words_oscar-nl")  # This will take 6 hours.
         weights.rename(DUTCH_CONFIG.lemma_weights)
 
-    if not DUTCH_CONFIG.morphologies.exists():  # TODO: Could probably query the MPI database
-        raise ValueError("No Dutch morphologies found at", DUTCH_CONFIG.morphologies.as_posix())
+    if DUTCH_CONFIG.morphologies is None or not DUTCH_CONFIG.morphologies.exists():  # TODO: Could probably query the MPI database
+        raise ValueError("No Dutch morphologies given.")
 
     if not DUTCH_CONFIG.base_vocab.exists():
         import json
@@ -88,15 +88,17 @@ def setupGerman() -> ProjectConfig:
     )
     ###
 
-    if not GERMAN_CONFIG.lemma_weights.exists():
-        from src.datahandlers.hf_corpora import dataloaderToWeights
-        from src.datahandlers.hf_corpora import generateDataloader_Oscar
-        weights = dataloaderToWeights(generateDataloader_Oscar("de"), "words_oscar-de")
-        weights.rename(GERMAN_CONFIG.lemma_weights)
+    if GERMAN_CONFIG.lemma_weights is not None and not GERMAN_CONFIG.lemma_weights.exists():
+        pass
+        # from src.datahandlers.hf_corpora import dataloaderToWeights
+        # from src.datahandlers.hf_corpora import generateDataloader_Oscar
+        # weights = dataloaderToWeights(generateDataloader_Oscar("de"), "words_oscar-de")  # THIS IS NOT ADVISABLE. IT TAKES MULTIPLE DAYS.
+        # weights.rename(GERMAN_CONFIG.lemma_weights)
 
     return GERMAN_CONFIG
 
 
+### Common imports found below ###
 
 @dataclass
 class Project:
@@ -118,3 +120,21 @@ Pℛ𝒪𝒥ℰ𝒞𝒯 = Project(setupDutch())
 # project: one is the default above, the other is the one in main.py. The one above is used for all executions that do
 # not use main.py (every instance of 'if __name__ == "__main__"' and also all executions starting from outside this
 # codebase, e.g. those that import BTE), the other is used only for executing main.py.
+
+
+def morphologyGenerator(**kwargs) -> Iterable[LemmaMorphology]:
+    """
+    Alias for LemmaMorphology.generator that automatically uses the project's file path for morphologies.
+    Without this, you would need to repeat the below statement everywhere you iterate over morphologies.
+    """
+    return Pℛ𝒪𝒥ℰ𝒞𝒯.config.parser.generator(Pℛ𝒪𝒥ℰ𝒞𝒯.config.morphologies, **kwargs)  # https://discuss.python.org/t/difference-between-return-generator-vs-yield-from-generator/2997
+
+
+def lexiconWeights() -> Dict[str, float]:
+    """
+    Alias for loadAndWeightLexicon that automatically uses the project's reweighting function.
+    Note that internally, loadAndWeightLexicon calls intersectLexiconCounts which itself automatically uses
+    the project's file path for word counts and which internally calls morphologyGenerator.
+    """
+    from src.auxiliary.measuring import loadAndWeightLexicon
+    return loadAndWeightLexicon(Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)

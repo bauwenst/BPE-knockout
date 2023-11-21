@@ -6,7 +6,7 @@ rules using its two parents. This involves two additional problems solved here:
 
 TODO:
     - Should try with different thresholds. I also think possibly a maximum threshold is needed because some 100%-blame
-      vocab types are just pedantry by e-Lex. (Could be useful to eliminate mediocre examples from the boundary log!)
+      vocab types are just pedantry by e-Lex. (Could be useful to eliminate mediocre examples from the log.)
     - For the use-cases where you chain annealing and knockout, it could be an idea to have the first be based on a
       heuristic, and have the second iterate as many times as the first. I.e.: if knockout removes 100 merges, anneal
       then adds 100 merges, ending up with the same vocab size.
@@ -24,13 +24,15 @@ from pathlib import Path
 from tqdm.auto import tqdm
 
 from src.datahandlers.holdout import Holdout
-from src.datahandlers.morphology import morphologyGenerator, LexSplit, MorphSplit
+from src.datahandlers.morphology import LexSplit, MorphSplit
 
 from src.auxiliary.measuring import SPLIT_MARKER_RE, SPLIT_MARKER
-from src.auxiliary.robbert_tokenizer import robbert_tokenizer, getMergeList_RobBERT
+from src.auxiliary.config import Pℛ𝒪𝒥ℰ𝒞𝒯, lexiconWeights, morphologyGenerator
+from src.auxiliary.bytemapping import accentMapper
 
 from src.visualisation.printing import doPrint, PrintTable
 from src.visualisation.timing import timeit
+
 
 MergeAsTuple = Tuple[int, str, str]
 
@@ -51,8 +53,11 @@ class Merge:
         return (
             self.priority,
             " " + " ".join(self.parts) + " ",
-            " " + "".join(self.parts) + " "
+            " " + self.childType() + " "
         )
+
+    def childType(self) -> str:
+        return "".join(self.parts)
 
 
 class MergeGraph:
@@ -71,19 +76,37 @@ class MergeGraph:
         self.next_type  = 0  # == 1 + max(self.vocab.values()), not always len(self.vocab) due to knockout.
         self.next_merge = 0  # == 1 + max([m.priority for m in self.merges]), not always len(self.merges) due to knockout.
 
-        self.vocab = vocab
+        # Initialise graph
         self.merges: List[Merge] = []
-        self.merges_with: Dict[str, List[Merge]] = {t: [] for t in self.vocab}
-        self.merges_of: Dict[str, List[Merge]]   = {t: [] for t in self.vocab}
+        self.vocab:       Dict[str, int]         = dict()
+        self.merges_with: Dict[str, List[Merge]] = dict()
+        self.merges_of:   Dict[str, List[Merge]] = dict()
 
-        if quiet:
-            for raw_merge in raw_merges:
-                self.add(raw_merge)
+        # Fill graph
+        for raw_type, type_id in vocab.items():
+            self.addVertex(raw_type, suggested_id=type_id)
+
+        for raw_merge in (raw_merges if quiet else tqdm(raw_merges, desc="CONSTRUCTING GRAPH")):
+            self.addArc(raw_merge)
+
+    def addVertex(self, type_to_add: str, suggested_id: int=-1):
+        if type_to_add in self.vocab:
+            raise ValueError(f"The type '{type_to_add}' is already in the merge graph.")
+        if " " in type_to_add:
+            raise ValueError(f"The type '{type_to_add}' contains a space. This is illegal.")
+
+        # Bad suggestions are replaced by the ID that is 1 bigger than the biggest ID so far (NOT the smallest unused).
+        if suggested_id < 0 or suggested_id in self.vocab.values():
+            suggested_id = self.next_type
+            self.next_type += 1
         else:
-            for raw_merge in tqdm(raw_merges, desc="CONSTRUCTING GRAPH"):
-                self.add(raw_merge)
+            self.next_type = max(self.next_type, suggested_id+1)
 
-    def add(self, merge_to_add: str):
+        self.vocab[type_to_add]       = suggested_id
+        self.merges_with[type_to_add] = []
+        self.merges_of[type_to_add]   = []
+
+    def addArc(self, merge_to_add: str):
         """
         Adds arcs to the merge graph, and the resulting type if necessary.
         :param merge_to_add: Space-separated merge, e.g. "ab cd e".
@@ -94,19 +117,16 @@ class MergeGraph:
         if any([p == "" for p in parts]):
             raise ValueError(f"The merge '{merge_to_add}' seems to have double spaces.")
 
-        new_type = "".join(parts)
         new_merge = Merge(self.next_merge, parts)
+        new_type = new_merge.childType()
 
         if new_type not in self.vocab:
-            self.vocab[new_type] = self.next_type
-            self.merges_with[new_type] = []
-            self.merges_of[new_type]   = []
+            self.addVertex(new_type)
         self.merges.append(new_merge)
         for part in set(parts):  # set() in case there is a duplicate part.
             self.merges_with[part].append(new_merge)
         self.merges_of[new_type].append(new_merge)
 
-        self.next_type  += 1
         self.next_merge += 1
 
     def knockout(self, type_to_delete: str):
@@ -161,7 +181,7 @@ class MergeGraph:
         """
         involved_merges = self.merges_with[t]
 
-        children = ["".join(m.parts) for m in involved_merges]
+        children = [m.childType() for m in involved_merges]
         spouses = set()
         for child in children:
             spouses.update(self.merges_of[child][0].parts)
@@ -177,7 +197,7 @@ class MergeGraph:
             children_of_parent = self.merges_with[parent]
             for child_merge in children_of_parent:
                 parental_spouses.update(child_merge.parts)
-                siblings.add("".join(child_merge.parts))
+                siblings.add(child_merge.childType())
         siblings.remove(t)
 
         print("Things it makes:", len(children), children)
@@ -215,11 +235,15 @@ class BteInitConfig:
     :param keep_long_merges: whether to skip knockout for merges with relatively long parts (because they likely
                              form compounds; these need to be removed from the vocab, but by not doing so, you can
                              measure their effect on intrinsic evaluation metrics).
+    :param starting_from_bytechars: whether the starting vocab and starting merges are encoded by HuggingFace's
+                                    byte-to-character mapper, which is the case if you use byte-based BPE.
     """
     knockout: RefMode = RefMode.NONE
-    anneal  : RefMode = RefMode.NONE
-    do_swap_stages: bool   = False
+    anneal:   RefMode = RefMode.NONE
+    do_swap_stages:   bool = False
     keep_long_merges: bool = False
+    weighted_training: bool = False
+    starting_from_bytechars: bool = True
 
 
 class BTE:
@@ -244,12 +268,14 @@ class BTE:
         self.knockout_segmentation = RefMode.toMethod(self.config.knockout)
         self.anneal_segmentation   = RefMode.toMethod(self.config.anneal)
         self.do_prune_trivials = not self.config.keep_long_merges
-        do_prune = self.knockout_segmentation is not None
+        do_prune  = self.knockout_segmentation is not None
         do_anneal = self.anneal_segmentation is not None
         self.name = "BTE" \
                     + ("-knockout-" + RefMode.toLetter(self.config.knockout))*(do_prune and not self.config.do_swap_stages)\
                     + ("-anneal-"   + RefMode.toLetter(self.config.anneal))  * do_anneal \
-                    + ("-knockout-" + RefMode.toLetter(self.config.knockout))*(do_prune and self.config.do_swap_stages)
+                    + ("-knockout-" + RefMode.toLetter(self.config.knockout))*(do_prune and self.config.do_swap_stages)\
+                    + (f"_{int(100*holdout.threshold)}-{int(100-100*holdout.threshold)}-holdout" if holdout is not None else "")\
+                    + "_keeptrivial"*self.config.keep_long_merges
 
         if not quiet:
             print("Instantiating", self.name, "...")
@@ -261,11 +287,13 @@ class BTE:
 
         # Graph
         if starting_vocab is None or starting_mergelist is None:
-            starting_vocab     = robbert_tokenizer.get_vocab()
-            starting_mergelist = getMergeList_RobBERT()
+            with open(Pℛ𝒪𝒥ℰ𝒞𝒯.config.base_vocab, "r", encoding="utf-8") as handle:
+                starting_vocab = json.load(handle)
+            with open(Pℛ𝒪𝒥ℰ𝒞𝒯.config.base_merges, "r", encoding="utf-8") as handle:
+                starting_mergelist = [line.strip() for line in handle]
         self.merge_graph = MergeGraph(starting_vocab, starting_mergelist, quiet=quiet)
 
-        self.padded_merge_rules: List[MergeAsTuple]        = None  # Will be synchronised with the graph
+        self.padded_merge_rules:        List[MergeAsTuple] = None  # Will be synchronised with the graph
         self.merges_starting_with: Dict[str, MergeAsTuple] = None  # idem
         self.syncWithGraph()
 
@@ -298,6 +326,10 @@ class BTE:
         """
         self.padded_merge_rules   = self.merge_graph.getPaddedMerges()
         self.merges_starting_with = {t: [] for t in self.merge_graph.vocab}
+        if self.config.starting_from_bytechars:
+            self.padded_merge_rules = [(tup[0], accentMapper(tup[1]), accentMapper(tup[2])) for tup in self.padded_merge_rules]
+            self.merges_starting_with = {accentMapper(t): [] for t in self.merge_graph.vocab}
+
         for tup in self.padded_merge_rules:
             head = tup[1][1:-1].split(" ")[0]
             self.merges_starting_with[head].append(tup)
@@ -308,14 +340,14 @@ class BTE:
         merges_to_remove = self.getBadOldMerges(relative_blame_threshold=BTE.KNOCKOUT_REL_THRESHOLD,
                                                 except_if_all_parts_longer_than=BTE.LONGPART_THRESHOLD if not self.do_prune_trivials else 100)
         for ratio, total, merge in tqdm(merges_to_remove, desc="PRUNING GRAPH"):
-            self.merge_graph.knockout("".join(merge.parts))
+            self.merge_graph.knockout(merge.childType())
 
     @timeit
     def anneal(self):
         print("Annealing...")
         merges_to_add = self.getGoodNewMerges(absolute_threshold=BTE.ANNEAL_ABS_THRESHOLD)
         for ratio, total, merge in tqdm(merges_to_add, desc="ANNEALING GRAPH"):
-            self.merge_graph.add(merge)
+            self.merge_graph.addArc(merge)
 
     def tokenize(self, word: str) -> List[str]:
         return self.segment_as_is(word.replace(" ", "Ġ"))
@@ -395,6 +427,7 @@ class BTE:
         Can be repeated before and after knockout; there will always be merges to blame.
         """
         prnt = doPrint(False)
+        weights = lexiconWeights() if self.config.weighted_training else dict()
 
         merge_lookup = self.merge_graph.merges
         blame = [0 for _ in merge_lookup]
@@ -402,35 +435,37 @@ class BTE:
 
         for obj in self.holdout(morphologyGenerator(), train=True):
             lemma = obj.lemma()
+            weight = weights.get(lemma, 1)
             prnt(lemma)
 
             # Get morphological split
             reference_segmentation = self.knockout_segmentation(obj)
 
             # Get BPE split and the ID of the merge that caused a space to disappear at each index.
+            # TODO: This line and the ones below are specific to using RobBERT's vocabulary as starting vocab. Any BPE
+            #       tokeniser that doesn't have an SoW (or doesn't have Ġ specifically) won't work currently.
             tokens, merge_ids = self.segment_as_is_diagnostic("Ġ" + lemma)
 
             # One modification: because we neglect the RobBERT's start-of-word character Ġ when doing morphological
-            # comparisons, we need to strip it from the tokenisation and hence also shift all the indices in the
-            # merge map.
-            bpe_segmentation = " ".join(tokens)[1:].strip()
+            # comparisons, we need to strip it from the tokenisation and hence also shift all the indices in the merge map.
+            bpe_segmentation = " ".join(tokens)[1:].strip()  # The .strip() is in case the segmentation looks like "Ġ abcd efgh"
             merge_ids = {k-1: v for k,v in merge_ids.items() if k != 0}
 
             # Get indices with wrongful merges. Unlike compareSplits, we don't use intersection for this.
             # This isn't the only type of error: you can also have too many splits -- a lack of merging -- which can be
             # even worse, e.g. aard schudding -> aard sch udding. We can't (directly) blame any merges for that, though!
-            bpe_split_indices = {match.start() for match in SPLIT_MARKER_RE.finditer(" ".join(bpe_segmentation).replace("   ", SPLIT_MARKER))}
+            bpe_split_indices = {match.start() for match in SPLIT_MARKER_RE.finditer(" ".join(      bpe_segmentation).replace("   ", SPLIT_MARKER))}
             ref_split_indices = {match.start() for match in SPLIT_MARKER_RE.finditer(" ".join(reference_segmentation).replace("   ", SPLIT_MARKER))}
-            indices_that_shouldve_never_merged = {index//2 for index in ref_split_indices - bpe_split_indices}
+            indices_that_shouldve_never_merged = {index//2 for index in ref_split_indices - bpe_split_indices}  # In an ideal tokeniser, subtracting the BPE split positions should result in an empty set. When it doesn't, BPE is missing split positions, i.e., it merged too many.
 
             # Blame the merges that caused these indices to contract.
             prnt("\t", reference_segmentation, "->", bpe_segmentation)
             prnt("\t", merge_ids)
             for merge_id in merge_ids.values():
-                total[merge_id] += 1  # FIXME: This will crash when you have already run knockout once. Probably due to the fact that you delete types in the middle of the merge list.
+                total[merge_id] += weight  # FIXME: This crashes when you have already run knockout once. The reason is that 'total' is a list and not a dictionary. Quite easy to fix.
             for index in indices_that_shouldve_never_merged:
                 merge_id = merge_ids[index]
-                blame[merge_id] += 1
+                blame[merge_id] += weight
                 prnt("\t", f"Blamed: space after '{lemma[index]}' merged by", merge_lookup[merge_ids[index]])
 
         # Calculate ratios
@@ -462,6 +497,7 @@ class BTE:
         yet by merging those together, you don't get the correct split.
         """
         prnt = doPrint(False)
+        weights = lexiconWeights() if self.config.weighted_training else dict()
 
         do_fuse_spans = False  # Not sure how you would count "total" for this one, unless in a second pass when you already know all the merge spans.
         amenability_count = Counter()
@@ -469,6 +505,7 @@ class BTE:
 
         for obj in self.holdout(morphologyGenerator(), train=True):
             lemma = obj.lemma()
+            weight = weights.get(lemma, 1)
             prnt(lemma)
 
             # Get morphological split
@@ -519,12 +556,12 @@ class BTE:
             prnt(bpe_segmentation, "->", reference_segmentation)
             for span_start,span_end in token_spans_to_merge:
                 merge_string = " ".join(tokens[span_start:span_end+1])
-                amenability_count[merge_string] += 1
+                amenability_count[merge_string] += weight
                 prnt("\tAmenable:", merge_string)
 
             for start_token,end_token in zip(tokens[:-1], tokens[1:]):
                 merge_string = start_token + " " + end_token
-                total_count[merge_string] += 1
+                total_count[merge_string] += weight
                 prnt("\tTotal:", start_token, end_token)
 
         print("Found", len(total_count), "token combos of which", len(amenability_count), "mended at least one gap.")
@@ -551,7 +588,9 @@ class BTE:
             knockout=RefMode(tkz_as_dict["init-metadata"]["knockout"]),
             anneal=RefMode(tkz_as_dict["init-metadata"]["anneal"]),
             do_swap_stages=tkz_as_dict["init-metadata"]["do_swap_stages"],
-            keep_long_merges=tkz_as_dict["init-metadata"]["keep_long_merges"]
+            keep_long_merges=tkz_as_dict["init-metadata"]["keep_long_merges"],
+            weighted_training=tkz_as_dict["init-metadata"]["weighted_training"],
+            starting_from_bytechars=tkz_as_dict["init-metadata"]["starting_from_bytechars"]
         )
 
         return BTE(init_config,
@@ -574,3 +613,9 @@ class BTE:
         with open(out_path, "w", encoding="utf-8") as handle:
             json.dump(data, handle, indent=4)
         return out_path
+
+    def convert_tokens_to_string(self, tokens: List[str]) -> str:
+        """
+        Method to convert special characters back to the intended text.
+        """
+        return "".join(tokens).replace("Ġ", " ")

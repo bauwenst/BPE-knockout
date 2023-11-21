@@ -8,10 +8,8 @@ from src.datahandlers.morphology import *
 from src.datahandlers.wordfiles import *
 from src.datahandlers.holdout import Holdout
 from src.auxiliary.paths import *
-from src.auxiliary.config import Pℛ𝒪𝒥ℰ𝒞𝒯
+from src.auxiliary.config import Pℛ𝒪𝒥ℰ𝒞𝒯, morphologyGenerator
 from src.auxiliary.robbert_tokenizer import robbert_tokenizer, tokenizeAsWord
-from src.datahandlers.morphology import morphologyGenerator
-
 
 # Segmentation kernel
 SPLIT_MARKER = "|"
@@ -89,10 +87,13 @@ class SegmentationConfusionMatrix:
 # Weight setup
 def intersectLexiconCounts() -> Optional[Counter]:
     """
-    Frequencies in e-Lex are often 0, and the max (for "de" and "en") is 250k.
-    Frequencies in OSCAR have max ~250M, which is 1000x more information. According to Zipf's law, all counts should have
-    increased proportionally, meaning their relative contribution is the same (~ 1/rank), so any weighting done with
-    a larger corpus shouldn't skew towards the higher frequencies.
+    Get the intersection between the morphological lexicon and the word count lexicon.
+
+    Why would you not use the counts from the morphological lexicon (if it has them in the first place)?
+        - Frequencies in e-Lex are often 0, and the max (for "de" and "en") is 250k.
+        - Frequencies in OSCAR have max ~250M, which is 1000x more information. According to Zipf's law, all counts should have
+          increased proportionally, meaning their relative contribution is the same (~ 1/rank), so any weighting done with
+          a larger corpus shouldn't skew towards the higher frequencies.
 
     Here's what we could do:
         1. Collect all surface forms for a lemma in e-Lex that has morphology.
@@ -130,9 +131,27 @@ def intersectLexiconCounts() -> Optional[Counter]:
             for word, count in counter.items():
                 handle.write(f"{word} {count}\n")
 
-    return wordsFileToDict(cache_path)
+    return wordsFileToCounter(cache_path)
 
 
+def loadAndWeightLexicon(reweighting_function: Callable[[float],float]) -> Dict[str, float]:
+    """
+    Takes care of converting word counts (integers) to weights (floats)
+    and returns a queriable object even if no counts exist.
+    """
+    lemma_weights = intersectLexiconCounts()  # Fill the cache using the config.
+    if lemma_weights is None:  # Possible if there was no weights file found.
+        return dict()
+    else:
+        lemma_weights = dict(lemma_weights)
+        for word, frequency in lemma_weights.items():
+            lemma_weights[word] = reweighting_function(frequency)  # Note that it's only disallowed to ADD items in an iterable, not change them.
+        return lemma_weights
+
+
+#########################
+### Testing framework ###
+#########################
 def morphologyVersusTokenisation(morphology_method: MorphologyVisitor, tokenizer=robbert_tokenizer,  # Compared
                                  weights: Dict[str, float]=None, holdout: Holdout=None,  # Experimental parameters
                                  do_write_errors=False, quiet=False, display_confusion_matrix=False, name="RobBERT"):  # Display
@@ -150,14 +169,8 @@ def morphologyVersusTokenisation(morphology_method: MorphologyVisitor, tokenizer
     for obj in holdout(morphologyGenerator(verbose=not quiet), test=True):
         lemma = obj.lemma()
 
-        # Get space-segmented word from the tokeniser. This is more difficult than expected, since you need to
-        # make sure the BPE merges use the start-of-word merge, and at the same time map that start-of-word
-        # token to its normal variant so that it can be compared to an ordinary string. Will differ from
-        # tokeniser to tokeniser.
-        # The implementation below is to remove the SoW from the tokenisation and if that causes a space to
-        # appear, remove the space. The converse -- adding a SoW to the lexemic split -- could cause an unfair
-        # drop in precision when the tokeniser puts a space after the SoW.
-        bpe_segmentation = " ".join(tokenizeAsWord(lemma, tokenizer=tokenizer))[1:].strip()  # Remove RobBERT's start-of-word character Ġ.
+        # Get space-segmented word from the tokeniser.
+        bpe_segmentation = " ".join(tokenizeAsWord(lemma, tokenizer=tokenizer)).strip()
 
         # Generate lexemic split
         reference_segmentation = morphology_method(obj)
@@ -223,18 +236,14 @@ def test_tokenizers_batch(tkzrs: list, reweighting_function: Callable[[float],fl
     :param tkzrs: The elements of the given list must have a method .tokenize(str) -> List[str].
     :param reweighting_function: Applied to lemma frequencies. If no function is given, the weighted metrics are dropped
                                  (rather than applying the identity function to the frequencies).
+                                 It's useful to not automatically fill this function in, because the reweighting function
+                                 used in the config is used in BTE training and nobody says that it needs to be equal here.
     """
     print("===== EVALUATION SETUP =====")
     import time
 
     # Load weights
-    lemma_weights = None
-    if reweighting_function is not None:  # If it is None, this is used as a signal to say "I don't want weighting".
-        lemma_weights = intersectLexiconCounts()
-        if lemma_weights is not None:  # Possible if there was no weights file found.
-            lemma_weights = dict(lemma_weights)
-            for word, frequency in lemma_weights.items():
-                lemma_weights[word] = reweighting_function(frequency)  # Note that it's only disallowed to ADD items, not change them.
+    lemma_weights = loadAndWeightLexicon(reweighting_function) if reweighting_function is not None else None  # If it is None, this is used as a signal to say "I don't want weighting".
 
     # Evaluation loop
     results = []

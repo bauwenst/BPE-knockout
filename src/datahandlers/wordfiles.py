@@ -210,7 +210,7 @@ def reaccentWordFile(word_file: Path):
     accents into the word file at those lemmata.
     """
     import tokenizers.normalizers as tn
-    from src.datahandlers.morphology import morphologyGenerator
+    from src.auxiliary.config import morphologyGenerator
 
     normalizer = tn.Sequence([tn.NFD(), tn.StripAccents()])  # You can't have StripAccents by itself. Needs to be preceded by NF...
 
