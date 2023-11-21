@@ -1,6 +1,6 @@
 import re
 from collections import Counter, defaultdict
-from typing import Iterable, TextIO
+from typing import Iterable, TextIO, Tuple
 from tqdm.auto import tqdm
 
 from src.auxiliary.paths import *
@@ -56,7 +56,7 @@ def iterateTxt(open_file_handle: TextIO, verbose=True):
             yield line.rstrip()
 
 
-def iterateWordsFile(open_file_handle: TextIO, sep=" "):
+def iterateWordsFile(open_file_handle: TextIO, sep=" ") -> Iterable[Tuple[str, str]]:
     """
     Iterating over the words file is slightly trickier than you think due to 2 technicalities that are easy to forget:
         - You must strip the newline at the end;
@@ -64,14 +64,14 @@ def iterateWordsFile(open_file_handle: TextIO, sep=" "):
           algorithm to do so (https://stackoverflow.com/a/30271689/9352077) that drops some Unicode.
           Try " 898".split().
 
-    Hence, we abstract it.
+    Hence, we abstract it. The result is completely in TEXT form, even if the second part is a number.
     """
     for stripped_line in iterateTxt(open_file_handle):
         parts = stripped_line.split(sep=sep)
         yield sep.join(parts[0:-1]), parts[-1]
 
 
-def wordsFileToDict(words_path: Path, sep=" ") -> Counter:
+def wordsFileToCounter(words_path: Path, sep=" ") -> Counter:
     c = Counter()
     with open(words_path, "r", encoding="utf-8") as handle:
         for word, count in iterateWordsFile(handle, sep):
@@ -79,7 +79,7 @@ def wordsFileToDict(words_path: Path, sep=" ") -> Counter:
     return c
 
 
-def trimWordFile(words_path: Path, minimum: int):
+def trimWordFile(words_path: Path, minimum: int) -> Path:
     """
     Removes all words with count < minimum.
     For OSCAR, setting minimum = 10 eliminates about 80% of all words to iterate over, greatly speeding up BPE.
@@ -95,7 +95,7 @@ def trimWordFile(words_path: Path, minimum: int):
 
 
 @timeit
-def cleanWordFile(words_path: Path):
+def cleanWordFile(words_path: Path) -> Path:
     """
     For the Dutch OSCAR corpus, there seem to be erroneously long entries, as well as non-Dutch entries.
     However, there are also long entries that are legit and longer than some non-legit entries:
@@ -201,9 +201,43 @@ def detectForeignAlphabets(string: str):
     return None
 
 
+ACCENTS = re.compile("[áàäâãéèëêíìïîóòöôõúùüû]")
+
+
+def reaccentWordFile(word_file: Path):
+    """
+    Uses the lemmata generated in the morphologyGenerator, which presumably come from a corpus WITH accents, to put
+    accents into the word file at those lemmata.
+    """
+    import tokenizers.normalizers as tn
+    from src.datahandlers.morphology import morphologyGenerator
+
+    normalizer = tn.Sequence([tn.NFD(), tn.StripAccents()])  # You can't have StripAccents by itself. Needs to be preceded by NF...
+
+    accent_map = dict()
+    for obj in morphologyGenerator():
+        lemma = obj.lemma()
+        if ACCENTS.search(lemma):
+            accent_map[normalizer.normalize_str(lemma)] = lemma
+    print(accent_map)
+
+    out_path = generatePathForAccentedFile(word_file)
+    with open(out_path, "w", encoding="utf-8") as out_handle:
+        with open(word_file, "r", encoding="utf-8") as in_handle:
+            for word, count in iterateWordsFile(in_handle):
+                accented = accent_map.get(word, word)
+                out_handle.write(accented + " " + count + "\n")
+
+    return out_path
+
+
 def generatePathForCleanedFile(path: Path):
     return path.with_stem(path.stem + "_cleaned")
 
 
 def generatePathForTrimmedFile(path: Path):
     return path.with_stem(path.stem + "_trimmed")
+
+
+def generatePathForAccentedFile(path: Path):
+    return path.with_stem(path.stem + "_reaccented")
