@@ -3,7 +3,7 @@ from torch.utils.data import DataLoader
 import tokenizers.normalizers as tn
 import tokenizers.pre_tokenizers as tp
 
-from src.visualisation.printing import *
+from knockout.visualisation.printing import *
 
 
 # https://huggingface.co/docs/tokenizers/components

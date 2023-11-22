@@ -1,4 +1,4 @@
-from src.datahandlers.morphology import *
+from knockout.datahandlers.morphology import *
 
 
 def test_parsing():
@@ -81,7 +81,7 @@ def test_alignments():
 
 
 def test_all():
-    from src.datahandlers.elex import outfilepath_morphologies, SEP
+    from knockout.datahandlers.elex import outfilepath_morphologies, SEP
 
     table = PrintTable()
     with open(outfilepath_morphologies, "r", encoding="utf-8") as handle:

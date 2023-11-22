@@ -1,4 +1,4 @@
-from src.auxiliary.paths import PATH_DATA_TEMP
+from knockout.auxiliary.paths import PATH_DATA_TEMP
 import json
 import requests
 from transformers import AutoTokenizer, RobertaTokenizerFast

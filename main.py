@@ -6,12 +6,12 @@ Runs and caches all functions required to reproduce the paper, similar to an RMa
         Also, for the German test, we additionally need a control for the BPE files on which BTE is based.
 """
 ### GENERATE LEMMA WEIGHTS ###
-from src.auxiliary.paths import *
+from knockout.auxiliary.paths import *
 PATH_WORDS_OSCAR = PATH_DATA_COMPRESSED / "oscar_words.txt"
 
-from src.datahandlers.hf_corpora import generateDataloader_Oscar_NL
-from src.datahandlers.wordfiles import *
-from src.auxiliary.measuring import generateWeights
+from bpe_knockout.datahandlers.hf_corpora import generateDataloader_Oscar_NL
+from bpe_knockout.datahandlers.wordfiles import *
+from bpe_knockout.auxiliary.measuring import generateWeights
 
 # This first call ran from 14:56 to 20:52, which is ~6 hours.  TODO: Add caching to this block. Also, should be in 1 function.
 weights = iterableToWordsFile(generateDataloader_Oscar_NL(), PATH_WORDS_OSCAR)

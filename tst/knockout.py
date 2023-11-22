@@ -9,10 +9,10 @@ TODO:
 """
 import itertools
 
-from src.auxiliary.robbert_tokenizer import tokenizeAsWord
-from src.knockout.knockout import *
-from src.auxiliary.measuring import *
-from src.visualisation.graphing import *
+from knockout.auxiliary.robbert_tokenizer import tokenizeAsWord
+from knockout.knockout.knockout import *
+from knockout.auxiliary.measuring import *
+from knockout.visualisation.graphing import *
 
 TRIVIAL_THRESHOLD = 4
 untrained_bte = BTE(BteInitConfig())

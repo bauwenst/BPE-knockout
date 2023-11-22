@@ -17,7 +17,7 @@ import re
 from typing import List, Tuple, Dict, Any
 from transformers import PreTrainedTokenizer
 
-from src.knockout.knockout import BTE, BteInitConfig, RefMode
+from knockout.knockout.knockout import BTE, BteInitConfig, RefMode
 
 Whitespace = re.compile(r"\s")
 
@@ -25,20 +25,20 @@ Whitespace = re.compile(r"\s")
 class BTEk_HuggingFace(PreTrainedTokenizer):
 
     def __init__(self, algorithm: BTE, **kwargs):
-        super().__init__(**kwargs)
         self.algorithm = algorithm
         self.vocab         = self.algorithm.get_vocab()
         self.reverse_vocab = {i: s for s,i in self.vocab.items()}  # Assume that the vocabulary is injective (no duplicate IDs)
+        super().__init__(**kwargs)
 
     @property
     def vocab_size(self) -> int:
         return len(self.vocab)
 
     def _convert_token_to_id(self, token):
-        raise self.vocab[token]
+        return self.vocab[token] if token in self.vocab else self.unk_token_id
 
     def _convert_id_to_token(self, index: int) -> str:
-        raise self.reverse_vocab[index]
+        return self.reverse_vocab[index]
 
     def prepare_for_tokenization(self, text: str, is_split_into_words: bool=False, **kwargs) -> Tuple[str, Dict[str, Any]]:
         """
@@ -75,6 +75,12 @@ class BTEk_HuggingFace(PreTrainedTokenizer):
                 continue
             tokens.extend(self.algorithm.tokenize(word=" " + word))
         return tokens
+    
+    def get_vocab(self) -> Dict[str, int]:
+        return self.algorithm.get_vocab()
+    
+    def save_vocabulary(self, save_directory: str, filename_prefix = None) -> Tuple[str]:
+        return save_directory + "tokenizer.json", save_directory + "vocab.json"
 
 
 def constructHuggingFaceBPEknockout():

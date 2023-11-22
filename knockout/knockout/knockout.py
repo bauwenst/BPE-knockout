@@ -23,14 +23,14 @@ from collections import Counter
 from pathlib import Path
 from tqdm.auto import tqdm
 
-from src.datahandlers.holdout import Holdout
-from src.datahandlers.morphology import LemmaMorphology, morphologyGenerator
+from knockout.datahandlers.holdout import Holdout
+from knockout.datahandlers.morphology import LemmaMorphology, morphologyGenerator
 
-from src.auxiliary.measuring import SPLIT_MARKER_RE, SPLIT_MARKER
-from src.auxiliary.robbert_tokenizer import robbert_tokenizer, getMergeList_RobBERT
+from knockout.auxiliary.measuring import SPLIT_MARKER_RE, SPLIT_MARKER
+from knockout.auxiliary.robbert_tokenizer import robbert_tokenizer, getMergeList_RobBERT
 
-from src.visualisation.printing import doPrint, PrintTable
-from src.visualisation.timing import timeit
+from knockout.visualisation.printing import doPrint, PrintTable
+from knockout.visualisation.timing import timeit
 
 MergeAsTuple = Tuple[int, str, str]
 
@@ -328,10 +328,11 @@ class BTE:
             types = buffer[1:-1].split(" ")
             possible_merges = []
             for t in types:
-                for m in self.merges_starting_with[t]:
-                    if m[1] in buffer:  # Note that m[1] is padded with spaces. If not, "a bc d" would allow the merge "a b".
-                        possible_merges.append(m)
-                        # print("\t", m[1])
+                if t in self.merges_starting_with:
+                    for m in self.merges_starting_with[t]:
+                        if m[1] in buffer:  # Note that m[1] is padded with spaces. If not, "a bc d" would allow the merge "a b".
+                            possible_merges.append(m)
+                            # print("\t", m[1])
 
             if not possible_merges:
                 break

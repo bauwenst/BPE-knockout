@@ -1,4 +1,4 @@
-from src.datahandlers.hf_corpora import *
+from knockout.datahandlers.hf_corpora import *
 
 
 def example_oscar():

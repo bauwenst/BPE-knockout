@@ -3,18 +3,18 @@ from collections import Counter
 from typing import Callable
 from dataclasses import dataclass
 
-from src.auxiliary.paths import PATH_DATA_OUT
-from src.auxiliary.robbert_tokenizer import robbert_tokenizer, tokenizeAsWord
-from src.datahandlers.morphology import *
-from src.datahandlers.wordfiles import *
-from src.datahandlers.holdout import Holdout
+from knockout.auxiliary.paths import PATH_DATA_OUT
+from knockout.auxiliary.robbert_tokenizer import robbert_tokenizer, tokenizeAsWord
+from knockout.datahandlers.morphology import *
+from knockout.datahandlers.wordfiles import *
+from knockout.datahandlers.holdout import Holdout
 #####
 # Any function with the same behaviour as morphologyGenerator can be used. Mine pulls its data from e-Lex.
 # Which morphologyGenerator is used controls which weights are extracted below.
-from src.datahandlers.morphology import morphologyGenerator
+from knockout.datahandlers.morphology import morphologyGenerator
 PATH_RELEVANT_WEIGHTS = PATH_DATA_OUT / f"elex_weights.txt"
 #####
-from src.visualisation.timing import timeit
+from knockout.visualisation.timing import timeit
 
 SPLIT_MARKER = "|"
 SPLIT_MARKER_RE = re.compile(re.escape(SPLIT_MARKER))

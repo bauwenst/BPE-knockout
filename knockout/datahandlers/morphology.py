@@ -8,9 +8,9 @@ import re
 from typing import List, Tuple
 from dataclasses import dataclass
 
-from src.datahandlers.hf_corpora import normalizer
-from src.datahandlers.wordfiles import iterateTxt
-from src.visualisation.printing import PrintTable, warn
+from knockout.datahandlers.hf_corpora import normalizer
+from knockout.datahandlers.wordfiles import iterateTxt
+from knockout.visualisation.printing import PrintTable, warn
 
 DO_WARNINGS = False
 
@@ -436,7 +436,7 @@ def viterbiLaTeX(trellis: list, lemma: str, morphemes: str, trace: list):
 
 ##################################################################################
 
-from src.auxiliary.paths import PATH_DATA_COMPRESSED
+from knockout.auxiliary.paths import PATH_DATA_COMPRESSED
 outfilepath_morphologies = PATH_DATA_COMPRESSED / "celex_morphology_nl.txt"
 SEP = "\t"
 def morphologyGenerator(verbose=True):

@@ -3,8 +3,8 @@ from collections import Counter
 from typing import Iterable, TextIO
 from tqdm.auto import tqdm
 
-from src.auxiliary.paths import *
-from src.visualisation.timing import timeit
+from knockout.auxiliary.paths import *
+from knockout.visualisation.timing import timeit
 
 
 def iterableToWordsFile(line_iterable: Iterable[str], output_file: TextIO):

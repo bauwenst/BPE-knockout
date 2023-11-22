@@ -53,7 +53,7 @@ DEFAULT_GRIDWIDTH = 0.5
 LEGEND_TITLE_CLASS = "class"
 
 # Path setup (if you ported this file from somewhere, you probably have to change the below import)
-from src.auxiliary.paths import PATH_DATA_OUT
+from knockout.auxiliary.paths import PATH_DATA_OUT
 PATH_FIGURES = PATH_DATA_OUT / "figures"
 PATH_FIGURES.mkdir(exist_ok=True)
 PATH_RAW = PATH_FIGURES / "raw"
