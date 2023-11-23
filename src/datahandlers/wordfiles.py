@@ -1,13 +1,18 @@
-import re
+from typing import Iterable, TextIO, List
 from collections import Counter, defaultdict
-from typing import Iterable, TextIO
+
+import re
+import time
+import gc
 from tqdm.auto import tqdm
 
 from src.auxiliary.paths import *
 from src.visualisation.timing import timeit
+from src.visualisation.printing import wprint, intsep
 
 
-def iterableToWordsFile(line_iterable: Iterable[str], output_file: Path):
+def iterableToWordsFile(line_iterable: Iterable[str], output_file: Path,
+                        cache_every: int=1_000_000, progress_bar_total: int=None):
     """
     Compresses the given string iterable to an output file, with the result
     containing every unique word exactly once in the format
@@ -18,15 +23,32 @@ def iterableToWordsFile(line_iterable: Iterable[str], output_file: Path):
 
     Simplified from get_vocab() at https://github.com/rsennrich/subword-nmt/blob/master/subword_nmt/learn_bpe.py.
     """
-    word_types = Counter()
+    CACHE_FOLDER = PATH_DATA_TEMP / time.strftime("wordcounts-%Y%m%d-%H%M%S")
+    CACHE_FOLDER.mkdir(exist_ok=False)
 
-    for line in line_iterable:  # TODO: Add a progress bar and cache every so-often...
-        for word in line.strip('\r\n ').split(' '):
-            word_types[word] += 1  # Note that the empty word is also counted with this; we can't have an "if word" check because branching is slow!
+    total_counter = Counter()
+    caches = []
+    for idx,line in tqdm(enumerate(line_iterable), total=progress_bar_total, smoothing=0.1):
+        # Counting
+        for word in line.split():  # No strip needed: note that .strip() without arguments will delete ALL WHITESPACE (i.e. any sequence length of space, tab, newline, carriage...). Those newlines would break word files.
+            total_counter[word] += 1
 
-    with open(output_file, "w", encoding="utf-8") as handle:
-        for key, f in sorted(word_types.items(), key=lambda x: x[1], reverse=True):
-            handle.write(key + " " + str(f) + "\n")
+        # Caching
+        if (idx+1) % cache_every == 0:
+            cache_path = CACHE_FOLDER / f"{len(caches)+1}.txt"
+            saveWordsFile(total_counter, cache_path)
+            caches.append(cache_path)
+            total_counter = Counter()
+
+    # For safety, cache the current incomplete counter
+    if total_counter:
+        cache_path = CACHE_FOLDER / f"{len(caches) + 1}.txt"
+        saveWordsFile(total_counter, cache_path)
+        caches.append(cache_path)
+
+    # Merge and delete caches
+    mergeWordFiles(caches, output_file, delete_afterwards=True, trim_hapax_every=5)
+    CACHE_FOLDER.rmdir()
 
     return output_file
 
@@ -67,15 +89,117 @@ def iterateWordsFile(open_file_handle: TextIO, sep=" "):
     """
     for stripped_line in iterateTxt(open_file_handle):
         parts = stripped_line.split(sep=sep)
-        yield sep.join(parts[0:-1]), parts[-1]
+        if len(parts) > 1:
+            yield sep.join(parts[0:-1]), parts[-1]
 
 
-def wordsFileToDict(words_path: Path, sep=" ") -> Counter:
+def saveWordsFile(counts: Counter, out_path: Path):
+    with open(out_path, "w", encoding="utf-8") as handle:
+        for word, count in sorted(counts.items(), key=lambda x: x[1], reverse=True):
+            handle.write(word + " " + str(count) + "\n")
+
+
+def wordsFileToDict(words_path: Path) -> Counter:
     c = Counter()
     with open(words_path, "r", encoding="utf-8") as handle:
-        for word, count in iterateWordsFile(handle, sep):
-            c[word] = int(count)
+        for word, count in iterateWordsFile(handle, " "):
+            if word not in c:  # Necessary (but not sufficient) to fix a bug where whitespace was left inside words. This condition catches that newlines were added to words, causing something like "a\nb 69" to show up as an ignored line "a" and a line "b 69" which would overwrite any count for b earlier in the file.
+                c[word] = int(count)
     return c
+
+
+def mergeWordFiles(word_files: List[Path], out_file: Path, delete_afterwards: bool=False,
+                   trim_hapax_every: int=100000):
+    """
+    :param trim_hapax_every: To mitigate against very large tails, trim words of count 1 (hapax legomena)
+                             every this many files.
+    TODO: You could implement an extra "safety valve" that detects when the dictionary goes over a certain size and
+          then starts trimming off the tail (count = 1, then 2, then 3, ...) until the size is under the threshold again.
+    """
+    # Collect
+    total_counter = Counter()
+    for idx, word_file in enumerate(word_files):
+        wprint(f"\nReading word file {word_file.name}...")
+        new_counts = wordsFileToDict(word_file)
+
+        wprint("Adding counts...")
+        for word, count in tqdm(new_counts.items(), total=len(new_counts)):
+            total_counter[word] += count
+
+        wprint("Size of total counter:", intsep(len(total_counter)))
+        if (idx+1) % trim_hapax_every == 0:
+            print("\tTrimming...")
+            for word in list(total_counter.keys()):  # A list of all keys is better than a copy of the dictionary.
+                if total_counter[word] == 1:
+                    del total_counter[word]  # I've read that .pop() doesn't allow garbage collection the same way.
+            gc.collect()  # We can't rely on the interpreter to decide when to garbage-collect those del'd items.
+            print("\tAfter trimming hapax legomena:", intsep(len(total_counter)))
+
+    # Save
+    saveWordsFile(total_counter, out_file)
+
+    # Delete
+    if delete_afterwards:
+        for word_file in word_files:
+            word_file.unlink()
+
+
+def fixWhiteSpace(words_path: Path, overwrite=True):
+    """
+    Due to a bug (that has now been fixed), the corpus was being split on
+    only spaces rather than tabs, newlines, ... and hence the latter all
+    ended up in words. The newlines caused the most havoc, but the others
+    are also wrong.
+
+    For example: the string
+    '''
+    Hello world, how
+    are you doing? Like, how
+    are you?
+    '''
+    supposedly contains the word "how\nare" twice, which then shows up
+    in the word file as
+    '''
+    how
+    are 2
+    '''
+    which then overwrote the old count for "are" and also lost 2 "how"s.
+
+    This function overwrites a word file with correct counts. Note that a space
+    can never be present in a word, which means that we can differentiate between
+    numbers that are words and numbers that are counts:
+    '''
+    efg 1
+    abc 69420
+    abd 1
+    '''
+    could come from a word "efg" and a word "abc\t69420\nabd". There's no space in front of the 69420
+    so it isn't a count written by the word file.
+
+    You can't solve it by only allowing counts lower than the previous count, because
+    then the 0 in the following example will invalidate all words below it:
+    '''
+    Trendprodukte	cbd 1
+    schmerzmittel	0
+    Essential 1
+    '''
+    Note that the word here is "schmerzmittel\t0\nEssential".
+    """
+    stack = []
+    actual_counts = Counter()
+    with open(words_path, "r", encoding="utf-8") as handle:
+        for line in iterateTxt(handle):
+            parts = line.split(" ")  # Should be 1 or 2 parts since space is only written by the saver.
+            stack.extend(parts[0].split())
+            if len(parts) > 1:  # The last part is a number.
+                assert len(parts) == 2
+                assert parts[-1].isnumeric()  # Assign this count to everything in the stack.
+                count = int(parts[-1])
+                for word in stack:
+                    actual_counts[word] += count
+                stack = []
+
+    saveWordsFile(actual_counts, words_path.with_stem(words_path.stem + "_fixed") if not overwrite else words_path)
 
 
 def trimWordFile(words_path: Path, minimum: int):
@@ -206,3 +330,15 @@ def generatePathForCleanedFile(path: Path):
 
 def generatePathForTrimmedFile(path: Path):
     return path.with_stem(path.stem + "_trimmed")
+
+
+if __name__ == "__main__":
+    output_file = PATH_DATA_COMPRESSED / "oscar-de-rawcounts.txt"
+    # CACHE_FOLDER = PATH_DATA_TEMP / "wordcounts-20231122-042136"
+    # caches = [CACHE_FOLDER / f"{i+1}.txt" for i in range(30)]
+    #
+    # for cache in caches:
+    #     fixWhiteSpace(cache)
+    #
+    # mergeWordFiles(caches, output_file, delete_afterwards=False, trim_hapax_every=5)
+    
