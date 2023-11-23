@@ -895,7 +895,7 @@ class Table(Diagram):
     class Column:
         name: str
         subcolumns: List["Table.Column"]
-        rows: Dict[str,float]
+        rows: Dict[str,float]  # Should be mutually exclusive with subcolumns; you either have subcolumns or you have row data.
 
         @staticmethod
         def fromDict(asdict: dict):  # inverse of dataclasses.asdict
@@ -903,17 +903,44 @@ class Table(Diagram):
             assert isinstance(asdict["subcolumns"], list)
             return Table.Column(asdict["name"], [Table.Column.fromDict(d) for d in asdict["subcolumns"]], asdict["rows"])
 
+        def isLeaf(self):
+            return len(self.subcolumns) == 0
+
+        def width(self) -> int:
+            if self.isLeaf():
+                return 1
+            else:
+                return sum([col.width() for col in self.subcolumns])
+
+        def height(self) -> int:
+            if self.isLeaf():
+                return 1
+            else:
+                return 1 + max([col.height() for col in self.subcolumns])
+
+        def getLeaves(self) -> List["Table.Column"]:
+            if self.isLeaf():
+                return [self]
+            else:
+                leaves = []
+                for col in self.subcolumns:
+                    leaves.extend(col.getLeaves())
+                return leaves
+
     def set(self, value: float, row: str, column_path: List[str]):
         """
         You could choose to either store all columns for all rows, or store all rows for all columns.
         The former is more intuitive when indexing (you start with the row), but actually, it makes way more sense to
         only store the structure of the table once.
         """
+        if not column_path:
+            raise ValueError("Column path needs at least one column.")
+
         if not self.data:
             self.data["top-column"] = Table.Column("", [], dict())
             self.data["unique-rows"] = []
 
-        current_col: Table.Column = self.data["top-column"]
+        current_col: Table.Column = self.getAsColumn()
         for col in column_path:
             current_list = current_col.subcolumns
             for i in range(len(current_list)):
@@ -928,9 +955,12 @@ class Table(Diagram):
         if row not in self.data["unique-rows"]:
             self.data["unique-rows"].append(row)
 
+    def getAsColumn(self) -> "Table.Column":
+        return self.data["top-column"]
+
     def _save(self) -> dict:
         return {
-            "top-column": dataclasses.asdict(self.data["top-column"]),
+            "top-column": dataclasses.asdict(self.getAsColumn()),
             "unique-rows": self.data["unique-rows"]
         }
 
@@ -940,7 +970,115 @@ class Table(Diagram):
             "unique-rows": saved_data["unique-rows"]
         }
 
-    # TODO: Needs a .commit method obviously. Probably a good idea to commit to .tex.
+    def commit(self, cell_prefix: str="", cell_suffix: str="",
+               column_alignment="c", rowname_alignment="l",
+               borders_between_columns_of_level: List[int]=None):
+        with ProtectedData(self):
+            lines = []
+
+            # Make first line and find header depth
+            first_line = r"\begin{tabular}{" + rowname_alignment + "|"
+            header_height = 0
+            table = self.getAsColumn()
+            for ancestor in table.subcolumns:
+                width = ancestor.width()
+                first_line += column_alignment*width  # No default borders. Everything is regulated by multicolumn below.
+                header_height = max(header_height, ancestor.height())
+            first_line += "}"
+            lines.append(first_line)
+
+            # Check validity of border settings
+            if borders_between_columns_of_level is None:
+                borders_between_columns_of_level = []
+            elif len(borders_between_columns_of_level) > 0 and (min(borders_between_columns_of_level) < 0 or max(borders_between_columns_of_level) >= header_height):
+                raise ValueError(f"This table has {header_height} header levels, with identifiers 0 to {header_height-1}. You gave {borders_between_columns_of_level}.")
+
+            # Determine prefix for header lines
+            header_prefix = max([len(rowname) for rowname in self.data["unique-rows"]])
+
+            # Get all header lines and where the borders are at each header level
+            level_has_edge_after_ncols = []
+            frontier = table.subcolumns
+            for header_line_idx in range(header_height):  # Vertical iteration
+                line = "    " + " "*header_prefix
+                level_has_edge_after_ncols.append([0])
+                cumulative_width = 0
+                new_frontier = []
+                for frontier_idx, col in enumerate(frontier):  # Horizontal iteration
+                    line += " & "
+                    width = col.width()
+                    cumulative_width += width
+                    if col.height() >= header_height-header_line_idx:  # This is where you enter all columns on the same header level. Very useful.
+                        new_frontier.extend(col.subcolumns)
+
+                        # Is this level one with borders, or does it have a border for a previous level, or neither?
+                        right_border = False
+                        left_border  = False
+                        if header_line_idx in borders_between_columns_of_level:
+                            left_border  = frontier_idx != 0 and level_has_edge_after_ncols[-1][-1] != 0  # No left border at the start and also not if a right border was just placed in that position.
+                            right_border = frontier_idx != len(frontier)-1  # No right border at the end of the table.
+                        elif frontier_idx != len(frontier)-1:  # In this case, you may still inherit a border.
+                            for level in borders_between_columns_of_level:
+                                if level >= header_line_idx:  # Only take into account levels strictly smaller than this one
+                                    continue
+                                if cumulative_width in level_has_edge_after_ncols[level]:
+                                    right_border = True
+                                    break
+
+                        # Render content
+                        if width == 1 and not right_border:  # Simple
+                            line += col.name
+                        else:  # Multicolumn width and/or border
+                            line += r"\multicolumn{" + str(width) + "}{" + "|"*left_border + column_alignment + "|"*right_border + "}{" + col.name + "}"
+
+                        # Border math
+                        if level_has_edge_after_ncols[-1][-1] != 0:
+                            level_has_edge_after_ncols[-1].append(width)
+                        else:
+                            level_has_edge_after_ncols[-1][-1] = width
+                        level_has_edge_after_ncols[-1].append(0)
+                    else:  # Column starts lower in the table. Re-schedule it for rendering later.
+                        new_frontier.append(col)
+
+                        line += " & "*(width-1)
+                        level_has_edge_after_ncols[-1][-1] += width
+                line += r" \\"
+                lines.append(line)
+
+                level_has_edge_after_ncols[-1] = level_has_edge_after_ncols[-1][:-2]  # Trim off last 0 and also last column since we don't want the edge of the table to have a border.
+                level_has_edge_after_ncols[-1] = [sum(level_has_edge_after_ncols[-1][:i+1]) for i in range(len(level_has_edge_after_ncols[-1]))]  # cumsum
+                frontier = new_frontier
+            lines[-1] += r"\hline"
+
+            # Make all body rows
+            for rowname in self.data["unique-rows"]:
+                line = "    " + rowname
+                for leaf_id, leaf in enumerate(table.getLeaves()):
+                    # Is there a border here?
+                    right_border = False
+                    for level in borders_between_columns_of_level:
+                        if leaf_id+1 in level_has_edge_after_ncols[level]:
+                            right_border = True
+                            break
+
+                    # Construct cell
+                    cell_content = cell_prefix + str(leaf.rows.get(rowname, "")) + cell_suffix
+                    if not right_border:
+                        line += " & " + cell_content
+                    else:
+                        line += " & " + r"\multicolumn{1}{" + column_alignment + "|}{" + cell_content + "}"
+                line += r" \\"
+                lines.append(line)
+            lines[-1] = lines[-1][:-2]  # Strip off the \\ at the end.
+            lines.append(r"\end{tabular}")
+
+            # Write out
+            # print(f"Writing .tex {self.name} ...")
+            # with open(PathHandling.getSafePath(PATH_FIGURES, self.name, ".tex"), "w") as file:
+            #     file.write("\n".join(lines))
+
+            from src.visualisation.printing import lprint
+            lprint(lines)
 
 
 def arrow(ax: plt.Axes, start_point, end_point):  # FIXME: I want TikZ's stealth arrows, but this only seems possible in Matplotlib's legacy .arrow() interface (which doesn't keep its head shape properly): https://stackoverflow.com/a/43379608/9352077
@@ -990,3 +1128,33 @@ def latexTable(name, TP, FN, FP, TN, F1frac, MSEfrac, MSE_label: str = "MSE"):
         r"\end{tabular}"
 
     return s
+
+
+#############
+### TESTS ###
+#############
+def example_table():
+    table = Table("test", caching=CacheMode.NONE)
+    table.set(3.14, "BPE", ["sizes", "$|V|$"])
+    table.set(15, "BPE", ["sizes", "$|M|$"])
+
+    table.set(92, "BPE", ["morphemes", "unweighted", "Pr"])
+    table.set(6.5, "BPE", ["morphemes", "unweighted", "Re"])
+    table.set(35, "BPE", ["morphemes", "unweighted", "$F_1$"])
+    table.set(8.9, "BPE", ["morphemes", "weighted", "Pr"])
+    table.set(79, "BPE", ["morphemes", "weighted", "Re"])
+    table.set(3.2, "BPE", ["morphemes", "weighted", "$F_1$"])
+
+    table.set(3.8, "BPE", ["inbetween", "left"])
+    table.set(46, "BPE", ["inbetween", "right"])
+
+    table.set(26, "BPE", ["lexemes", "unweighted", "Pr"])
+    table.set(4.3, "BPE", ["lexemes", "unweighted", "Re"])
+    table.set(38, "BPE", ["lexemes", "unweighted", "$F_1$"])
+    table.set(3.2, "BPE", ["lexemes", "weighted", "Pr"])
+    table.set(79, "BPE", ["lexemes", "weighted", "Re"])
+    table.set(5.0, "BPE", ["lexemes", "weighted", "$F_1$"])
+
+    table.set("wow!", "ULM", ["morphemes", "weighted", "Re"])
+
+    table.commit(borders_between_columns_of_level=[0, 1])

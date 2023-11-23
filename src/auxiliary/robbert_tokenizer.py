@@ -1,16 +1,29 @@
-from src.auxiliary.paths import PATH_DATA_TEMP
+from typing import List
+
 import json
 import requests
 from transformers import AutoTokenizer, RobertaTokenizerFast
 robbert_tokenizer: RobertaTokenizerFast = AutoTokenizer.from_pretrained("pdelobelle/robbert-v2-dutch-base")
 
+from src.auxiliary.paths import PATH_DATA_TEMP
 
-def tokenizeAsWord(word: str, tokenizer=robbert_tokenizer) -> list:
+
+def tokenizeAsWord(word: str, tokenizer=robbert_tokenizer) -> List[str]:
     """
-    Due to the way RobBERT's tokenizer works, you need to add a space
-    up front for it to add a start-of-word symbol before tokenising.
+    Does two things that are commonly needed alongside tokenisation:
+     - Adds a space in front of the input. Many tokenisers need this before they can add their start-of-word symbol.
+     - Post-processes the tokens to be proper strings. Byte-level tokenisers in particular output byte-representing
+       characters (i.e. single characters that have no inherent meaning except that they represent bytes) by default,
+       for which a conversion method exists.
+
+    NOTE: The result will likely have a first token that has a space up front. This is because apart from converting
+    byte-level storage artefacts back to their intended characters, HuggingFace also replaces signalling characters
+    like the start-of-word G-dot.
+
+    TODO: Kinda wondering what happens when you have an EoW. Do you need to add a space after the word too, then?
     """
-    return tokenizer.tokenize(" " + word)
+    return [tokenizer.convert_tokens_to_string([token])
+            for token in tokenizer.tokenize(" " + word)]
 
 
 def fetchAndCacheDict(url: str, stem: str):

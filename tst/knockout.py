@@ -3,34 +3,47 @@ TODO:
     - Learning blame with weighted lemmata (right now, each lemma in e-Lex has equal contribution to the blame ratio).
 """
 import itertools
+import re
 
 from src.visualisation.graphing import *
 from src.knockout.knockout import *
 from src.auxiliary.measuring import *
-from src.auxiliary.robbert_tokenizer import tokenizeAsWord
-from src.auxiliary.config import Pℛ𝒪𝒥ℰ𝒞𝒯
+from src.auxiliary.robbert_tokenizer import tokenizeAsWord, robbert_tokenizer, getMergeList_RobBERT
+from src.auxiliary.config import Pℛ𝒪𝒥ℰ𝒞𝒯, morphologyGenerator
+from src.datahandlers.wordfiles import ACCENTS
 
 TRIVIAL_THRESHOLD = 4
-untrained_bte = BTE(BteInitConfig())
+untrained_bte = BTE(BteInitConfig(), quiet=True)
 
 
-def assert_equal_applyBPE():
+def assert_tokenisers_equal(tokeniser1=robbert_tokenizer, tokeniser2=untrained_bte):
     """
     Test whether e-Lex is segmented the same way by BTE without pruning and RobBERT.
     Without pruning, BTE and applyBPE should be identical.
     """
     print("Starting assertion...")
-
+    skipped = 0
+    total   = 0
+    errors  = 0
     for obj in morphologyGenerator():
+        total += 1
         lemma = obj.lemma()
 
-        tokens1 = tokenizeAsWord(lemma, tokenizer=robbert_tokenizer)
-        tokens2 = tokenizeAsWord(lemma, tokenizer=untrained_bte)
-        # print(tokens1, "=?=", tokens2)
-        if any(["Ã" in t or "Â" in t or "'" in t
-                for t in tokens1]):  # Weird Latin-1 or pretokeniser stuff I don't want to deal with. As long as 99.9% of all words are segmented the same, it's fine by me.
-            continue
-        assert tokens1 == tokens2
+        tokens1 = tokenizeAsWord(lemma, tokenizer=tokeniser1)
+        tokens2 = tokenizeAsWord(lemma, tokenizer=tokeniser2)
+        # if any(["Ã" in t or "Â" in t or "'" in t
+        #         for t in robbert_tokenizer.tokenize(lemma)]):  # Weird Latin-1 or pretokeniser stuff I don't want to deal with. As long as 99.9% of all words are segmented the same, it's fine by me.
+        #     # print("Unicode might cause assertion failure:", lemma)
+        #     skipped += 1
+        #     continue
+        errors += (tokens1 != tokens2)
+        if tokens1 != tokens2 and not ACCENTS.search(lemma):
+            print(tokens1, "=/=", tokens2)
+
+    print(f"Skipped {round(100*skipped/total, 2)}% of e-Lex lemmata ({skipped} of {total}).")
+    # Dutch: 814 of 96540 (0.84%, i.e. 99.16% safe)
+    # German: 0 of 47583 (0%), probably because they removed those.
+    print("Differences:", errors, "of", total)
 
 
 def ex():
@@ -88,7 +101,7 @@ def test_trivial_knockout():
         # print(trivial_merges)
 
         for merge in tqdm(solid_merges, desc="PRUNING GRAPH"):
-            bte.merge_graph.knockout("".join(merge.parts))
+            bte.merge_graph.knockout(merge.childType())
         bte.syncWithGraph()
 
         tkzs.append(bte)
@@ -122,7 +135,7 @@ def time_iterators():
 
     # Time to generate objects + tokenise fast: 21s - 13s = 8s
     for morpho in morphologyGenerator():
-        " ".join(tokenizeAsWord(morpho.lemma(), tokenizer=robbert_tokenizer))[1:].strip()
+        " ".join(tokenizeAsWord(morpho.lemma(), tokenizer=robbert_tokenizer)).strip()
 
     # Time to generate objects + get morph split: 24s - 13s = 11s
     for morpho in morphologyGenerator():
@@ -130,12 +143,12 @@ def time_iterators():
 
     # Time to generate objects + tokenise slow: 1m35s - 13s = 1m22s  (more than 10x difference with fast tokenizer)
     for morpho in morphologyGenerator():
-        " ".join(tokenizeAsWord(morpho.lemma(), tokenizer=bte_tokenizer))[1:].strip()
+        " ".join(tokenizeAsWord(morpho.lemma(), tokenizer=bte_tokenizer)).strip()
 
     # Time to generate objects + get morph split + tokenise fast: 34s
     for morpho in morphologyGenerator():
         morpho.morphSplit()
-        " ".join(tokenizeAsWord(morpho.lemma()))[1:].strip()
+        " ".join(tokenizeAsWord(morpho.lemma())).strip()
 
 
 ##############################################################################
@@ -214,12 +227,39 @@ def main_vocabstats():
                             y_tickspacing=1000, do_kde=False, center_ticks=True, alpha=0.5, x_lims=(0, 15))
 
 
-def main_intrinsic_evaluation():
+def addEvaluationToTable(table: Table, results: List[TokeniserEvaluation]):
+    for tokeniser in results:
+        row = tokeniser.name
+        table.set(tokeniser.vocabsize, row, ["|V|"])
+
+        pr, re, f1 = tokeniser.cm_morph.compute()
+        table.set(pr, row, ["morphemic", "unweighted", "Pr"])
+        table.set(re, row, ["morphemic", "unweighted", "Re"])
+        table.set(f1, row, ["morphemic", "unweighted", "$F_1$"])
+
+        if tokeniser.cm_morph_w:
+            pr, re, f1 = tokeniser.cm_morph_w.compute()
+            table.set(pr, row, ["morphemic", "weighted", "Pr"])
+            table.set(re, row, ["morphemic", "weighted", "Re"])
+            table.set(f1, row, ["morphemic", "weighted", "$F_1$"])
+
+        pr, re, f1 = tokeniser.cm_lex.compute()
+        table.set(pr, row, ["lexemic", "unweighted", "Pr"])
+        table.set(re, row, ["lexemic", "unweighted", "Re"])
+        table.set(f1, row, ["lexemic", "unweighted", "$F_1$"])
+
+        if tokeniser.cm_lex_w:
+            pr, re, f1 = tokeniser.cm_lex_w.compute()
+            table.set(pr, row, ["lexemic", "weighted", "Pr"])
+            table.set(re, row, ["lexemic", "weighted", "Re"])
+            table.set(f1, row, ["lexemic", "weighted", "$F_1$"])
+
+
+def main_intrinsicAll():
     """
-    Test all combinations of annealing and knockout
-    on intrinsic metrics (morphological Pr-Re-F1).
+    Test all combinations of annealing and knockout on intrinsic metrics (morphological Pr-Re-F1).
     """
-    table = Table("bte-modes-f1", caching=CacheMode.IF_MISSING)
+    table = Table("bte-intrinsic-all", caching=CacheMode.IF_MISSING)
     if table.needs_computation:
         # Construct possible tokenisers
         modesets = list(itertools.product((RefMode.NONE,RefMode.MORPHEMIC,RefMode.LEXEMIC),
@@ -239,51 +279,57 @@ def main_intrinsic_evaluation():
         print("Expected wait time:", 2*total_stages, "minutes.")
         tkzrs = [BTE(BteInitConfig(knockout=m1, anneal=m2, do_swap_stages=m3)) for m1, m2, m3 in fullsets]
         results = test_tokenizers_batch(tkzrs, reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
+        addEvaluationToTable(table, results)
 
-        # Format results
-        for tokeniser in results:
-            row = tokeniser.name
-            table.set(tokeniser.vocabsize, row, ["|V|"])
-
-            pr, re, f1 = tokeniser.cm_morph.compute()
-            table.set(pr, row, ["morphemic", "unweighted", "Pr"])
-            table.set(re, row, ["morphemic", "unweighted", "Re"])
-            table.set(f1, row, ["morphemic", "unweighted", "$F_1$"])
-
-            pr, re, f1 = tokeniser.cm_morph_w.compute()
-            table.set(pr, row, ["morphemic", "weighted", "Pr"])
-            table.set(re, row, ["morphemic", "weighted", "Re"])
-            table.set(f1, row, ["morphemic", "weighted", "$F_1$"])
-
-            pr, re, f1 = tokeniser.cm_lex.compute()
-            table.set(pr, row, ["lexemic", "unweighted", "Pr"])
-            table.set(re, row, ["lexemic", "unweighted", "Re"])
-            table.set(f1, row, ["lexemic", "unweighted", "$F_1$"])
-
-            pr, re, f1 = tokeniser.cm_lex_w.compute()
-            table.set(pr, row, ["lexemic", "weighted", "Pr"])
-            table.set(re, row, ["lexemic", "weighted", "Re"])
-            table.set(f1, row, ["lexemic", "weighted", "$F_1$"])
-
-        # TODO: Instead of saving, you should commit the table (and do that outside the 'if').
-        table.save()
+    table.commit()
 
 
-def main_partial_evaluation():
+def main_intrinsicMultilingual():
+    """
+    Only tests BPE without knockout and BPE with morphemic knockout,
+    but does this in two languages.
+    """
+    old_config = Pℛ𝒪𝒥ℰ𝒞𝒯.config
+    ###
+
+    from src.auxiliary.config import setupDutch, setupGerman
+
+    table = Table("bte-intrinsic-dutch-german")
+    if table.needs_computation:
+        for config in [setupDutch(), setupGerman()]:
+            Pℛ𝒪𝒥ℰ𝒞𝒯.config = config
+            bte          = BTE(BteInitConfig())  # Changes depending on the language.
+            bte_knockout = BTE(BteInitConfig(knockout=RefMode.MORPHEMIC))
+            results = test_tokenizers_batch([bte, bte_knockout], reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
+            addEvaluationToTable(table, results)
+
+    table.commit()
+
+    ###
+    Pℛ𝒪𝒥ℰ𝒞𝒯.config = old_config
+
+
+def main_intrinsicPartial():
     """
     Intrinsic evaluation, except you use holdout and/or trivial merge exclusion to get a more nuanced view of the
     metrics.
     """
-    # Trivials
-    bte_only_nontrivial_M = BTE(BteInitConfig(knockout=RefMode.MORPHEMIC, keep_long_merges=True))
-    bte_only_nontrivial_L = BTE(BteInitConfig(knockout=RefMode.LEXEMIC,   keep_long_merges=True))
-    test_tokenizers_batch([bte_only_nontrivial_M, bte_only_nontrivial_L], reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
+    table = Table("bte-intrinsic-partial")
+    if table.needs_computation:
+        # Trivials
+        bte_only_nontrivial_M = BTE(BteInitConfig(knockout=RefMode.MORPHEMIC, keep_long_merges=True))
+        bte_only_nontrivial_L = BTE(BteInitConfig(knockout=RefMode.LEXEMIC,   keep_long_merges=True))
+        results = test_tokenizers_batch([bte_only_nontrivial_M, bte_only_nontrivial_L], reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
+        addEvaluationToTable(table, results)
 
-    # Holdout
-    holdout = Holdout(80)
-    bte_holdout_M = BTE(BteInitConfig(knockout=RefMode.MORPHEMIC, keep_long_merges=False), holdout=holdout)
-    bte_holdout_L = BTE(BteInitConfig(knockout=RefMode.LEXEMIC,   keep_long_merges=False), holdout=holdout)
-    test_tokenizers_batch([bte_holdout_M, bte_holdout_L], reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=holdout)
+        # Holdout
+        holdout = Holdout(0.8)
+        bte_holdout_M = BTE(BteInitConfig(knockout=RefMode.MORPHEMIC, keep_long_merges=False), holdout=holdout)
+        bte_holdout_L = BTE(BteInitConfig(knockout=RefMode.LEXEMIC,   keep_long_merges=False), holdout=holdout)
+        results = test_tokenizers_batch([bte_holdout_M, bte_holdout_L], reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=holdout)
+        addEvaluationToTable(table, results)
+
+    table.commit()
 
 
 def main_deleteRandomMerges():
@@ -312,7 +358,7 @@ def main_deleteRandomMerges():
                               merge_indices))  # The list() is important here! You must do all your array accesses BEFORE altering the array!
             # for merge_idx in tqdm(merge_indices, desc="RANDOMLY PRUNING GRAPH"):
             for merge in merges:
-                bte.merge_graph.knockout("".join(merge.parts))
+                bte.merge_graph.knockout(merge.childType())
             bte.syncWithGraph()
 
             # Evaluate
@@ -378,6 +424,138 @@ def main_deleteRandomMerges():
                  logx=True, y_lims=(0.0, 1.01), y_tickspacing=0.1)
 
 
+def main_deleteLastMerges():
+    """
+    Same test except you just trim the merge list.
+    You can re-use the same tokeniser for this.
+    """
+    PERCENTAGES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 20, 30, 40, 50]
+
+    graph = LineGraph(name="last-type-deletions", caching=CacheMode.IF_MISSING)
+    if graph.needs_computation:
+        bte = BTE(BteInitConfig(), quiet=True, autorun_modes=False)
+        initial_merges = len(bte.merge_graph.merges)
+        results = []
+
+        for p in PERCENTAGES:
+            goal_merges    = int(initial_merges * (100-p)/100)
+            current_merges = len(bte.merge_graph.merges)
+            to_knock_out   = current_merges - goal_merges
+            print(f"\tDeleting {to_knock_out} merges to get to {p}% deletion...")
+
+            # Construct tokeniser
+            if to_knock_out != 0:
+                merges = bte.merge_graph.merges[-to_knock_out:]  # "Select the last {size} merges"
+                for merge in tqdm(merges, total=len(merges)):
+                    bte.merge_graph.knockout(merge.childType())
+                bte.syncWithGraph()
+
+            # Evaluate
+            cm, cm_w = morphologyVersusTokenisation(MorphSplit(), bte, name=bte.name + f"_minus_{p}%", quiet=False)
+            pr, re, f1 = cm.compute()
+
+            results.append((pr,re,f1))
+
+        for p, (pr,re,f1) in zip(PERCENTAGES, results):
+            graph.add("Pr",    p, pr)
+            graph.add("Re",    p, re)
+            graph.add("$F_1$", p, f1)
+
+    graph.commit(x_label="Merges deleted [\\%]", y_label="Correspondence of split positions",
+                 logx=True, y_lims=(0.0, 1.01), y_tickspacing=0.1)
+
+
+def main_deleteLastLeaves():
+    """
+    Same test except you knock out from the back of the merge list BUT ONLY if they are leaves. You keep deleting until
+    you reach p% of the merge list.
+
+    Note that the test for being a leaf is done BEFORE any of them are knocked out. This is to
+    ensure that you don't just end up deleting the last p% anyway.
+    """
+    # Part 1: Percentage leaves
+    PERCENTAGES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+                   20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100]
+
+    g1 = LineGraph("leaf-percentages", caching=CacheMode.IF_MISSING)
+    if g1.needs_computation:
+        bte = BTE(BteInitConfig(), quiet=True)
+        amount_of_merges = len(bte.merge_graph.merges)
+
+        for p in PERCENTAGES:
+            selection_size = int(amount_of_merges * p/100)
+
+            head_leaves = 0
+            tail_leaves = 0
+            if p == 0:
+                head_percentage = 0
+                tail_percentage = 100
+            else:
+                head_merges = bte.merge_graph.merges[:selection_size]
+                tail_merges = bte.merge_graph.merges[-selection_size:]
+                for m in head_merges:
+                    if not bte.merge_graph.merges_with[m.childType()]:
+                        head_leaves += 1
+                for m in tail_merges:
+                    if not bte.merge_graph.merges_with[m.childType()]:
+                        tail_leaves += 1
+
+                head_percentage = 100*head_leaves/selection_size
+                tail_percentage = 100*tail_leaves/selection_size
+
+            print(f"Amount of merges in the last {selection_size} ({p}%) that are leaves:")
+            print(f"\tFrom head: {head_leaves} ({round(head_percentage, 2)}%)")
+            print(f"\tFrom tail: {tail_leaves} ({round(tail_percentage, 2)}%)")
+
+            g1.add("from the start", p, head_percentage)
+            g1.add("from the end",   p, tail_percentage)
+
+    g1.commit(x_label="Fraction of total merges [\\%]", y_label="Fraction that are leaves [\\%]",
+              y_lims=(0, 101), x_tickspacing=10, y_tickspacing=10)
+
+    # Part 2: Performance
+    PERCENTAGES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 20, 30, 40, 50]
+
+    g2 = LineGraph("last-leaf-deletions")
+    results = []
+    if g2.needs_computation:
+        for p in PERCENTAGES:
+            # Re-initialise a new BTE each time because I'm scared of re-using one (leaf status changes with knockout)
+            bte = BTE(BteInitConfig(), quiet=True)
+            amount_of_merges = len(bte.merge_graph.merges)
+            to_knock_out = int(amount_of_merges * p/100)
+            print(f"\tDeleting {to_knock_out} merges to get to {p}% deletion...")
+
+            # Construct tokeniser
+            merges = []
+            i = amount_of_merges-1
+            while len(merges) < to_knock_out and i >= 0:
+                m = bte.merge_graph.merges[i]
+                if not bte.merge_graph.merges_with[m.childType()]:
+                    merges.append(m)
+                i -= 1
+            if i < 0:
+                print(f"Warning: less than {p}% of the graph are leaves, so I couldn't delete that amount. Deleted all current leaves.")
+
+            for merge in tqdm(merges, total=len(merges)):
+                bte.merge_graph.knockout(merge.childType())
+            bte.syncWithGraph()
+
+            # Evaluate
+            cm, cm_w = morphologyVersusTokenisation(MorphSplit(), bte, name=bte.name + f"_minus_{p}%", quiet=False)
+            pr, re, f1 = cm.compute()
+
+            results.append((pr,re,f1))
+
+        for p, (pr,re,f1) in zip(PERCENTAGES, results):
+            g2.add("Pr",    p, pr)
+            g2.add("Re",    p, re)
+            g2.add("$F_1$", p, f1)
+
+    g2.commit(x_label="Merges deleted [\\%]", y_label="Correspondence of split positions",
+                 logx=True, y_lims=(0.0, 1.01), y_tickspacing=0.1)
+
+
 def sep():
     print("="*75)
 
@@ -399,6 +577,8 @@ if __name__ == "__main__":
     # sep()
     # main_partial_evaluation()
     # sep()
-    main_deleteRandomMerges()
-
+    # main_deleteRandomMerges()
+    # sep()
+    # main_deleteLastMerges()
     # time_iterators()
+    main_deleteLastLeaves()

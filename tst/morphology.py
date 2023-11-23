@@ -118,6 +118,29 @@ def test_wtf():
     print("\t", o.morphSplit())
 
 
+def test_german():
+    examples = [
+        ("Abbaugerechtigkeit", "(((ab)[V|.V],(bau)[V])[V],(((ge)[A|.N],((recht)[A])[N])[A],(ig)[N|A.x],(keit)[N|Ax.])[N])[N]"),
+        ("Abdachung", "(((ab)[V|.N],(Dach)[N])[V],(ung)[N|V.])[N]"),
+        ("Abdampfwaerme", "(((ab)[V|.V],(dampf)[V])[V],((warme)[F])[N])[N]"),
+        ("abdingen", "((ab)[V|.V],((Ding)[N])[V])[V]"),
+        ("abgabenpflichtig", "((((ab)[V|.V],(geb)[V])[V])[N],(n)[A|N.Nx],((pfleg)[V])[N],(ig)[A|NxN.])[A]"),
+        ("anerkanntermassen", "(((anerkannt)[F])[A],(er)[B|A.x],(massen)[B|Ax.])[B]")
+    ]
+    for l, m in examples:
+        o = CelexLemmaMorphology(m, l)
+        print("Morphemes vs. morphs:")
+        o.printAlignments()
+        print("Morph:", o.morphSplit())
+        print("  Lex:", o.lexemeSplit())
+        print()
+
+
+def test_germantree():
+    o = CelexLemmaMorphology(lemma="Abbaugerechtigkeit", celex_struclab="(((ab)[V|.V],(bau)[V])[V],(((ge)[A|.N],((recht)[A])[N])[A],(ig)[N|A.x],(keit)[N|Ax.])[N])[N]")
+    print(o.toForest())
+
+
 if __name__ == "__main__":
     # test_morphsplits()
     # test_all()
@@ -127,4 +150,6 @@ if __name__ == "__main__":
     # print(MorphologicalSplit._morphSplit_viterbi("accumulatief", "accumuleer atie ief"))   # tie between  accumul at ief  and   accumul atie f. The latter arrives at the end.
     # print(MorphologicalSplit._morphSplit_viterbi("acceptatiegraad", "accept eer atie graad"))  # acceptati egr aad
     # print(LemmaMorphology._morphSplit_viterbi("isolementspositie", "isoleer ement s pose eer itie"))  # acceptati egr aad
-    print(CelexLemmaMorphology._morphSplit_viterbi("kolencentrale", "kool en centrum aal e"))  # acceptati egr aad
+    # print(CelexLemmaMorphology._morphSplit_viterbi("kolencentrale", "kool en centrum aal e"))  # acceptati egr aad
+    test_german()
+    # test_germantree()

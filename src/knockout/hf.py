@@ -12,13 +12,16 @@ There are two possible interfaces to implement here:
         _convert_token_to_id()
         _convert_id_to_token()
         _tokenize()
-TODO: Apparently the parent class of transformers.PreTrainedTokenizer has 10 unimplemented methods of which 2 are left:
+The parent class of transformers.PreTrainedTokenizer has 10 unimplemented methods of which 2 are left:
         get_vocab()
         save_vocabulary()
 """
-import re
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Dict, Any, Optional
+from pathlib import Path
+
 from transformers import PreTrainedTokenizer
+import re
+import json
 
 from src.knockout.knockout import BTE, BteInitConfig, RefMode
 
@@ -37,11 +40,25 @@ class BTEk_HuggingFace(PreTrainedTokenizer):
     def vocab_size(self) -> int:
         return len(self.vocab)
 
+    def get_vocab(self) -> Dict[str, int]:
+        return self.vocab
+
+    def save_vocabulary(self, save_directory: str, filename_prefix: Optional[str] = None) -> Tuple[str]:
+        save_directory = Path(save_directory)
+        save_directory.mkdir(parents=True, exist_ok=True)
+
+        filename_prefix = "" if filename_prefix is None else filename_prefix + "_"
+        file_path = save_directory / (filename_prefix + "vocab.json")  # Will be overwritten if it already exists. Deal with it!
+        with open(file_path, "w", encoding="utf-8") as handle:
+            json.dump(self.get_vocab(), handle)
+
+        return (file_path.as_posix(),)
+
     def _convert_token_to_id(self, token):
-        raise self.vocab[token]
+        return self.vocab[token]
 
     def _convert_id_to_token(self, index: int) -> str:
-        raise self.reverse_vocab[index]
+        return self.reverse_vocab[index]
 
     def prepare_for_tokenization(self, text: str, is_split_into_words: bool=False, **kwargs) -> Tuple[str, Dict[str, Any]]:
         """
@@ -63,7 +80,8 @@ class BTEk_HuggingFace(PreTrainedTokenizer):
         It should be noted that the pretokenisation I do below is **NOT** the same pretokenisation you should do to
         train the BPE tokeniser this is based on. In particular: the BPE tokeniser should not be allowed to see hyphens
         nor punctuation as reachable from neighbouring characters. When the time then comes to tokenise a sentence with
-        that tokeniser, there is no longer a need to add spaces (nor Gs) in front of punctuation marks.
+        that tokeniser, there is no longer a need to add spaces (nor Gs) in front of punctuation marks, because it will
+        have zero merges containing those puncutation marks and hence will naturally respect that boundary.
         """
         tokens = []
 
@@ -74,7 +92,7 @@ class BTEk_HuggingFace(PreTrainedTokenizer):
         # this kind of preprocessing allows token injection (although the strings are each sent to the tokeniser as
         # strings... I don't know what the point would be in that case).
         for word in Whitespace.split(text):  # I'm using regex whitespace, which, unlike HuggingFace Whitespace, loses exact character positions.
-            if not word:  # Takes care of double spaces. Not good if you want to parse Python code, FYI.
+            if not word:  # Takes care of double spaces. Not good if you want to parse code, FYI.
                 continue
             tokens.extend(self.algorithm.tokenize(word=" " + word))
         return tokens
