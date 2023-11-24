@@ -1,6 +1,7 @@
 from typing import Callable
 
-from datasets import load_dataset
+import numpy.random as npr
+from datasets import load_dataset, Dataset
 from torch.utils.data import DataLoader
 import tokenizers.normalizers as tn
 import tokenizers.pre_tokenizers as tp
@@ -26,14 +27,31 @@ def preprocess(line: str):
     return " ".join([w for w,_ in pretokens])
 
 
-def generateDataloader_Oscar(lang: str="nl", sentence_preprocessor: Callable[[str],str]=preprocess) -> DataLoader:
+def generateDataloader_Oscar(lang: str="nl", sentence_preprocessor: Callable[[str],str]=preprocess,
+                             size_limit: int=None, shuffle: bool=False) -> DataLoader:
     """
     Note that the DataLoader is an iteraBLE, not an iteraTOR. It can be iterated over multiple times.
     """
     logger("Loading dataset... (takes about 5 minutes for NL and 10 minutes for DE)")
-    data = load_dataset(path="oscar", name="unshuffled_deduplicated_" + lang, split="train")
+    data: Dataset = load_dataset(path="oscar", name="unshuffled_deduplicated_" + lang, split="train")
     logger("Finished loading.")
     data = data.remove_columns(["id"])
+    if size_limit is not None and len(data) > size_limit:
+        # Shuffling has pros and cons:
+        #   Pro: you avoid one topic/document dominating the dataset. Especially useful for small subsets (or large source documents).
+        #   Con: your hard drive isn't doing sequential reads, which has at least two downsides:
+        #           (1) Random disk access is known to be much slower. In practice: 30-hour ETA vs. 2-hour ETA.
+        #           (2) It is strenuous for the device. I can hear my drive crackling very loudly after shuffling.
+        if shuffle:
+            data = data.shuffle(seed=0)
+            indices = range(size_limit)
+            # 10s of millions of indices is >100 MiB of memory. HuggingFace .shuffle() caches indices for a reason.
+            # rng = npr.default_rng(seed=0)
+            # indices = rng.choice(len(data), size=size_limit, replace=False)
+        else:
+            indices = range(size_limit)
+
+        data = data.select(indices)
 
     def dictionaryProcessor(batched_example):
         """
@@ -53,7 +71,7 @@ def dataloaderToWeights(dataloader: DataLoader, output_stem: str):
     return path
 
 
-def punctuationPretokneiserExceptHyphens():
+def punctuationPretokeniserExceptHyphens():
     import tokenizers.normalizers as tn
     normalizer = tn.NFD()
 
@@ -80,8 +98,8 @@ if __name__ == "__main__":
 
     t = Timer()
     t.start(echo=True)
-    # TODO: Needs caching, needs a progress bar, and needs parallellisation for VSC.
-    dataloader = generateDataloader_Oscar(lang="de", sentence_preprocessor=punctuationPretokneiserExceptHyphens())
+    dataloader = generateDataloader_Oscar(lang="de", sentence_preprocessor=punctuationPretokeniserExceptHyphens(),
+                                          size_limit=30_000_000)
     t.lap(echo=True)
-    iterableToWordsFile(dataloader, PATH_DATA_COMPRESSED / "oscar-de-rawcounts.txt")
+    iterableToWordsFile(dataloader, PATH_DATA_COMPRESSED / "oscar-de-rawcounts.txt", cache_every=1_000_000, progress_bar_total=len(dataloader))
     t.lap(echo=True)

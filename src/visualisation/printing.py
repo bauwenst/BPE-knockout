@@ -20,6 +20,27 @@ def kprint(d: dict, indent=0):
             print("\t"*indent, k, ":", "...")
 
 
+def wprint(*args, **kwargs):
+    """
+    Print, but surrounded by two small waits.
+    Useful before and after a TQDM progress bar.
+    """
+    time.sleep(0.05)
+    print(*args, **kwargs)
+    time.sleep(0.05)
+
+
+def iprint(integer: int, sep=" "):
+    """
+    Print an integer with a custom thousands separator.
+    """
+    print(intsep(integer, sep))
+
+
+def intsep(integer: int, sep=" "):
+    return f"{integer:,}".replace(",", sep)
+
+
 def logger(msg: str):
     print("[" + time.strftime('%H:%M:%S') + "]", msg)
 
