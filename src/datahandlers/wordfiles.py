@@ -196,7 +196,8 @@ def fixWhiteSpace(words_path: Path, overwrite=True):
                 assert parts[-1].isnumeric()  # Assign this count to everything in the stack.
                 count = int(parts[-1])
                 for word in stack:
-                    actual_counts[word] += count
+                    if word:
+                        actual_counts[word] += count
                 stack = []
 
     saveWordsFile(actual_counts, words_path.with_stem(words_path.stem + "_fixed") if not overwrite else words_path)
@@ -327,6 +328,22 @@ def detectForeignAlphabets(string: str):
 ACCENTS = re.compile("[áàäâãéèëêíìïîóòöôõúùüû]")
 
 
+def recomposeAccents(word_file: Path):
+    """
+    Unicode normalisation with NFD means that accented characters are decomposed into two characters (the letter and
+    the accent). NFC reverts that.
+    """
+    from tokenizers.normalizers import NFC
+    n = NFC()
+
+    counts = wordsFileToCounter(word_file)
+    new_counts = Counter()
+    for word, count in counts:
+        new_counts[n.normalize_str(word)] += count
+
+    saveWordsFile(new_counts, word_file)
+
+
 def reaccentWordFile(word_file: Path):
     """
     Uses the lemmata generated in the morphologyGenerator, which presumably come from a corpus WITH accents, to put
@@ -335,7 +352,7 @@ def reaccentWordFile(word_file: Path):
     import tokenizers.normalizers as tn
     from src.auxiliary.config import morphologyGenerator
 
-    normalizer = tn.Sequence([tn.NFD(), tn.StripAccents()])  # You can't have StripAccents by itself. Needs to be preceded by NF...
+    normalizer = tn.Sequence([tn.NFD(), tn.StripAccents()])  # Need the "D" because it "D"ecomposes an accented letter into the letter and its accent, e.g. ä -> a¨ (in Unicode, that looks like: ä)
 
     accent_map = dict()
     for obj in morphologyGenerator():
@@ -365,13 +382,3 @@ def generatePathForTrimmedFile(path: Path):
 def generatePathForAccentedFile(path: Path):
     return path.with_stem(path.stem + "_reaccented")
 
-
-if __name__ == "__main__":
-    output_file = PATH_DATA_COMPRESSED / "oscar-de-rawcounts.txt"
-    # CACHE_FOLDER = PATH_DATA_TEMP / "wordcounts-20231122-042136"
-    # caches = [CACHE_FOLDER / f"{i+1}.txt" for i in range(30)]
-    #
-    # for cache in caches:
-    #     fixWhiteSpace(cache)
-    #
-    # mergeWordFiles(caches, output_file, delete_afterwards=False, trim_hapax_every=5)

@@ -159,7 +159,7 @@ class Diagram(ABC):
                     print(f"Successfully preloaded data for diagram '{self.name}'.")
                     already_exists = True
                 except Exception as e:
-                    print("Could not load cached diagram:", e)
+                    print(f"Could not load cached diagram '{self.name}':", e)
 
             if not already_exists:  # Cache miss
                 self.needs_computation = True
@@ -374,7 +374,8 @@ class LineGraph(Diagram):
                 main_ax.set_xlabel(x_label)
             if y_label:
                 main_ax.set_ylabel(y_label)
-            main_ax.legend(loc=legend_position)
+            if legend_position:  # Can be None or "" to turn it off.
+                main_ax.legend(loc=legend_position)
 
             if y_lims:
                 main_ax.set_ylim(y_lims[0], y_lims[1])
@@ -584,7 +585,7 @@ class MultiHistogram(Diagram):
         for name, values in saved_data.items():
             if not isinstance(values, list):
                 raise ValueError("Histogram data corrupted.")
-            self.addMany(name, values)
+            MultiHistogram.addMany(self, name, values)  # Specifically mentions the parent class to prevent using a child's method here.
 
     def add(self, series_name: str, x_value: float):
         if series_name not in self.data:
@@ -650,10 +651,10 @@ class MultiHistogram(Diagram):
             df = self.toDataframe()
             if len(self.data) != 1:
                 legend_title = LEGEND_TITLE_CLASS
-                print(df.groupby(LEGEND_TITLE_CLASS).describe())
+                # print(df.groupby(LEGEND_TITLE_CLASS).describe())
             else:
                 legend_title = None
-                print(df.describe())
+                print(df.value_counts())
 
             fig, ax = newFigAx(aspect_ratio)
             if not log_x:
@@ -661,7 +662,7 @@ class MultiHistogram(Diagram):
                              binwidth=binwidth, binrange=(math.floor(df["value"].min()/binwidth)*binwidth,
                                                           math.ceil( df["value"].max()/binwidth)*binwidth),
                              discrete=center_ticks, stat=mode, common_norm=False,
-                             kde=do_kde, kde_kws={"bw_adjust": 10} if kde_smoothing else None,  # Btw, do not use displot: https://stackoverflow.com/a/63895570/9352077
+                             kde=do_kde, kde_kws={"bw_adjust": 10} if kde_smoothing else seaborn_args.pop("kde_kws", None),  # Btw, do not use displot: https://stackoverflow.com/a/63895570/9352077
                              color=fill_colour, edgecolor=border_colour,
                              **seaborn_args)  # Do note use displot: https://stackoverflow.com/a/63895570/9352077
             else:
@@ -1073,12 +1074,12 @@ class Table(Diagram):
             lines.append(r"\end{tabular}")
 
             # Write out
-            # print(f"Writing .tex {self.name} ...")
-            # with open(PathHandling.getSafePath(PATH_FIGURES, self.name, ".tex"), "w") as file:
-            #     file.write("\n".join(lines))
+            print(f"Writing .tex {self.name} ...")
+            with open(PathHandling.getSafePath(PATH_FIGURES, self.name, ".tex"), "w") as file:
+                file.write("\n".join(lines))
 
-            from src.visualisation.printing import lprint
-            lprint(lines)
+            # from src.visualisation.printing import lprint
+            # lprint(lines)
 
 
 def arrow(ax: plt.Axes, start_point, end_point):  # FIXME: I want TikZ's stealth arrows, but this only seems possible in Matplotlib's legacy .arrow() interface (which doesn't keep its head shape properly): https://stackoverflow.com/a/43379608/9352077

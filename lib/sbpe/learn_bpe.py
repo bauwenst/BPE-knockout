@@ -1,119 +1,116 @@
 #!/usr/bin/env python
 
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# Copyright (c) 2015 University of Edinburgh
-#
-# SPDX-License-Identifier: MIT-0
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of this
-# software and associated documentation files (the "Software"), to deal in the Software
-# without restriction, including without limitation the rights to use, copy, modify,
-# merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
-# permit persons to whom the Software is furnished to do so.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
-# INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-# PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
-# HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-# OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+"""
+Source: https://github.com/amazon-science/statistical-byte-pair-encoding
+License:
+Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+Copyright (c) 2015 University of Edinburgh
 
+SPDX-License-Identifier: MIT-0
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this
+software and associated documentation files (the "Software"), to deal in the Software
+without restriction, including without limitation the rights to use, copy, modify,
+merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+"""
 import argparse
 import codecs
 import re
 import shutil
 import sys
-
-from collections import Counter, defaultdict
 import math
+
+from typing import Callable, List, Iterable, TextIO
+from collections import Counter, defaultdict
+from dataclasses import dataclass
+from tqdm.auto import tqdm
 from unicodedata import category
 
-from heap import HeapWithInverseIndex
-
-EOW = "</w>"
+from lib.sbpe.heap import HeapWithInverseIndex
 
 
-def create_arg_parser(subparsers=None):
+@dataclass
+class SowEowSpecification:
+    detached: bool
+    start_not_end: bool
+    character: str
+
+SOWEOW = SowEowSpecification(detached=False, start_not_end=False, character="</w>")
+
+WordPreprocessor = Callable[[str],List[str]]
+def defaultWordPreprocessor(word: str):
+    return [word]
+
+
+def error(message: str):
+    sys.stderr.write(message)
+
+
+class VocabCounter:
     """
-    Create the argument parser.
-
-    Copied from the original implementation to be command-line compatible.
+    Extract the word-level vocabulary from a file (which can be a plain text or a
+    dictionary file (i.e. (words, freq) pairs).
     """
-    if subparsers:
-        parser = subparsers.add_parser('learn-bpe',
-                                       formatter_class=argparse.RawDescriptionHelpFormatter,
-                                       description="learn BPE-based word segmentation")
-    else:
-        parser = argparse.ArgumentParser(
-            formatter_class=argparse.RawDescriptionHelpFormatter,
-            description="learn BPE-based word segmentation")
 
-    parser.add_argument(
-        '--input', '-i', type=argparse.FileType('r'), default=[sys.stdin],
-        metavar='PATH', nargs="+",
-        help="Input text(s) (default: standard input).")
+    def __init__(self, input_handles: Iterable[Iterable[str]], dictionary_mode: bool=False,
+                 soweow: SowEowSpecification=SOWEOW, word_preprocessor: WordPreprocessor=defaultWordPreprocessor):
+        self.forward_index = dict()  # tuple of word characters -> token ID
+        self.inverse_index = []      # token ID (list index) -> tuple of word characters
+        self.counter = []            # token ID (list index) -> count in corpus
+        self.soweow = soweow
+        self.wp     = word_preprocessor
 
-    parser.add_argument(
-        '--probabilistic', '-p', action="store_true",
-        help="Use probabilistic BPE")
-    parser.add_argument(
-        '--frac-stopping', '-fs', type=float, default=0.0,
-        help="(Probabilistic) Stop when the likelihood increase falls below this fraction of the initial one)")
-    parser.add_argument(
-        '--frac-stopping-average', '-fsa', type=int, default=5,
-        help='"Mini-batch" size for frac-stopping computation (default: %(default)s)')
-    parser.add_argument(
-        '--output', '-o', type=argparse.FileType('w'), default=sys.stdout,
-        metavar='PATH',
-        help="Output file for BPE codes (default: standard output)")
-    parser.add_argument(
-        '--symbols', '-s', type=int, default=10000,
-        help="Create this many new symbols (each representing a character n-gram) (default: %(default)s))")
-    parser.add_argument(
-        '--min-frequency', type=int, default=2, metavar='FREQ',
-        help='Stop if no symbol pair has frequency >= FREQ (default: %(default)s))')
-    parser.add_argument('--dict-input', action="store_true",
-        help="If set, input file is interpreted as a dictionary where each line contains a word-count pair")
-    parser.add_argument(
-        '--total-symbols', '-t', action="store_true",
-        help="Subtract number of characters from the symbols to be generated (so that '--symbols' becomes an estimate for the total number of symbols needed to encode text).")
-    parser.add_argument(
-        '--verbose', '-v', action="store_true",
-        help="verbose mode.")
-
-    return parser
-
-
-class VocabCounter():
-    """
-    Extract the vocabulary from a file (which can be a plain text or a
-    dictionary file (i.e. pairs words, freq).
-    """
-    def __init__(self, fp_ins, is_dict=False):
-        self.forward_index = {}
-        self.inverse_index = []
-        self.counter = []
-
-        for fp in fp_ins:
-            for l in fp:
-                fields = l.strip('\r\n ').split(' ')
-                if is_dict:
-                    assert len(fields) == 2
+        for file_handle in input_handles:
+            for line in tqdm(file_handle):  # Although it should be a handle, any iterator that produces strings works.
+                if dictionary_mode:
+                    fields = line.strip("\r\n ").split(" ")
+                    assert len(fields) == 2  # Each line in the file looks like e.g. "potato 69420".
                     self._add_word(fields[0], count=int(fields[1]))
                 else:
+                    fields = line.strip("\r\n ").split()
                     for w in fields:
                         if w:
                             self._add_word(w)
 
-    def _add_word(self, word, count=1):
-        word_eow = (tuple(word[:-1]) + (word[-1] + EOW,))
-        index = self.forward_index.get(word_eow)
-        if index is None:
-            index = len(self.inverse_index)
-            self.forward_index[word_eow] = index
-            self.inverse_index.append(word_eow)
-            self.counter.append(0)
-        self.counter[index] += count
+    def _add_word(self, word: str, count=1):
+        # [Bauwens] Support for byte-level conversion.
+        pre_tokens = self.wp(word)
+
+        # [Bauwens] Support for every style of start-of-word or end-of-word.
+        affix = self.soweow.character
+        for idx, pre_token in enumerate(pre_tokens):
+            if affix:
+                if idx == 0 and self.soweow.start_not_end:
+                    if self.soweow.detached:  # RobBERT-style: Ġ w o r d
+                        pre_token = (affix,) + tuple(pre_token)
+                    else:  # BERT-style, except the complement: Ġw o r d
+                        pre_token = (affix + pre_token[0],) + tuple(pre_token[1:])
+                elif idx == len(pre_tokens)-1 and not self.soweow.start_not_end:
+                    if self.soweow.detached:  # BPE v1.0: w o r d </w>
+                        pre_token = tuple(pre_token) + (affix,)
+                    else:  # BPE v1.1: w o r d</w>
+                        pre_token = tuple(pre_token[:-1]) + (pre_token[-1] + affix,)
+                else:
+                    pre_token = tuple(pre_token)
+            else:
+                pre_token = tuple(pre_token)
+
+            # The original code
+            index = self.forward_index.get(pre_token)
+            if index is None:
+                index = len(self.inverse_index)
+                self.forward_index[pre_token] = index
+                self.inverse_index.append(pre_token)
+                self.counter.append(0)
+            self.counter[index] += count
 
     def substitute(self, old_word, new_word):
         pos = self.forward_index[old_word]
@@ -127,16 +124,17 @@ class VocabCounter():
     def get_counts_from_index(self, pos):
         return self.counter[pos]
 
-    class Iterator():
+    def __len__(self):
+        return len(self.counter)
+
+    class Iterator:
         def __init__(self, vocab):
             self.vocab = vocab
             self.pos = 0
 
         def __next__(self):
             if self.pos < len(self.vocab.counter):
-                rv = (self.pos,
-                      self.vocab.inverse_index[self.pos],
-                      self.vocab.counter[self.pos])
+                rv = (self.pos, self.vocab.inverse_index[self.pos], self.vocab.counter[self.pos])
                 self.pos += 1
                 return rv
             else:
@@ -146,7 +144,7 @@ class VocabCounter():
         return self.Iterator(self)
 
 
-class PairStats():
+class PairStats:
     """
     Class for handling the pairs of operations. It is basically a wrapper
     around a heap of operations, with additional functions for updating counts
@@ -158,7 +156,7 @@ class PairStats():
 
         raw_stats = defaultdict(int)  # From pairs to counts
         self.vocab_entries_for_pair = defaultdict(set)  # From pairs to lists of indices in vocab
-        for pos, word, freq in self.vocab:
+        for pos, word, freq in tqdm(self.vocab, total=len(self.vocab)):
             word_pair_stats = self.get_pair_stats_from_word(word)
             for pair, count in word_pair_stats.items():
                 raw_stats[pair] += count * freq
@@ -169,7 +167,7 @@ class PairStats():
             self.produced_count = defaultdict(int)
             self.n_running_symbols = 0
             # Store the counts of the initial units (characters)
-            for _, word, freq in self.vocab:
+            for _, word, freq in tqdm(self.vocab, total=len(self.vocab)):
                 for unit in word:
                     self.produced_count[unit] += freq
                     self.n_running_symbols += freq
@@ -178,7 +176,7 @@ class PairStats():
         self.stats_heap = HeapWithInverseIndex(value_score_function=self._get_scoring_function(),
                                                use_score_caching=True,
                                                key_function=lambda x: x[1])
-        for pair in [(i[1], i[0]) for i in raw_stats.items()]:
+        for pair in tqdm([(i[1], i[0]) for i in raw_stats.items()], desc="HEAP", total=len(raw_stats)):
             self.stats_heap.insert(pair)
 
     def get_pair_stats_from_word(self, word, filter_elems=None):
@@ -303,7 +301,7 @@ class PairStats():
         between probabilistic and non-probabilistic counts without effort (see
         self.get_pair_stats_from_word for the mismatch).
         """
-        filter_set = set([new_pair[0], new_pair[1], new_pair[0] + new_pair[1]])
+        filter_set = {new_pair[0], new_pair[1], new_pair[0]+new_pair[1]}
         old_pair_stats = self.get_pair_stats_from_word(old_word, filter_set)
         new_pair_stats = self.get_pair_stats_from_word(new_word, filter_set)
         all_pairs = set(old_pair_stats.keys()) | set(new_pair_stats.keys())
@@ -337,52 +335,63 @@ class PairStats():
                     stats_changes[pair] = freq_change
 
 
-def adapt_num_symbols(num_symbols, vocab, total_symbols):
+def adapt_num_symbols(num_symbols, vocab: VocabCounter, total_symbols: bool):
     """
     Handle the parameter --total_symbols.
     """
     new_num_symbols = num_symbols
     if total_symbols:
-        uniq_char_internal = set()
-        uniq_char_final = set()
-        for _, word, _ in vocab:
-            for char in word[:-1]:
-                uniq_char_internal.add(char)
-            uniq_char_final.add(word[-1])
-        sys.stderr.write('Number of word-internal characters: {0}\n'.format(len(uniq_char_internal)))
-        sys.stderr.write('Number of word-final characters: {0}\n'.format(len(uniq_char_final)))
-        sys.stderr.write('Reducing number of merge operations by {0}\n'.format(len(uniq_char_internal) + len(uniq_char_final)))
-        new_num_symbols -= len(uniq_char_internal) + len(uniq_char_final)
+        unique_chars = set()
+        for _, char_tuple, _ in vocab:
+            for char in char_tuple:
+                unique_chars.add(char)
+
+        error("Number of basic characters (merges that won't be done): {0}\n".format(len(unique_chars)))
+        new_num_symbols -= len(unique_chars)
 
     return new_num_symbols
 
 
-def learn_bpe(infiles,
-              outfile,
-              num_symbols_ori,
-              probabilistic=False,
-              frac_stopping=None,
-              frac_stopping_average_n=100,
-              min_frequency=2,
-              is_dict=False,
-              total_symbols=False,
-              verbose=False):
-    """Learn num_symbols BPE operations from vocabulary, and write to outfile.
+def learn_bpe(infiles: List[Iterable[str]], outfile: TextIO,
+              num_symbols_ori: int, total_symbols=False,
+              probabilistic=False, frac_stopping=None, frac_stopping_average_n=100, min_frequency=2,
+              is_dict=False, verbose=False,
+              soweow: SowEowSpecification=SOWEOW, word_preprocessor: WordPreprocessor=defaultWordPreprocessor):
     """
+    Learn num_symbols BPE operations from vocabulary, and write to outfile.
 
+    [Bauwens]: apparently Vilar & Federico wrote this file in such a way that it is fully compatible with the
+               original BPE interface. The "probabilistic" parameter switches from BPE to S-BPE.
+
+    :param num_symbols_ori: size of vocab OR amount of merges.
+    :param total_symbols: if True, num_symbols_ori is the vocab size. If False, it is the amount of merges.
+    :param probabilistic: BPE (False) or S-BPE (True). Should really be "statistical".
+    :param frac_stopping: "k" parameter in the paper. Should be 0.002.
+    :param frac_stopping_average_n: "M" parameter in the paper. They say 5 is okay.
+    :param min_frequency: If using BPE, stops early when the argmax drops below this.
+    :param is_dict: whether or not the infiles are in "dictionary mode", i.e.
+        word1 count1
+        word2 count2
+        word3 count3 ...
+    """
     # version 0.2 changes the handling of the end-of-word token ('</w>');
     # version numbering allows backward compatibility
-    # We should be compatible with the original 0.2 version
+    # [Vilar]: We should be compatible with the original 0.2 version
     outfile.write('#version: 0.2\n')
-    vocab = VocabCounter(infiles, is_dict)
+
+    print("Generating word vocabulary...")
+    vocab       = VocabCounter(infiles, is_dict, soweow=soweow, word_preprocessor=word_preprocessor)
     num_symbols = adapt_num_symbols(num_symbols_ori, vocab, total_symbols)
-    pair_stats = PairStats(vocab, probabilistic)
+
+    print("Getting pair statistics...")
+    pair_stats  = PairStats(vocab, probabilistic)
+
     ini_score = None
     frac_stopping_accum = 0.0
     num_written = 0
-    for num_written in range(num_symbols):
+    for num_written in tqdm(range(num_symbols), desc="MERGES"):
         if not pair_stats:
-            sys.stderr.write('No more pairs after creating {} symbols. Stopping\n'.format(num_written))
+            error('No more pairs after creating {} symbols. Stopping\n'.format(num_written))
             break
         (freq, pair), score = pair_stats.pop_max()
 
@@ -394,21 +403,71 @@ def learn_bpe(infiles,
             elif (num_written + 1) % frac_stopping_average_n == 0:
                 avg = frac_stopping_accum / frac_stopping_average_n
                 if avg < frac_stopping * ini_score:
-                    sys.stderr.write('Stopping due to frac-stopping after %d symbols (%f < %f * %f)\n' %
-                                     (num_written, avg, frac_stopping, ini_score))
+                    error(f'Stopping due to frac-stopping after {num_written} symbols ({avg} < {frac_stopping} * {ini_score})\n')
                     break
                 else:
                     frac_stopping_accum = 0.0
 
         if not probabilistic and freq < min_frequency:
-            sys.stderr.write('no pair has frequency >= {0}. Stopping\n'.format(min_frequency))
+            error('no pair has frequency >= {0}. Stopping\n'.format(min_frequency))
             break
         if verbose:
-            sys.stderr.write('pair {0}: {1} {2} -> {1}{2} (frequency {3})\n'.format(num_written, pair[0], pair[1], freq))
+            error('pair {0}: {1} {2} -> {1}{2} (frequency {3})\n'.format(num_written, pair[0], pair[1], freq))
         outfile.write('{0} {1}\n'.format(*pair))
 
-    sys.stderr.write(f"{num_written} pairs written to file.\n")
+    error(f"{num_written} pairs written to file.\n")
     return num_written
+
+
+def create_arg_parser(subparsers=None):
+    """
+    Create the argument parser.
+
+    Copied from the original implementation to be command-line compatible.
+    """
+    if subparsers:
+        parser = subparsers.add_parser('learn-bpe',
+                                       formatter_class=argparse.RawDescriptionHelpFormatter,
+                                       description="learn BPE-based word segmentation")
+    else:
+        parser = argparse.ArgumentParser(
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            description="learn BPE-based word segmentation")
+
+    parser.add_argument(
+        '--input', '-i', type=argparse.FileType('r'), default=[sys.stdin],
+        metavar='PATH', nargs="+",
+        help="Input text(s) (default: standard input).")
+
+    parser.add_argument(
+        '--probabilistic', '-p', action="store_true",
+        help="Use probabilistic BPE")
+    parser.add_argument(
+        '--frac-stopping', '-fs', type=float, default=0.0,
+        help="(Probabilistic) Stop when the likelihood increase falls below this fraction of the initial one)")
+    parser.add_argument(
+        '--frac-stopping-average', '-fsa', type=int, default=5,
+        help='"Mini-batch" size for frac-stopping computation (default: %(default)s)')
+    parser.add_argument(
+        '--output', '-o', type=argparse.FileType('w'), default=sys.stdout,
+        metavar='PATH',
+        help="Output file for BPE codes (default: standard output)")
+    parser.add_argument(
+        '--symbols', '-s', type=int, default=10000,
+        help="Create this many new symbols (each representing a character n-gram) (default: %(default)s))")
+    parser.add_argument(
+        '--min-frequency', type=int, default=2, metavar='FREQ',
+        help='Stop if no symbol pair has frequency >= FREQ (default: %(default)s))')
+    parser.add_argument('--dict-input', action="store_true",
+        help="If set, input file is interpreted as a dictionary where each line contains a word-count pair")
+    parser.add_argument(
+        '--total-symbols', '-t', action="store_true",
+        help="Subtract number of characters from the symbols to be generated (so that '--symbols' becomes an estimate for the total number of symbols needed to encode text).")
+    parser.add_argument(
+        '--verbose', '-v', action="store_true",
+        help="verbose mode.")
+
+    return parser
 
 
 def main():
@@ -418,7 +477,7 @@ def main():
     # is not present.
     sys.stderr = codecs.getwriter('UTF-8')(sys.stderr.buffer)
     sys.stdout = codecs.getwriter('UTF-8')(sys.stdout.buffer)
-    sys.stdin = codecs.getreader('UTF-8')(sys.stdin.buffer)
+    sys.stdin  = codecs.getreader('UTF-8')(sys.stdin.buffer)
 
     arg_parser = create_arg_parser()
     args = arg_parser.parse_args()
@@ -430,15 +489,16 @@ def main():
     if args.output.name != '<stdout>':
         args.output = codecs.open(args.output.name, 'w', encoding='utf-8')
 
-    learn_bpe(args.input, args.output, args.symbols,
-              probabilistic=args.probabilistic,
-              frac_stopping=args.frac_stopping,
-              frac_stopping_average_n=args.frac_stopping_average,
-              min_frequency=args.min_frequency,
-              is_dict=args.dict_input,
-              total_symbols=args.total_symbols,
-              verbose=args.verbose,
-              )
+    learn_bpe(
+        args.input, args.output, args.symbols,
+        probabilistic=args.probabilistic,
+        frac_stopping=args.frac_stopping,
+        frac_stopping_average_n=args.frac_stopping_average,
+        min_frequency=args.min_frequency,
+        is_dict      =args.dict_input,
+        total_symbols=args.total_symbols,
+        verbose      =args.verbose,
+    )
 
 
 if __name__ == "__main__":

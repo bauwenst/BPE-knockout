@@ -1,7 +1,3 @@
-"""
-TODO:
-    - Learning blame with weighted lemmata (right now, each lemma in e-Lex has equal contribution to the blame ratio).
-"""
 import itertools
 import re
 
@@ -12,8 +8,11 @@ from src.auxiliary.robbert_tokenizer import tokenizeAsWord, robbert_tokenizer, g
 from src.auxiliary.config import Pℛ𝒪𝒥ℰ𝒞𝒯, morphologyGenerator
 from src.datahandlers.wordfiles import ACCENTS
 
-TRIVIAL_THRESHOLD = 4
+
+print("Loading tests...")
 untrained_bte = BTE(BteInitConfig(), quiet=True)
+# modes_to_test = [RefMode.MORPHEMIC, RefMode.LEXEMIC]  # Thesis, not paper.
+modes_to_test = [RefMode.MORPHEMIC]
 
 
 def assert_tokenisers_equal(tokeniser1=robbert_tokenizer, tokeniser2=untrained_bte):
@@ -80,9 +79,10 @@ def visualise():
 
 
 def test_trivial_knockout():
+    TRIVIAL_THRESHOLD = 4
+
     tkzs = []
-    modes = [RefMode.LEXEMIC, RefMode.MORPHEMIC]
-    for mode in modes:
+    for mode in modes_to_test:
         bte = BTE(BteInitConfig(knockout=mode), autorun_modes=False)
         bte.name = "Testing knockout-" + RefMode.toLetter(mode)
 
@@ -153,41 +153,41 @@ def time_iterators():
 
 ##############################################################################
 
-
+@timeit
 def main_tokenDiffs():
     bpe = robbert_tokenizer
 
-    modes = [RefMode.LEXEMIC, RefMode.MORPHEMIC]
-    for mode in modes:
-        print("THE BELOW HOLDS FOR KNOCKOUT MODE:", RefMode.toLetter(mode))
-        bte = BTE(BteInitConfig(knockout=mode))
+    for mode in modes_to_test:
+        histo = Histogram(f"knockout_tokendiffs_{RefMode.toLetter(mode)}", caching=CacheMode.IF_MISSING)
+        if histo.needs_computation:
+            # TODO: You should kinda treat the confusion matrix as a figure.
+            cm = SegmentationConfusionMatrix()
+            bte = BTE(BteInitConfig(knockout=mode))
+            for obj in morphologyGenerator():
+                lemma = obj.lemma()
 
-        cm = SegmentationConfusionMatrix()
-        histo = Histogram(f"knockout_tokendiffs_{RefMode.toLetter(mode)}", caching=CacheMode.NONE)
-        for obj in morphologyGenerator():
-            lemma = obj.lemma()
+                tokens_bpe = tokenizeAsWord(lemma, tokenizer=bpe)
+                tokens_bte = tokenizeAsWord(lemma, tokenizer=bte)
 
-            tokens_bpe = tokenizeAsWord(lemma, tokenizer=bpe)
-            tokens_bte = tokenizeAsWord(lemma, tokenizer=bte)
+                histo.add(len(tokens_bte) - len(tokens_bpe))
+                cm.add(reference=" ".join(tokens_bpe), candidate=" ".join(tokens_bte))
 
-            histo.add(len(tokens_bte) - len(tokens_bpe))
-            cm.add(reference=" ".join(tokens_bpe), candidate=" ".join(tokens_bte))
+            print("BPE as reference, BPE-knockout as candidate:")
+            cm.computeAndDisplay(indent=1)
 
         histo.commit_histplot(binwidth=1, x_tickspacing=1, x_label="Increase in token amount", y_label="Fraction of lemmata",
-                              relative_counts=True, x_lims=(-2, +3), y_tickspacing=10, center_ticks=True,
-                              kde_smoothing=True, aspect_ratio=(4,2.5))
-
-        print("BPE as reference, BPE-knockout as candidate:")
-        cm.computeAndDisplay(indent=1)
+                              relative_counts=True, x_lims=(-2, +5), y_tickspacing=10, center_ticks=True,
+                              do_kde=True, kde_smoothing=False, kde_kws={"bw_adjust": 6.5},
+                              aspect_ratio=(4,2.5))
 
 
+@timeit
 def main_mergestats():
     """
     Histogram of the IDs of the knocked-out merges
     + Histogram of the length of each left and right type.
     """
-    modes = [RefMode.LEXEMIC, RefMode.MORPHEMIC]
-    for mode in modes:
+    for mode in modes_to_test:
         ids     =      Histogram(f"knockout_ids_{RefMode.toLetter(mode)}",     caching=CacheMode.IF_MISSING)
         lengths = MultiHistogram(f"knockout_lengths_{RefMode.toLetter(mode)}", caching=CacheMode.IF_MISSING)
 
@@ -203,14 +203,15 @@ def main_mergestats():
                     lengths.add("left types", len(left))
                     lengths.add("right types", len(right))
 
-        ids.commit_histplot(binwidth=100, x_tickspacing=2500, x_label="Merge", y_label="Amount of knockouts in bin",
-                            aspect_ratio=(4,2), fill_colour="black", border_colour=None,
+        BINWIDTH = 100
+        ids.commit_histplot(binwidth=BINWIDTH, x_tickspacing=2500, x_label="Merge", y_label=f"Amount of knockouts in {BINWIDTH}-merge bin",
+                            aspect_ratio=(7,2), fill_colour="black", border_colour=None,
                             y_tickspacing=1, do_kde=False)
         lengths.commit_histplot(binwidth=1, x_tickspacing=1, x_label="Type length", y_label="Amount of knockouts",
                                 aspect_ratio=(4,2.75), border_colour=None,
                                 y_tickspacing=100, do_kde=False, center_ticks=True, alpha=0.5, x_lims=(0,15))
 
-
+@timeit
 def main_vocabstats():
     """
     Histogram of the original RobBERT tokeniser's merge type lengths.
@@ -254,7 +255,7 @@ def addEvaluationToTable(table: Table, results: List[TokeniserEvaluation]):
             table.set(re, row, ["lexemic", "weighted", "Re"])
             table.set(f1, row, ["lexemic", "weighted", "$F_1$"])
 
-
+@timeit
 def main_intrinsicAll():
     """
     Test all combinations of annealing and knockout on intrinsic metrics (morphological Pr-Re-F1).
@@ -283,7 +284,7 @@ def main_intrinsicAll():
 
     table.commit()
 
-
+@timeit
 def main_intrinsicMultilingual():
     """
     Only tests BPE without knockout and BPE with morphemic knockout,
@@ -308,7 +309,7 @@ def main_intrinsicMultilingual():
     ###
     Pℛ𝒪𝒥ℰ𝒞𝒯.config = old_config
 
-
+@timeit
 def main_intrinsicPartial():
     """
     Intrinsic evaluation, except you use holdout and/or trivial merge exclusion to get a more nuanced view of the
@@ -317,21 +318,23 @@ def main_intrinsicPartial():
     table = Table("bte-intrinsic-partial")
     if table.needs_computation:
         # Trivials
-        bte_only_nontrivial_M = BTE(BteInitConfig(knockout=RefMode.MORPHEMIC, keep_long_merges=True))
-        bte_only_nontrivial_L = BTE(BteInitConfig(knockout=RefMode.LEXEMIC,   keep_long_merges=True))
-        results = test_tokenizers_batch([bte_only_nontrivial_M, bte_only_nontrivial_L], reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
+        results = test_tokenizers_batch(
+            [BTE(BteInitConfig(knockout=mode, keep_long_merges=True)) for mode in modes_to_test],
+            reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter
+        )
         addEvaluationToTable(table, results)
 
         # Holdout
         holdout = Holdout(0.8)
-        bte_holdout_M = BTE(BteInitConfig(knockout=RefMode.MORPHEMIC, keep_long_merges=False), holdout=holdout)
-        bte_holdout_L = BTE(BteInitConfig(knockout=RefMode.LEXEMIC,   keep_long_merges=False), holdout=holdout)
-        results = test_tokenizers_batch([bte_holdout_M, bte_holdout_L], reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=holdout)
+        results = test_tokenizers_batch(
+            [BTE(BteInitConfig(knockout=mode, keep_long_merges=False), holdout=holdout) for mode in modes_to_test],
+            reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=holdout
+        )
         addEvaluationToTable(table, results)
 
     table.commit()
 
-
+@timeit
 def main_deleteRandomMerges():
     """
     Baseline comparison that computes expected Pr-Re-F1 when 1%, 2%, 5%, 10%, ... of merges are removed
@@ -362,7 +365,7 @@ def main_deleteRandomMerges():
             bte.syncWithGraph()
 
             # Evaluate
-            cm, cm_w = morphologyVersusTokenisation(MorphSplit(), bte, name=bte.name, quiet=True)
+            cm, cm_w = morphologyVersusTokenisation(MorphSplit(), bte, log_name=bte.name, quiet=True)
             pr, re, f1 = cm.compute()
             return pr, re, f1
 
@@ -421,9 +424,9 @@ def main_deleteRandomMerges():
             graph.add("$F_1$", p, sum_f1/n)
 
     graph.commit(x_label="Merges deleted [\\%]", y_label="Correspondence of split positions (average of $10$ trials)",
-                 logx=True, y_lims=(0.0, 1.01), y_tickspacing=0.1)
+                 logx=False, y_lims=(0.0, 1.01), y_tickspacing=0.1)
 
-
+@timeit
 def main_deleteLastMerges():
     """
     Same test except you just trim the merge list.
@@ -441,7 +444,7 @@ def main_deleteLastMerges():
             goal_merges    = int(initial_merges * (100-p)/100)
             current_merges = len(bte.merge_graph.merges)
             to_knock_out   = current_merges - goal_merges
-            print(f"\tDeleting {to_knock_out} merges to get to {p}% deletion...")
+            wprint(f"\tDeleting {to_knock_out} merges to get to {p}% deletion...")
 
             # Construct tokeniser
             if to_knock_out != 0:
@@ -451,7 +454,7 @@ def main_deleteLastMerges():
                 bte.syncWithGraph()
 
             # Evaluate
-            cm, cm_w = morphologyVersusTokenisation(MorphSplit(), bte, name=bte.name + f"_minus_{p}%", quiet=False)
+            cm, _ = morphologyVersusTokenisation(MorphSplit(), bte, log_name=bte.name + f"_minus_{p}%", quiet=False, weights=None)
             pr, re, f1 = cm.compute()
 
             results.append((pr,re,f1))
@@ -462,9 +465,9 @@ def main_deleteLastMerges():
             graph.add("$F_1$", p, f1)
 
     graph.commit(x_label="Merges deleted [\\%]", y_label="Correspondence of split positions",
-                 logx=True, y_lims=(0.0, 1.01), y_tickspacing=0.1)
+                 logx=False, y_lims=(0.0, 1.01), y_tickspacing=0.1)
 
-
+@timeit
 def main_deleteLastLeaves():
     """
     Same test except you knock out from the back of the merge list BUT ONLY if they are leaves. You keep deleting until
@@ -516,7 +519,7 @@ def main_deleteLastLeaves():
     # Part 2: Performance
     PERCENTAGES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 20, 30, 40, 50]
 
-    g2 = LineGraph("last-leaf-deletions")
+    g2 = LineGraph("last-leaf-deletions", caching=CacheMode.IF_MISSING)
     results = []
     if g2.needs_computation:
         for p in PERCENTAGES:
@@ -524,7 +527,7 @@ def main_deleteLastLeaves():
             bte = BTE(BteInitConfig(), quiet=True)
             amount_of_merges = len(bte.merge_graph.merges)
             to_knock_out = int(amount_of_merges * p/100)
-            print(f"\tDeleting {to_knock_out} merges to get to {p}% deletion...")
+            wprint(f"\tDeleting {to_knock_out} merges to get to {p}% deletion...")
 
             # Construct tokeniser
             merges = []
@@ -542,7 +545,7 @@ def main_deleteLastLeaves():
             bte.syncWithGraph()
 
             # Evaluate
-            cm, cm_w = morphologyVersusTokenisation(MorphSplit(), bte, name=bte.name + f"_minus_{p}%", quiet=False)
+            cm, cm_w = morphologyVersusTokenisation(MorphSplit(), bte, log_name=bte.name + f"_minus_{p}%", quiet=False)
             pr, re, f1 = cm.compute()
 
             results.append((pr,re,f1))
@@ -553,7 +556,45 @@ def main_deleteLastLeaves():
             g2.add("$F_1$", p, f1)
 
     g2.commit(x_label="Merges deleted [\\%]", y_label="Correspondence of split positions",
-                 logx=True, y_lims=(0.0, 1.01), y_tickspacing=0.1)
+                 logx=False, y_lims=(0.0, 1.01), y_tickspacing=0.1)
+
+
+def main_blameThreshold():
+    RATIOS = [1, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 99]
+
+    g1 = LineGraph("blame-threshold-amounts", caching=CacheMode.IF_MISSING)  # TODO: I want a second Y axis that shows percentage of total merges.
+    g2 = LineGraph("blame-threshold-evaluation", caching=CacheMode.IF_MISSING)
+    if g1.needs_computation or g2.needs_computation:
+        # We can get a rating for ALL merges by requesting to return all merges with a blame above 0.
+        bte = BTE(BteInitConfig(knockout=RefMode.MORPHEMIC), autorun_modes=False, quiet=True)
+        all_merges = bte.getBadOldMerges(relative_blame_threshold=0)
+
+        # And now we just filter them out manually.
+        for minimal_blame in RATIOS:
+            relevant_merges = [merge for ratio, _, merge in all_merges
+                               if ratio >= minimal_blame/100]
+
+            if g1.needs_computation:
+                g1.add("BTE", minimal_blame, len(relevant_merges))
+
+            if g2.needs_computation:
+                # Construct tokeniser
+                bte = BTE(BteInitConfig(knockout=RefMode.MORPHEMIC), autorun_modes=False, quiet=True)
+                for merge in relevant_merges:
+                    bte.merge_graph.knockout(merge.childType())
+                bte.syncWithGraph()
+
+                # Evaluate
+                cm, _ = morphologyVersusTokenisation(MorphSplit(), bte)
+                pr, re, f1 = cm.compute()
+                g2.add("Pr",    minimal_blame, pr)
+                g2.add("Re",    minimal_blame, re)
+                g2.add("$F_1$", minimal_blame, f1)
+
+    g1.commit(x_label="Blame ratio threshold [\\%]", y_label="Merges knocked out",
+              logx=False, y_lims=(3500, 5500), y_tickspacing=100, x_tickspacing=10, legend_position=None)
+    g2.commit(x_label="Blame ratio threshold [\\%]", y_label="Correspondence of split positions",
+              logx=False, y_lims=(0.3, 0.91), y_tickspacing=0.05, x_tickspacing=10)
 
 
 def sep():
@@ -567,7 +608,7 @@ if __name__ == "__main__":
     # print_knockout()
     # visualise()
 
-    # main_tokenDiffs()
+    main_tokenDiffs()
     # sep()
     # main_mergestats()
     # sep()
@@ -581,4 +622,4 @@ if __name__ == "__main__":
     # sep()
     # main_deleteLastMerges()
     # time_iterators()
-    main_deleteLastLeaves()
+    # main_deleteLastLeaves()

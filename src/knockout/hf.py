@@ -15,6 +15,11 @@ There are two possible interfaces to implement here:
 The parent class of transformers.PreTrainedTokenizer has 10 unimplemented methods of which 2 are left:
         get_vocab()
         save_vocabulary()
+
+TODO:
+    - Support all unicode by having UNKs
+    - Support byte-based preprocessing
+    - Support <s> </s> post-processing
 """
 from typing import List, Tuple, Dict, Any, Optional
 from pathlib import Path

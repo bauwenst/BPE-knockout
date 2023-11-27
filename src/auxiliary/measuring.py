@@ -48,11 +48,11 @@ class SegmentationConfusionMatrix:
                  "        \t  +  \t  -\n"   +\
                 f"actual +\t {tp}\t {fn}\n" +\
                 f"       -\t {fp}\t {tn}"
-        print(string)
+        wprint(string)
 
     def computeAndDisplay(self, indent=0):
         P, R, F1 = self.compute()
-        print("\t"*indent + "Precision:", P)
+        wprint("\t"*indent + "Precision:", P)
         print("\t"*indent + "Recall:   ", R)
         print("\t"*indent + "F1:       ", F1)
 
@@ -109,7 +109,7 @@ def intersectLexiconCounts() -> Optional[Counter]:
     if Pℛ𝒪𝒥ℰ𝒞𝒯.config.lemma_weights is None:  # Impossible to identify which cache file it would be.
         return None
 
-    cache_path = PATH_DATA_TEMP / f"{Pℛ𝒪𝒥ℰ𝒞𝒯.config.lemma_weights.stem} (x) {Pℛ𝒪𝒥ℰ𝒞𝒯.config.morphologies.stem}.txt"  # Path depends on the two files it intersects, otherwise it would be used even if you switched languages.
+    cache_path = PATH_DATA_TEMP / f"{Pℛ𝒪𝒥ℰ𝒞𝒯.config.lemma_weights.stem} ⊗ {Pℛ𝒪𝒥ℰ𝒞𝒯.config.morphologies.stem}.txt"  # Path depends on the two files it intersects, otherwise it would be used even if you switched languages.
     if not cache_path.exists():
         if not Pℛ𝒪𝒥ℰ𝒞𝒯.config.lemma_weights.exists():  # Impossible to fill the cache.
             return None
@@ -154,11 +154,11 @@ def loadAndWeightLexicon(reweighting_function: Callable[[float],float]) -> Dict[
 #########################
 def morphologyVersusTokenisation(morphology_method: MorphologyVisitor, tokenizer=robbert_tokenizer,  # Compared
                                  weights: Dict[str, float]=None, holdout: Holdout=None,  # Experimental parameters
-                                 do_write_errors=False, quiet=False, display_confusion_matrix=False, name="RobBERT"):  # Display
+                                 do_write_errors=False, quiet=False, display_confusion_matrix=False, log_name="log"):  # Display
     # Optional stuff
     weighted = weights is not None
     if do_write_errors:
-        log = open(PATH_DATA_OUT / f"{name}_boundary_violations_{morphology_method.__name__}.txt", "w", encoding="utf-8")
+        log = open(PATH_DATA_OUT / f"{log_name}_boundary_violations_{morphology_method.__name__}.txt", "w", encoding="utf-8")
 
     cm   = SegmentationConfusionMatrix()
     cm_w = SegmentationConfusionMatrix() if weighted else None
@@ -263,12 +263,12 @@ def test_tokenizers_batch(tkzrs: list, reweighting_function: Callable[[float],fl
         print("|V|:", size)
         print("\tMorph split accuracy:")
         time.sleep(0.01)
-        cm1, cm1_w = morphologyVersusTokenisation(MorphSplit(), tokenizer=t, do_write_errors=False, name=name,
+        cm1, cm1_w = morphologyVersusTokenisation(MorphSplit(), tokenizer=t, do_write_errors=False, log_name=name,
                                                   weights=lemma_weights, holdout=holdout)
 
         print("\tLemmatic split accuracy:")
         time.sleep(0.01)
-        cm2, cm2_w = morphologyVersusTokenisation(LexSplit(), tokenizer=t, do_write_errors=False, name=name,
+        cm2, cm2_w = morphologyVersusTokenisation(LexSplit(), tokenizer=t, do_write_errors=False, log_name=name,
                                                   weights=lemma_weights, holdout=holdout)
         print()
 

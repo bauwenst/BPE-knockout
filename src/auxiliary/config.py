@@ -52,7 +52,7 @@ def setupDutch() -> ProjectConfig:
     if DUTCH_CONFIG.lemma_weights is not None and not DUTCH_CONFIG.lemma_weights.exists():
         from src.datahandlers.hf_corpora import dataloaderToWeights
         from src.datahandlers.hf_corpora import generateDataloader_Oscar
-        weights = dataloaderToWeights(generateDataloader_Oscar("nl"), "words_oscar-nl")  # This will take 6 hours.
+        weights = dataloaderToWeights(generateDataloader_Oscar("nl"), DUTCH_CONFIG.lemma_weights.stem)  # This will take 6 hours.
         weights.rename(DUTCH_CONFIG.lemma_weights)
 
     if DUTCH_CONFIG.morphologies is None or not DUTCH_CONFIG.morphologies.exists():  # TODO: Could probably query the MPI database
@@ -79,7 +79,7 @@ def setupGerman() -> ProjectConfig:
 
     ###
     GERMAN_CONFIG = ProjectConfig(
-        lemma_weights=None,
+        lemma_weights=PATH_DATA_COMPRESSED / "words_oscar-de.txt",
         morphologies=PATH_DATA_COMPRESSED / "celex_morphology_de.txt",
         base_vocab=None,
         base_merges=None,
@@ -89,11 +89,11 @@ def setupGerman() -> ProjectConfig:
     ###
 
     if GERMAN_CONFIG.lemma_weights is not None and not GERMAN_CONFIG.lemma_weights.exists():
-        pass
-        # from src.datahandlers.hf_corpora import dataloaderToWeights
-        # from src.datahandlers.hf_corpora import generateDataloader_Oscar
-        # weights = dataloaderToWeights(generateDataloader_Oscar("de"), "words_oscar-de")  # THIS IS NOT ADVISABLE. IT TAKES MULTIPLE DAYS.
-        # weights.rename(GERMAN_CONFIG.lemma_weights)
+        from src.datahandlers.hf_corpora import dataloaderToWeights, generateDataloader_Oscar, punctuationPretokeniserExceptHyphens
+        dataloader = generateDataloader_Oscar(lang="de", sentence_preprocessor=punctuationPretokeniserExceptHyphens(),
+                                              size_limit=30_000_000)
+        weights = dataloaderToWeights(dataloader, GERMAN_CONFIG.lemma_weights.stem)
+        weights.rename(GERMAN_CONFIG.lemma_weights)
 
     return GERMAN_CONFIG
 

@@ -6,6 +6,9 @@ if __name__ == "__main__":
     from src.auxiliary.config import *
     Pℛ𝒪𝒥ℰ𝒞𝒯.config = setupDutch()  # Here is where you set the language for all the runs below.
 
+    # Attempt to load lexicon weights (good test to see if setup worked)
+    lexiconWeights()
+
     from tst.knockout import *
     main_mergestats()
     main_vocabstats()
@@ -13,5 +16,6 @@ if __name__ == "__main__":
     main_deleteRandomMerges()
     main_deleteLastMerges()
     main_deleteLastLeaves()
+    main_blameThreshold()
     main_intrinsicPartial()
     main_intrinsicMultilingual()

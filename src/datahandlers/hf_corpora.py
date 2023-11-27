@@ -12,7 +12,8 @@ from src.visualisation.printing import *
 
 # https://huggingface.co/docs/tokenizers/components
 # https://huggingface.co/docs/tokenizers/pipeline
-normalizer   = tn.Sequence([tn.NFD(), tn.StripAccents()])
+# normalizer   = tn.Sequence([tn.NFD(), tn.StripAccents()])  TODO: For Dutch, you want to remove all ´ and ` but keep all ¨ and ^. There is no normaliser for that.
+normalizer   = tn.NFKC()  # There are 4 NFs. The ones with a K turn weird letters to their ASCII form. The ones with a D turn accents into "modifying characters" (which you need for StripAccent), e.g. in the two-character example "ä", while C composes them into one character again.
 pretokeniser = tp.Whitespace()  # Combines WhitespaceSplit and Punctuation
 
 
@@ -65,7 +66,8 @@ def generateDataloader_Oscar(lang: str="nl", sentence_preprocessor: Callable[[st
 
 
 def dataloaderToWeights(dataloader: DataLoader, output_stem: str):
-    path = iterableToWordsFile(dataloader, PATH_DATA_COMPRESSED / (output_stem + ".txt"))  # For OSCAR, this call ran from 14:56 to 20:52, which is ~6 hours.  TODO: Add caching somewhere here ("if file doesn't exist, ..."). But you should know which file!
+    path = iterableToWordsFile(dataloader, PATH_DATA_COMPRESSED / (output_stem + ".txt"),
+                               cache_every=1_000_000, progress_bar_total=len(dataloader))  # For OSCAR, this call ran from 14:56 to 20:52, which is ~6 hours.  TODO: Add caching somewhere here ("if file doesn't exist, ..."). But you should know which file!
     path = cleanWordFile(path)
     path = trimWordFile(path, minimum=10)
     return path
@@ -79,7 +81,7 @@ def punctuationPretokeniserExceptHyphens():
     from string import punctuation
     from tokenizers import Regex
 
-    punctuation = punctuation + "€£…‘’“”«»"  # Adding some European punctuations.
+    punctuation = punctuation + "€£…‘’“”„«»"  # Adding some European punctuations.
     punctuation = punctuation.replace("\\", "") + "\\"  # Put backslash in the back. Makes the pattern clearer.
     punctuation = punctuation.replace("-", "")  # Ignore hyphens!
 
@@ -101,5 +103,5 @@ if __name__ == "__main__":
     dataloader = generateDataloader_Oscar(lang="de", sentence_preprocessor=punctuationPretokeniserExceptHyphens(),
                                           size_limit=30_000_000)
     t.lap(echo=True)
-    iterableToWordsFile(dataloader, PATH_DATA_COMPRESSED / "oscar-de-rawcounts.txt", cache_every=1_000_000, progress_bar_total=len(dataloader))
+    dataloaderToWeights(dataloader, output_stem="words_oscar-de")
     t.lap(echo=True)
