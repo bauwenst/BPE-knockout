@@ -228,6 +228,12 @@ class RefMode(str, Enum):  # The str parent allows JSON serialisation: https://s
             return ""
 
 
+class ByteBasedMode(str, Enum):
+    NONE           = 1
+    VOCAB_TO_CHARS = 2  # Take a vocab produced by HuggingFace's BBPE (which consists of the 256 byte-representing characters) and convert it to the corresponding characters.
+    INPUT_TO_BYTES = 3  # Take UTF-8 input and map it to HuggingFace's 256 byte-representing characters.
+
+
 @dataclasses.dataclass
 class BteInitConfig:
     """
@@ -235,15 +241,13 @@ class BteInitConfig:
     :param keep_long_merges: whether to skip knockout for merges with relatively long parts (because they likely
                              form compounds; these need to be removed from the vocab, but by not doing so, you can
                              measure their effect on intrinsic evaluation metrics).
-    :param starting_from_bytechars: whether the starting vocab and starting merges are encoded by HuggingFace's
-                                    byte-to-character mapper, which is the case if you use byte-based BPE.
     """
     knockout: RefMode = RefMode.NONE
     anneal:   RefMode = RefMode.NONE
     do_swap_stages:   bool = False
     keep_long_merges: bool = False
     weighted_training: bool = False
-    starting_from_bytechars: bool = True
+    bytebased: ByteBasedMode = ByteBasedMode.NONE
 
 
 class BTE:
@@ -326,7 +330,7 @@ class BTE:
         """
         self.padded_merge_rules   = self.merge_graph.getPaddedMerges()
         self.merges_starting_with = {t: [] for t in self.merge_graph.vocab}
-        if self.config.starting_from_bytechars:
+        if self.config.bytebased == ByteBasedMode.VOCAB_TO_CHARS:
             self.padded_merge_rules = [(tup[0], accentMapper(tup[1]), accentMapper(tup[2])) for tup in self.padded_merge_rules]
             self.merges_starting_with = {accentMapper(t): [] for t in self.merge_graph.vocab}
 
@@ -350,7 +354,7 @@ class BTE:
             self.merge_graph.addArc(merge)
 
     def tokenize(self, word: str) -> List[str]:
-        return self.segment_as_is(word.replace(" ", "Ġ"))
+        return self.segment_as_is(word.replace(" ", "Ġ"))  # TODO: This definitely doesn't support attached SoW/EoW.
 
     # @timeit
     def segment_as_is(self, word: str) -> List[str]:
@@ -590,7 +594,7 @@ class BTE:
             do_swap_stages=tkz_as_dict["init-metadata"]["do_swap_stages"],
             keep_long_merges=tkz_as_dict["init-metadata"]["keep_long_merges"],
             weighted_training=tkz_as_dict["init-metadata"]["weighted_training"],
-            starting_from_bytechars=tkz_as_dict["init-metadata"]["starting_from_bytechars"]
+            bytebased=ByteBasedMode(tkz_as_dict["init-metadata"]["starting_from_bytechars"])
         )
 
         return BTE(init_config,
@@ -611,7 +615,7 @@ class BTE:
 
         out_path = folder / time.strftime("BTE_%Y-%m-%d_%H%M%S.json")
         with open(out_path, "w", encoding="utf-8") as handle:
-            json.dump(data, handle, indent=4)
+            json.dump(data, handle, indent=4, ensure_ascii=False)
         return out_path
 
     def convert_tokens_to_string(self, tokens: List[str]) -> str:

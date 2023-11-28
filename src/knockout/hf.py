@@ -18,19 +18,26 @@ The parent class of transformers.PreTrainedTokenizer has 10 unimplemented method
 
 TODO:
     - Support all unicode by having UNKs
-    - Support byte-based preprocessing
-    - Support <s> </s> post-processing
+    - Support <s> </s> post-processing. A little forensic work shows that there exists the following callchain:
+        ._encode_plus()
+            .tokenize(text)
+                ._tokenize(text)
+            .convert_tokens_to_ids(tokens)
+            .prepare_for_model(ids)
+                .build_inputs_with_special_tokens(ids)
+                .create_token_type_ids_from_sequences(...)
+     It is build_inputs_with_special_tokens() that we need to override for post-processing.
+     Note that tokenizers.processors isn't allowed with a slow tokeniser, so you should just append the IDs of <s> and </s>.
+    - Ensure that the special token IDs aren't already used inside the BTE vocab, somehow.
 """
 from typing import List, Tuple, Dict, Any, Optional
 from pathlib import Path
 
 from transformers import PreTrainedTokenizer
-import re
+from tokenizers import pre_tokenizers, decoders
 import json
 
-from src.knockout.knockout import BTE, BteInitConfig, RefMode
-
-Whitespace = re.compile(r"\s")
+from src.knockout.knockout import BTE, BteInitConfig, RefMode, ByteBasedMode
 
 
 class BTEk_HuggingFace(PreTrainedTokenizer):
@@ -40,6 +47,14 @@ class BTEk_HuggingFace(PreTrainedTokenizer):
         self.algorithm = algorithm
         self.vocab         = self.algorithm.get_vocab()
         self.reverse_vocab = {i: s for s,i in self.vocab.items()}  # Assume that the vocabulary is injective (no duplicate IDs)
+        if algorithm.config.bytebased == ByteBasedMode.INPUT_TO_BYTES:  # TODO: This if-then should probably be inside BTE, since it is part of its config, not the HuggingFace tokeniser.
+            pt = pre_tokenizers.ByteLevel(add_prefix_space=False)
+            pti = decoders.ByteLevel()
+            self.sentence_to_tokens = lambda sentence: [t for t,_ in pt.pre_tokenize_str(sentence)]
+            self.tokens_to_sentence = lambda token_strings: pti.decode(token_strings)
+        else:
+            self.sentence_to_tokens = lambda sentence: [" " + t for t in sentence.split()]
+            self.tokens_to_sentence = lambda token_strings: "".join(token_strings)
 
     @property
     def vocab_size(self) -> int:
@@ -92,15 +107,13 @@ class BTEk_HuggingFace(PreTrainedTokenizer):
 
         # For some dark reason, HuggingFace's "slow tokenizer" interface doesn't offer access to pretokenisation:
         #   https://github.com/huggingface/transformers/issues/26254
-        # The only kind of pretokenisation is that a sentence is split based on a "tokens_trie" that recognises
-        # predetermined strings, but I find this strange since the text that arrives comes from user input, and hence
-        # this kind of preprocessing allows token injection (although the strings are each sent to the tokeniser as
-        # strings... I don't know what the point would be in that case).
-        for word in Whitespace.split(text):  # I'm using regex whitespace, which, unlike HuggingFace Whitespace, loses exact character positions.
-            if not word:  # Takes care of double spaces. Not good if you want to parse code, FYI.
-                continue
-            tokens.extend(self.algorithm.tokenize(word=" " + word))
+        # Hence, what arrives in this method is a full sentence.
+        for word in self.sentence_to_tokens(text):
+            tokens.extend(self.algorithm.tokenize(word=word))  # The word is expected to have either a space or a start-of-word up front. I.e.: the segmentation should be lossless.
         return tokens
+
+    def convert_tokens_to_string(self, tokens: List[str]) -> str:
+        return self.tokens_to_sentence(tokens)
 
 
 def constructHuggingFaceBPEknockout():

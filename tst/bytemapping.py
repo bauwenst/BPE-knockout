@@ -52,7 +52,7 @@ def pythonBTEvsHuggingFaceBPErevisited():
     Hypothesis: they actually differ for words with e.g. an ë because whereas HuggingFace sees the ë all the way through
                 even if its config file shows "Ã«", BTE thinks it needs the literal characters Ã« to merge that word.
     """
-    from src.knockout.knockout import BTE, BteInitConfig
+    from src.knockout.knockout import BTE, BteInitConfig, ByteBasedMode
     from src.auxiliary.robbert_tokenizer import robbert_tokenizer, tokenizeAsWord
     from tst.knockout import assert_tokenisers_equal
     assert_tokenisers_equal()
@@ -73,7 +73,7 @@ def pythonBTEvsHuggingFaceBPErevisited():
         print("\t", tokenizeAsWord(example, tokenizer=bte))
 
     print("Fixed:")
-    bte = BTE(BteInitConfig(starting_from_bytechars=True))
+    bte = BTE(BteInitConfig(bytebased=ByteBasedMode.VOCAB_TO_CHARS))
     for example in examples:
         print("\t", tokenizeAsWord(example, tokenizer=bte))
 
@@ -207,15 +207,15 @@ def doubleCollapse():
 
 
 def compareWithAndWithoutByteRemapping():
-    from src.knockout.knockout import BTE, BteInitConfig, RefMode
+    from src.knockout.knockout import BTE, BteInitConfig, RefMode, ByteBasedMode
     from tst.knockout import assert_tokenisers_equal
 
     # bte1 = BTE(BteInitConfig(starting_from_bytechars=False))
     # bte2 = BTE(BteInitConfig(starting_from_bytechars=True))
     # assert_tokenisers_equal(bte1, bte2)
 
-    bte1 = BTE(BteInitConfig(starting_from_bytechars=False, knockout=RefMode.MORPHEMIC), autorun_modes=False)
-    bte2 = BTE(BteInitConfig(starting_from_bytechars=True,  knockout=RefMode.MORPHEMIC), autorun_modes=False)
+    bte1 = BTE(BteInitConfig(bytebased=ByteBasedMode.NONE, knockout=RefMode.MORPHEMIC), autorun_modes=False)
+    bte2 = BTE(BteInitConfig(bytebased=ByteBasedMode.VOCAB_TO_CHARS, knockout=RefMode.MORPHEMIC), autorun_modes=False)
     lst1 = bte1.getBadOldMerges()
     lst2 = bte2.getBadOldMerges()
 
@@ -235,8 +235,8 @@ def compareWithAndWithoutByteRemapping():
     print([(tup[2], merges2[tup[2]]) for tup in set2 - set1 if tup[2] not in merges1])
     # [(34143, ['ĠintuÃ¯t', 'ief']), (9788, ['Ġcategorie', 'Ã«n']), (28659, ['ĠcoÃ¶per', 'atie']), (18251, ['ĠcoÃ¶rdin', 'atie']), (6389, ['Ġbe', 'Ã¯n']), (29264, ['ĠoriÃ«nt', 'eren']), (37584, ['oriÃ«nt', 'atie']), (19968, ['ĠcoÃ¶rdin', 'ator']), (31653, ['u', 'Ã¯']), (18454, ['Ġtwee', 'Ã«n']), (14289, ['o', 'Ã¯']), (24415, ['iÃ«nt', 'ie']), (15937, ['Ġcalorie', 'Ã«n']), (12642, ['Ã©', 's']), (14332, ['Ġre', 'Ã«']), (6921, ['Ġbe', 'Ã«']), (39001, ['ĠdiÃ«t', 'ist']), (17767, ['ĠefficiÃ«nt', 'ie']), (4272, ['ic', 'i']), (31636, ['ĠhygiÃ«n', 'isch']), (4373, ['Ġidee', 'Ã«n']), (28683, ['Ġre', 'Ã¯n']), (17651, ['Ġco', 'Ã¶per']), (31699, ['Ã¶per', 'atie']), (17875, ['g', 'i']), (6383, ['Ġge', 'Ã«']), (21821, ['ĠoriÃ«nt', 'atie']), (8963, ['iÃ«r', 's']), (29118, ['Ġdrie', 'Ã«n'])]
 
-    bte1 = BTE(BteInitConfig(starting_from_bytechars=False, knockout=RefMode.MORPHEMIC), autorun_modes=True)
-    bte2 = BTE(BteInitConfig(starting_from_bytechars=True,  knockout=RefMode.MORPHEMIC), autorun_modes=True)
+    bte1 = BTE(BteInitConfig(bytebased=ByteBasedMode.NONE, knockout=RefMode.MORPHEMIC), autorun_modes=True)
+    bte2 = BTE(BteInitConfig(bytebased=ByteBasedMode.VOCAB_TO_CHARS, knockout=RefMode.MORPHEMIC), autorun_modes=True)
     assert_tokenisers_equal(bte1, bte2)
     # There are 632 different tokenisations, of which only 6 are not related to accents:
     #                        [' mag', 'gi'] =/= [' mag', 'g', 'i']

@@ -382,3 +382,37 @@ def generatePathForTrimmedFile(path: Path):
 def generatePathForAccentedFile(path: Path):
     return path.with_stem(path.stem + "_reaccented")
 
+
+def wordfileToBpeCorpus(wordfile: Path, do_pretokenise=False) -> Iterable[str]:
+    """
+    Converts a file
+        apple 5
+        banana-pear 3
+        ...
+    to sentences
+        Ġapple Ġapple Ġapple Ġapple Ġapple
+        Ġbanana - pear Ġbanana - pear Ġbanana - pear
+
+    or, if pretokenisation is turned on (do NOT do this when using HuggingFace's ByteLevel pretokeniser already!),
+        apple apple apple apple apple
+        banana-pear banana-pear banana-pear
+    """
+    from src.datahandlers.hf_corpora import punctuation
+    PUNCTUATION_PATTERN = re.compile("("
+                                     + "["
+                                     + "-_–" + punctuation.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")  # Could've just been ([-]+) but the other punctuation could also prove useful for wordfiles where you forgot to split off periods etc.
+                                     + "]+"
+                                     + ")")
+    LARGEST_STRING_LEN  = 5_000_000
+
+    with open(wordfile, "r", encoding="utf-8") as handle:
+        for word, count in iterateWordsFile(handle):
+            if do_pretokenise:
+                word = " ".join(PUNCTUATION_PATTERN.split("Ġ" + word))  # Add spaces around (groups of) punctuation. Note that the pattern's capture group ( ) keeps the separator. https://stackoverflow.com/a/2136580/9352077
+            count = int(count)  # Note: you can't just multiply the string you want to return by this count, because you'll run into memory errors (kinda hard to reserve 400 million bytes of stack space).
+            max_at_once = max(1, LARGEST_STRING_LEN // (len(word)+1))
+            while count > 0:
+                new_count = max(0, count - max_at_once)
+                diff      = count - new_count
+                count -= diff
+                yield diff*(" " + word)
