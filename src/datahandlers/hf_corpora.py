@@ -73,17 +73,16 @@ def dataloaderToWeights(dataloader: DataLoader, output_stem: str):
     return path
 
 
+from string import punctuation
+punctuation = punctuation + "€£…‘’“”„«»"  # Adding some European punctuations.
+punctuation = punctuation.replace("\\", "") + "\\"  # Put backslash in the back. Makes the pattern clearer.
+punctuation = punctuation.replace("-", "")  # Ignore hyphens!
 def punctuationPretokeniserExceptHyphens():
     import tokenizers.normalizers as tn
     normalizer = tn.NFD()
 
     import tokenizers.pre_tokenizers as pt
-    from string import punctuation
     from tokenizers import Regex
-
-    punctuation = punctuation + "€£…‘’“”„«»"  # Adding some European punctuations.
-    punctuation = punctuation.replace("\\", "") + "\\"  # Put backslash in the back. Makes the pattern clearer.
-    punctuation = punctuation.replace("-", "")  # Ignore hyphens!
 
     punctuation_pattern = Regex("[" + punctuation.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]") + "]+")
     pretokeniser = pt.Split(pattern=punctuation_pattern, behavior="isolated")

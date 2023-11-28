@@ -389,7 +389,7 @@ def learn_bpe(infiles: List[Iterable[str]], outfile: TextIO,
     ini_score = None
     frac_stopping_accum = 0.0
     num_written = 0
-    for num_written in tqdm(range(num_symbols), desc="MERGES"):
+    for num_written in tqdm(range(num_symbols), desc="MERGES", smoothing=0.1):
         if not pair_stats:
             error('No more pairs after creating {} symbols. Stopping\n'.format(num_written))
             break
