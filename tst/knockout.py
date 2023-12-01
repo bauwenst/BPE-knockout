@@ -284,6 +284,7 @@ def main_intrinsicAll():
 
     table.commit()
 
+
 @timeit
 def main_intrinsicMultilingual():
     """
@@ -295,13 +296,22 @@ def main_intrinsicMultilingual():
 
     from src.auxiliary.config import setupDutch, setupGerman
 
-    table = Table("bte-intrinsic-dutch-german")
+    table = Table("bte-intrinsic-dutch-german", caching=CacheMode.IF_MISSING)
     if table.needs_computation:
+        import transformers
+        transformers.set_seed(0)
+
+        def BPEdropout():
+            tkz = Pℛ𝒪𝒥ℰ𝒞𝒯.config.base_tokeniser.toFastBPE()
+            tkz.backend_tokenizer.model.dropout = 0.1
+            return tkz
+
         for config in [setupDutch(), setupGerman()]:
             Pℛ𝒪𝒥ℰ𝒞𝒯.config = config
             bte          = BTE(BteInitConfig())  # Changes depending on the language.
+            bpe_dropout  = BPEdropout()
             bte_knockout = BTE(BteInitConfig(knockout=RefMode.MORPHEMIC))
-            results = test_tokenizers_batch([bte, bte_knockout], reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
+            results = test_tokenizers_batch([bte, bpe_dropout, bte_knockout], reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
             addEvaluationToTable(table, results)
 
     table.commit()
@@ -309,13 +319,14 @@ def main_intrinsicMultilingual():
     ###
     Pℛ𝒪𝒥ℰ𝒞𝒯.config = old_config
 
+
 @timeit
 def main_intrinsicPartial():
     """
     Intrinsic evaluation, except you use holdout and/or trivial merge exclusion to get a more nuanced view of the
-    metrics.
+    metrics. TODO: Possibly have to do this per language, idk how you want to tabulate it.
     """
-    table = Table("bte-intrinsic-partial")
+    table = Table("bte-intrinsic-partial", caching=CacheMode.IF_MISSING)
     if table.needs_computation:
         # Trivials
         results = test_tokenizers_batch(
@@ -333,6 +344,20 @@ def main_intrinsicPartial():
         addEvaluationToTable(table, results)
 
     table.commit()
+
+
+@timeit
+def main_intrinsicWeightedTraining():
+    table = Table("bte-intrinsic-weightedtraining", caching=CacheMode.IF_MISSING)
+    if table.needs_computation:
+        results = test_tokenizers_batch(
+            [BTE(BteInitConfig(knockout=mode, weighted_training=True)) for mode in modes_to_test],
+            reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter
+        )
+        addEvaluationToTable(table, results)
+
+    table.commit()  # FIXME: Formatting options haven't been committed yet on my desktop, so I don't have them here.
+
 
 @timeit
 def main_deleteRandomMerges():

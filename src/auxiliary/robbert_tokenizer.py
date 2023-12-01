@@ -1,11 +1,26 @@
 from typing import List
+from pathlib import Path
 
 import json
 import requests
-from transformers import AutoTokenizer, RobertaTokenizerFast
-robbert_tokenizer: RobertaTokenizerFast = AutoTokenizer.from_pretrained("pdelobelle/robbert-v2-dutch-base")
+from transformers import AutoTokenizer, RobertaTokenizerFast, PreTrainedTokenizerFast
 
 from src.auxiliary.paths import PATH_DATA_TEMP
+
+
+def AutoTokenizer_from_pretrained(path_or_name: str) -> PreTrainedTokenizerFast:
+    """
+    HuggingFace's AutoTokenizer.from_pretrained somehow doesn't work with local paths.
+    Fine, I'll do it myself.
+    """
+    path = Path(path_or_name)
+    if path.is_absolute():
+        return PreTrainedTokenizerFast(tokenizer_file=path.as_posix())
+    else:
+        return AutoTokenizer.from_pretrained(path_or_name)
+
+
+robbert_tokenizer = AutoTokenizer_from_pretrained("pdelobelle/robbert-v2-dutch-base")
 
 
 def tokenizeAsWord(word: str, tokenizer=robbert_tokenizer) -> List[str]:

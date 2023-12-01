@@ -27,30 +27,32 @@ SPECIAL_TYPES = SpecialTokensMixin(
     unk_token=UNK
 )  # The above argument mapping is reconstructed with .special_tokens_map; the list of values is .all_special_tokens
 
+SOW = "Ġ"
+
 
 class BPETrainer:
 
     def __init__(self, vocab_size: int, byte_based: bool):
         self.size   = vocab_size
-        self.soweow = SowEowSpecification(detached=True, start_not_end=True, character="Ġ")
+        self.soweow = SowEowSpecification(detached=True, start_not_end=True, character=SOW)
         self.byte_based = byte_based
-
-        normaliser = normalizers.NFKC()
-        if self.byte_based:
-            pretokeniser = pre_tokenizers.ByteLevel(add_prefix_space=False)  # Also a punctuation tokeniser!
-            self.preprocessor = lambda word: [token for token, _ in pretokeniser.pre_tokenize_str(normaliser.normalize_str(word))]
-        else:
-            self.preprocessor = lambda word: [normaliser.normalize_str(word)]
+        self.normaliser = normalizers.NFKC()
 
     def train(self, wordfile: Path, out_folder: Path):
         paths = SennrichTokeniser(folder=out_folder)
         path_vocab, path_merges = paths.getPaths()
 
         # Learn merges
+        if self.byte_based:
+            pretokeniser = pre_tokenizers.ByteLevel(add_prefix_space=False)  # Also a punctuation tokeniser!
+            preprocessor = lambda word: [token for token, _ in pretokeniser.pre_tokenize_str(self.normaliser.normalize_str(word))]
+        else:
+            preprocessor = lambda word: [self.normaliser.normalize_str(word)]
+
         with open(path_merges, "w", encoding="utf-8") as out_handle:
             with open(wordfile, "r", encoding="utf-8") as in_handle:
                 learn_bpe([in_handle], out_handle, num_symbols_ori=self.size, total_symbols=True,
-                          is_dict=True, word_preprocessor=self.preprocessor, soweow=self.soweow)
+                          is_dict=True, word_preprocessor=preprocessor, soweow=self.soweow)
 
         # Deduce vocab
         vocab = BPETrainer.deduceVocabFromMerges(path_merges, byte_based=self.byte_based)
@@ -91,21 +93,24 @@ class BPETrainer:
         tokeniser = Tokenizer(models.BPE())
         if self.byte_based:
             tokeniser.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False, trim_offsets=True)
+        else:
+            tokeniser.pre_tokenizer = pre_tokenizers.Metaspace(replacement=SOW)
 
         # Trainer interface according to https://huggingface.co/docs/tokenizers/api/trainers (ignore the type hints that complain):
         trainer = trainers.BpeTrainer(
-            vocab_size=40_000,
+            vocab_size=self.size,
             show_progress=True,
             special_tokens=SPECIAL_TYPES.all_special_tokens,
-            initial_alphabet=tokeniser.pre_tokenizer.alphabet() if self.byte_based else None  # after https://huggingface.co/docs/tokenizers/training_from_memory
+            initial_alphabet=tokeniser.pre_tokenizer.alphabet() if self.byte_based else []  # after https://huggingface.co/docs/tokenizers/training_from_memory
         )
         tokeniser.train_from_iterator(wordfileToBpeCorpus(wordfile, do_pretokenise=False), trainer=trainer)
 
-        # Save and turn into vocab.json + merges.txt
+        # Save
         save_path = out_folder / f"BPE_from_{wordfile.stem}.json"
+        hf = HuggingFaceTokeniser(json_path=save_path)
         tokeniser.save(path=save_path.as_posix())
 
-        hf = HuggingFaceTokeniser(json_path=save_path)
+        # Turn into vocab.json + merges.txt
         vocab, merges = SennrichTokeniser(folder=out_folder).getPaths()
         with open(vocab, "w", encoding="utf-8") as out_handle:
             json.dump(hf.loadVocabulary(), out_handle, ensure_ascii=False, indent=4)

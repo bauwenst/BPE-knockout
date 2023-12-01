@@ -147,12 +147,12 @@ class CelexLemmaMorphology(LemmaMorphology):
             lines.extend(c.__repr__().split("\n"))
         return "\n|\t".join(lines)
 
-    def toForest(self, indent=0):
-        s = "[" + self.morphtext + r" (\textsc{" + self.pos[1:-1].lower().replace("|", "$\leftarrow$") + "})"
+    def toForest(self, do_full_morphemes=False, indent=0):
+        s = "[" + (self.morphemetext if do_full_morphemes else self.morphtext) + r" (\textsc{" + self.pos[1:-1].lower().replace("|", "$\leftarrow$") + "})"
         if self.children is not None:
             s += "\n"
             for child in self.children:
-                s += "".join(["\t" + line + "\n" for line in child.toForest(indent + 1).split("\n")])
+                s += "".join(["\t" + line + "\n" for line in child.toForest(do_full_morphemes=do_full_morphemes, indent=indent + 1).split("\n")])
         s += "]"
         return s
 
