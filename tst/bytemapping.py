@@ -11,6 +11,7 @@ Goal: Investigate how the assumption of character-level tokenisation influences 
 """
 from src.auxiliary.robbert_tokenizer import robbert_tokenizer, tokenizeAsWord
 from src.auxiliary.bytemapping import *
+from src.visualisation.timing import timeit
 
 
 def robbert():
@@ -247,6 +248,36 @@ def compareWithAndWithoutByteRemapping():
     # [' tafel', 'ten', 'n', 'ist', 'afel'] =/= [' tafel', 'ten', 'nist', 'afel']
 
 
+def compareMappingSpeed():
+    from tokenizers.decoders import ByteLevel
+    hf_decoder = ByteLevel()
+
+    text   = " coÃ¶peratie coÃ¶rdinatie intuÃ¯tief oriÃ«nteren"
+    tokens = ["Ġ" + t for t in text.split()]
+
+    print(simplifiedByteMapper(text))
+    print(hf_decoder.decode(tokens))
+
+    @timeit
+    def testPython():
+        for _ in range(1_000_000):
+            x = simplifiedByteMapper(text)
+
+    @timeit
+    def testHF():
+        for _ in range(1_000_000):
+            x = hf_decoder.decode([text])
+
+    @timeit
+    def testHF_withspaces():
+        for _ in range(1_000_000):
+            x = " ".join([hf_decoder.decode([part]).replace(" ", "Ġ") for part in text.split()])
+
+    testPython()
+    testHF()
+    testHF_withspaces()
+
+
 if __name__ == "__main__":
     # robbert()
     # pythonBTEvsHuggingFaceBPErevisited()
@@ -254,4 +285,5 @@ if __name__ == "__main__":
     # convertMerges()
     # testMapping()
     # doubleCollapse()
-    compareWithAndWithoutByteRemapping()
+    # compareWithAndWithoutByteRemapping()
+    compareMappingSpeed()

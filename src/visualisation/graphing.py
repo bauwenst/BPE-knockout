@@ -45,7 +45,7 @@ def getColours():
     return list(NICE_COLORS)
 
 # Graphical defaults
-ASPECT_RATIO_SIZEUP = 2
+ASPECT_RATIO_SIZEUP = 1.5  # Make this LARGER to make fonts and lines SMALLER.
 DEFAULT_ASPECT_RATIO = (4,3)
 DEFAULT_GRIDWIDTH = 0.5
 
@@ -654,7 +654,7 @@ class MultiHistogram(Diagram):
                 # print(df.groupby(LEGEND_TITLE_CLASS).describe())
             else:
                 legend_title = None
-                print(df.value_counts())
+                # print(df.value_counts())
 
             fig, ax = newFigAx(aspect_ratio)
             if not log_x:
@@ -1082,6 +1082,9 @@ class Table(Diagram):
             # lprint(lines)
 
 
+########################
+### TO-BE-INTEGRATED ###
+########################
 def arrow(ax: plt.Axes, start_point, end_point):  # FIXME: I want TikZ's stealth arrows, but this only seems possible in Matplotlib's legacy .arrow() interface (which doesn't keep its head shape properly): https://stackoverflow.com/a/43379608/9352077
     """
     Matplotlib's arrow interface is impossibly complicated. This simplifies that.
@@ -1134,6 +1137,13 @@ def latexTable(name, TP, FN, FP, TN, F1frac, MSEfrac, MSE_label: str = "MSE"):
 #############
 ### TESTS ###
 #############
+def example_linegraph():
+    graph = LineGraph("test", caching=CacheMode.NONE)
+    graph.addMany("a", [1,2,3,4,5,6,7,8,9,10], [5,4,8,3,7,9,5,4,8,6])
+    graph.addMany("b", [1,2,3,4,5,6,7,8,9,10], [1,8,5,3,1,4,7,5,3,8])
+    graph.commit()
+
+
 def example_table():
     table = Table("test", caching=CacheMode.NONE)
     table.set(3.14, "BPE", ["sizes", "$|V|$"])
@@ -1159,3 +1169,7 @@ def example_table():
     table.set("wow!", "ULM", ["morphemes", "weighted", "Re"])
 
     table.commit(borders_between_columns_of_level=[0, 1])
+
+
+if __name__ == "__main__":
+    example_linegraph()

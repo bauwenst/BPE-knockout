@@ -28,7 +28,7 @@ def iterableToWordsFile(line_iterable: Iterable[str], output_file: Path,
 
     total_counter = Counter()
     caches = []
-    for idx,line in tqdm(enumerate(line_iterable), total=progress_bar_total, smoothing=0.1):
+    for idx,line in tqdm(enumerate(line_iterable), total=progress_bar_total, smoothing=0.05):
         # Counting
         for word in line.split():  # No strip needed: note that .strip() without arguments will delete ALL WHITESPACE (i.e. any sequence length of space, tab, newline, carriage...). Those newlines would break word files.
             total_counter[word] += 1
@@ -70,7 +70,7 @@ def iterateTxt(open_file_handle: TextIO, verbose=True):
         open_file_handle.seek(0)
 
         # Now generate each line whilst updating a progress bar.
-        for line in tqdm(open_file_handle, total=total_lines, desc=Path(open_file_handle.name).name):
+        for line in tqdm(open_file_handle, total=total_lines, desc=Path(open_file_handle.name).name, smoothing=0.05):
             yield line.rstrip()
     else:
         for line in open_file_handle:
@@ -399,11 +399,11 @@ def wordfileToBpeCorpus(wordfile: Path, do_pretokenise=False) -> Iterable[str]:
     """
     from src.datahandlers.hf_corpora import punctuation
     PUNCTUATION_PATTERN = re.compile("("
-                                     + "["
-                                     + "-_–" + punctuation.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")  # Could've just been ([-]+) but the other punctuation could also prove useful for wordfiles where you forgot to split off periods etc.
-                                     + "]+"
-                                     + ")")
-    LARGEST_STRING_LEN  = 5_000_000
+                                   + "["
+                                   + "_–" + punctuation.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]").replace("-", "\\-")  # Could've just been ([\-]+) but the other punctuation could also prove useful for wordfiles where you forgot to split off periods etc.
+                                   + "]+"
+                                   + ")")
+    LARGEST_STRING_LEN  = 1_000
 
     with open(wordfile, "r", encoding="utf-8") as handle:
         for word, count in iterateWordsFile(handle):

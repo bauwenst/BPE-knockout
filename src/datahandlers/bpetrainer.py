@@ -1,10 +1,31 @@
 import json
 from pathlib import Path
+from typing import Dict, Set, Tuple
 
 from tokenizers import Tokenizer, models, normalizers, pre_tokenizers, trainers
 
+from src.auxiliary.paths import *
+from src.auxiliary.config import SennrichTokeniser, HuggingFaceTokeniser
 from src.datahandlers.wordfiles import wordfileToBpeCorpus
 from lib.sbpe.learn_bpe import learn_bpe, SowEowSpecification
+
+PATH_MODELS = PATH_DATA_OUT / "models"
+PATH_MODELS.mkdir(exist_ok=True)
+
+
+from transformers import SpecialTokensMixin
+PAD = "<pad>"
+BOS = "<s>"
+EOS = "</s>"
+MSK = "<mask>"
+UNK = "<unk>"
+SPECIAL_TYPES = SpecialTokensMixin(
+    pad_token=PAD,
+    bos_token=BOS,
+    eos_token=EOS,
+    mask_token=MSK,
+    unk_token=UNK
+)  # The above argument mapping is reconstructed with .special_tokens_map; the list of values is .all_special_tokens
 
 
 class BPETrainer:
@@ -18,15 +39,12 @@ class BPETrainer:
         if self.byte_based:
             pretokeniser = pre_tokenizers.ByteLevel(add_prefix_space=False)  # Also a punctuation tokeniser!
             self.preprocessor = lambda word: [token for token, _ in pretokeniser.pre_tokenize_str(normaliser.normalize_str(word))]
-            self.alphabet = pretokeniser.alphabet()
         else:
             self.preprocessor = lambda word: [normaliser.normalize_str(word)]
-            self.alphabet = None
 
     def train(self, wordfile: Path, out_folder: Path):
-        out_folder.mkdir(exist_ok=True, parents=True)
-        path_vocab  = out_folder / "vocab.json"
-        path_merges = out_folder / "merges.txt"
+        paths = SennrichTokeniser(folder=out_folder)
+        path_vocab, path_merges = paths.getPaths()
 
         # Learn merges
         with open(path_merges, "w", encoding="utf-8") as out_handle:
@@ -34,7 +52,15 @@ class BPETrainer:
                 learn_bpe([in_handle], out_handle, num_symbols_ori=self.size, total_symbols=True,
                           is_dict=True, word_preprocessor=self.preprocessor, soweow=self.soweow)
 
-        with open(path_merges, "r", encoding="utf-8") as in_handle:
+        # Deduce vocab
+        vocab = BPETrainer.deduceVocabFromMerges(path_merges, byte_based=self.byte_based)
+        with open(path_vocab, "w", encoding="utf-8") as out_handle:
+            json.dump(vocab, out_handle, ensure_ascii=False, indent=4)
+
+    @staticmethod
+    def deduceVocabFromMerges(mergefile: Path, byte_based: bool) -> Dict[str, int]:
+        # Summarise merges
+        with open(mergefile, "r", encoding="utf-8") as in_handle:
             merges = [line.strip() for line in in_handle if line != "#version: 0.2\n"]
 
         used_types     = set()
@@ -45,20 +71,22 @@ class BPETrainer:
             produced_types.add("".join(parts))
 
         # Get alphabet
-        if not self.byte_based:
-            self.alphabet = used_types - produced_types
+        alphabet = pre_tokenizers.ByteLevel().alphabet() if byte_based else used_types - produced_types
 
-        # Get vocab
+        # Combine everything
         vocab = {c: i for i, c in enumerate(
-            ["<pad>", "<s>", "</s>", "<mask>", "<unk>"] +
-            sorted(self.alphabet) +
+            SPECIAL_TYPES.all_special_tokens +
+            sorted(alphabet) +
             list(produced_types)
         )}
 
-        with open(path_vocab, "w", encoding="utf-8") as out_handle:
-            json.dump(vocab, out_handle, ensure_ascii=False, indent=4)
+        return vocab
 
     def train_hf(self, wordfile: Path, out_folder: Path):
+        """
+        HuggingFace equivalent. For German: starts out extremely slow
+        (giving an ETA of 500 000 hours), but finishes in under 2 hours.
+        """
         # Model: no normaliser (because RobBERT doesn't have one) and no decoder (because training is back-end-only).
         tokeniser = Tokenizer(models.BPE())
         if self.byte_based:
@@ -68,24 +96,24 @@ class BPETrainer:
         trainer = trainers.BpeTrainer(
             vocab_size=40_000,
             show_progress=True,
-            special_tokens=["<pad>", "<s>", "</s>", "<unk>", "<mask>"],
-            initial_alphabet=pre_tokenizers.ByteLevel.alphabet()  # after https://huggingface.co/docs/tokenizers/training_from_memory
+            special_tokens=SPECIAL_TYPES.all_special_tokens,
+            initial_alphabet=tokeniser.pre_tokenizer.alphabet() if self.byte_based else None  # after https://huggingface.co/docs/tokenizers/training_from_memory
         )
-
         tokeniser.train_from_iterator(wordfileToBpeCorpus(wordfile, do_pretokenise=False), trainer=trainer)
-        # tokeniser.save(path=(out_folder / f"BPE_from_{wordfile.stem}.json").as_posix())  # TODO: uncomment
 
-        ### TESTING
-        from transformers import PreTrainedTokenizerFast
-        wrapped_tokeniser = PreTrainedTokenizerFast(tokenizer_object=tokeniser)
-        print(wrapped_tokeniser.tokenize(" energie-efficiëntie wow"))
-        print(wrapped_tokeniser(" energie-efficiëntie wow"))
-        ###
+        # Save and turn into vocab.json + merges.txt
+        save_path = out_folder / f"BPE_from_{wordfile.stem}.json"
+        tokeniser.save(path=save_path.as_posix())
+
+        hf = HuggingFaceTokeniser(json_path=save_path)
+        vocab, merges = SennrichTokeniser(folder=out_folder).getPaths()
+        with open(vocab, "w", encoding="utf-8") as out_handle:
+            json.dump(hf.loadVocabulary(), out_handle, ensure_ascii=False, indent=4)
+        with open(merges, "w", encoding="utf-8") as out_handle:
+            out_handle.writelines([merge + "\n" for merge in hf.loadMerges()])
 
 
 if __name__ == "__main__":
-    from src.auxiliary.paths import PATH_DATA_OUT, PATH_DATA_COMPRESSED
-
     trainer = BPETrainer(vocab_size=40_000, byte_based=True)
-    trainer.train_hf(PATH_DATA_COMPRESSED / "words_oscar-de.txt",
-                     PATH_DATA_OUT / "german-bpe")
+    trainer.train_hf(PATH_DATA_COMPRESSED / "oscar-nl-raw_cleaned_trimmed.txt",
+                     PATH_MODELS / "clean-nl-bpe")

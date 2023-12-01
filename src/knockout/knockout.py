@@ -5,8 +5,6 @@ rules using its two parents. This involves two additional problems solved here:
     2. A way of deciding which types to knock out of the vocabulary. I came up with "blame ratio", see below.
 
 TODO:
-    - Should try with different thresholds. I also think possibly a maximum threshold is needed because some 100%-blame
-      vocab types are just pedantry by e-Lex. (Could be useful to eliminate mediocre examples from the log.)
     - For the use-cases where you chain annealing and knockout, it could be an idea to have the first be based on a
       heuristic, and have the second iterate as many times as the first. I.e.: if knockout removes 100 merges, anneal
       then adds 100 merges, ending up with the same vocab size.
@@ -28,12 +26,14 @@ from src.datahandlers.morphology import LexSplit, MorphSplit
 
 from src.auxiliary.measuring import SPLIT_MARKER_RE, SPLIT_MARKER
 from src.auxiliary.config import Pℛ𝒪𝒥ℰ𝒞𝒯, lexiconWeights, morphologyGenerator
-from src.auxiliary.bytemapping import accentMapper
+from src.auxiliary.bytemapping import simplifiedByteMapper
+from tokenizers.decoders import ByteLevel as ByteLevelDecoder  # The simplified byte mapper above suffices for Dutch/German.
+from tokenizers.pre_tokenizers import ByteLevel as ByteLevelPretokeniser
 
 from src.visualisation.printing import doPrint, PrintTable
 from src.visualisation.timing import timeit
 
-
+SOW = "Ġ"
 MergeAsTuple = Tuple[int, str, str]
 
 @dataclasses.dataclass
@@ -247,7 +247,7 @@ class BteInitConfig:
     do_swap_stages:   bool = False
     keep_long_merges: bool = False
     weighted_training: bool = False
-    bytebased: ByteBasedMode = ByteBasedMode.NONE
+    bytebased: ByteBasedMode = ByteBasedMode.INPUT_TO_BYTES  # Because all our tests assume byte-based vocabularies, we use this as default to not specify it every time.
 
 
 class BTE:
@@ -268,7 +268,17 @@ class BTE:
         """
         self.config = init_config
 
-        # Modes
+        # Character mapping (not pretokenisation)
+        if self.config.bytebased == ByteBasedMode.INPUT_TO_BYTES:
+            character_converter_plus_segmenter = ByteLevelPretokeniser(add_prefix_space=False)
+            character_converter_inverse        = ByteLevelDecoder()
+            self.word_preprocessor = lambda word: "".join([t for t,_ in character_converter_plus_segmenter.pre_tokenize_str(word)])  # We don't need the segmentation.
+            self.tokens_to_word    = lambda tokens: character_converter_inverse.decode(tokens)
+        else:
+            self.word_preprocessor = lambda word: word
+            self.tokens_to_word    = lambda tokens: "".join(tokens)
+
+        # Training regime
         self.knockout_segmentation = RefMode.toMethod(self.config.knockout)
         self.anneal_segmentation   = RefMode.toMethod(self.config.anneal)
         self.do_prune_trivials = not self.config.keep_long_merges
@@ -281,20 +291,17 @@ class BTE:
                     + (f"_{int(100*holdout.threshold)}-{int(100-100*holdout.threshold)}-holdout" if holdout is not None else "")\
                     + "_keeptrivial"*self.config.keep_long_merges
 
-        if not quiet:
-            print("Instantiating", self.name, "...")
-
-        # Training regime
         if holdout is None:
             holdout = Holdout(1.0)  # 100% of data goes to training.
         self.holdout = holdout
 
         # Graph
+        if not quiet:
+            print("Instantiating", self.name, "...")
+
         if starting_vocab is None or starting_mergelist is None:
-            with open(Pℛ𝒪𝒥ℰ𝒞𝒯.config.base_vocab, "r", encoding="utf-8") as handle:
-                starting_vocab = json.load(handle)
-            with open(Pℛ𝒪𝒥ℰ𝒞𝒯.config.base_merges, "r", encoding="utf-8") as handle:
-                starting_mergelist = [line.strip() for line in handle]
+            starting_vocab     = Pℛ𝒪𝒥ℰ𝒞𝒯.config.base_tokeniser.loadVocabulary()
+            starting_mergelist = Pℛ𝒪𝒥ℰ𝒞𝒯.config.base_tokeniser.loadMerges()
         self.merge_graph = MergeGraph(starting_vocab, starting_mergelist, quiet=quiet)
 
         self.padded_merge_rules:        List[MergeAsTuple] = None  # Will be synchronised with the graph
@@ -302,20 +309,23 @@ class BTE:
         self.syncWithGraph()
 
         if autorun_modes:
-            if not self.config.do_swap_stages:
-                if self.knockout_segmentation is not None:
-                    self.prune()
-                    self.syncWithGraph()
-                if self.anneal_segmentation is not None:
-                    self.anneal()
-                    self.syncWithGraph()
-            else:
-                if self.anneal_segmentation is not None:
-                    self.anneal()
-                    self.syncWithGraph()
-                if self.knockout_segmentation is not None:
-                    self.prune()
-                    self.syncWithGraph()
+            self.runModes()
+
+    def runModes(self):
+        if not self.config.do_swap_stages:
+            if self.knockout_segmentation is not None:
+                self.prune()
+                self.syncWithGraph()
+            if self.anneal_segmentation is not None:
+                self.anneal()
+                self.syncWithGraph()
+        else:
+            if self.anneal_segmentation is not None:
+                self.anneal()
+                self.syncWithGraph()
+            if self.knockout_segmentation is not None:
+                self.prune()
+                self.syncWithGraph()
 
     def getName(self):
         return self.name
@@ -330,13 +340,15 @@ class BTE:
         """
         self.padded_merge_rules   = self.merge_graph.getPaddedMerges()
         self.merges_starting_with = {t: [] for t in self.merge_graph.vocab}
+
         if self.config.bytebased == ByteBasedMode.VOCAB_TO_CHARS:
-            self.padded_merge_rules = [(tup[0], accentMapper(tup[1]), accentMapper(tup[2])) for tup in self.padded_merge_rules]
-            self.merges_starting_with = {accentMapper(t): [] for t in self.merge_graph.vocab}
+            mapping = simplifiedByteMapper  # TODO: It is faster (and works for any language) to use HuggingFace's decoder, EXCEPT it can't deal with spaces, and handling those causes it to become SLOWER. (Nevertheless, this sync method is not called during tokenisation, so technically you can afford to make it slow and accurate.)
+            self.padded_merge_rules = [(tup[0], mapping(tup[1]), mapping(tup[2])) for tup in self.padded_merge_rules]  # Note that tup[1] contains spaces and Ġ that both become spaces after mapping.
+            self.merges_starting_with = {mapping(t): [] for t in self.merge_graph.vocab}
 
         for tup in self.padded_merge_rules:
             head = tup[1][1:-1].split(" ")[0]
-            self.merges_starting_with[head].append(tup)
+            self.merges_starting_with[head].append(tup)  # If this raises a KeyError, something is definitely wrong.
 
     @timeit
     def prune(self):
@@ -353,10 +365,10 @@ class BTE:
         for ratio, total, merge in tqdm(merges_to_add, desc="ANNEALING GRAPH"):
             self.merge_graph.addArc(merge)
 
-    def tokenize(self, word: str) -> List[str]:
-        return self.segment_as_is(word.replace(" ", "Ġ"))  # TODO: This definitely doesn't support attached SoW/EoW.
-
-    # @timeit
+    def tokenize(self, word: str) -> List[str]:  # TODO: This doesn't support "attached SoW/EoW" and leaves SoW/EoW to the user. Not good.
+        return self.segment_as_is(self.word_preprocessor(word)
+                                  .replace(" ", SOW))    # My interface is messy in the sense that I expect the user to decide whether they want SoW or EoW by adding a prefixed or suffixed space to "word". This is technical debt from HuggingFace, who mix Unicode encoding with start-of-word prefixing.
+                                                         # By the way, if the word preprocessor is byte-level, it will auto-convert any space to Ġ, leaving us no choice of choosing the SoW/EoW. That sucks.
     def segment_as_is(self, word: str) -> List[str]:
         buffer = " " + " ".join(word) + " "
         while True:
@@ -364,7 +376,7 @@ class BTE:
             types = buffer[1:-1].split(" ")
             possible_merges = []
             for t in types:
-                for m in self.merges_starting_with[t]:
+                for m in self.merges_starting_with.get(t, []):
                     if m[1] in buffer:  # Note that m[1] is padded with spaces. If not, "a bc d" would allow the merge "a b".
                         possible_merges.append(m)
                         # print("\t", m[1])
@@ -394,7 +406,7 @@ class BTE:
             types = buffer[1:-1].split(" ")
             possible_merges = []
             for t in types:
-                for m in self.merges_starting_with[t]:
+                for m in self.merges_starting_with.get(t, []):
                     if m[1] in buffer:  # Note that m[1] is padded with spaces. If not, "a bc d" would allow the merge "a b".
                         possible_merges.append(m)
                         # print("\t", m[1])
@@ -448,7 +460,7 @@ class BTE:
             # Get BPE split and the ID of the merge that caused a space to disappear at each index.
             # TODO: This line and the ones below are specific to using RobBERT's vocabulary as starting vocab. Any BPE
             #       tokeniser that doesn't have an SoW (or doesn't have Ġ specifically) won't work currently.
-            tokens, merge_ids = self.segment_as_is_diagnostic("Ġ" + lemma)
+            tokens, merge_ids = self.segment_as_is_diagnostic(SOW + lemma)
 
             # One modification: because we neglect the RobBERT's start-of-word character Ġ when doing morphological
             # comparisons, we need to strip it from the tokenisation and hence also shift all the indices in the merge map.
@@ -516,7 +528,7 @@ class BTE:
             reference_segmentation = self.anneal_segmentation(obj)
 
             # Get BPE split
-            tokens = self.segment_as_is("Ġ" + lemma)
+            tokens = self.segment_as_is(SOW + lemma)
 
             # One modification: because we neglect RobBERT's start-of-word character Ġ when doing morphological
             # comparisons, we need to strip it from the tokenisation.
@@ -584,8 +596,8 @@ class BTE:
         return results
 
     @staticmethod
-    def load(path: Path) -> "BTE":
-        with open(path, "r", encoding="utf-8") as handle:
+    def load(json_path: Path) -> "BTE":
+        with open(json_path, "r", encoding="utf-8") as handle:
             tkz_as_dict = json.load(handle)
 
         init_config = BteInitConfig(
@@ -622,4 +634,4 @@ class BTE:
         """
         Method to convert special characters back to the intended text.
         """
-        return "".join(tokens).replace("Ġ", " ")
+        return self.tokens_to_word(tokens).replace(SOW, " ")

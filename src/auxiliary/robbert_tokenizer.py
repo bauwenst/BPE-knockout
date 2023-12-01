@@ -40,7 +40,7 @@ def fetchAndCacheDict(url: str, stem: str):
         response = requests.get(url)
         j = response.json()  # Convert response to JSON dict.
         with open(path, "w", encoding="utf-8") as handle:
-            json.dump(j, handle)
+            json.dump(j, handle, ensure_ascii=False, indent=4)
 
     return j
 

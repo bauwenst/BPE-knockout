@@ -70,23 +70,25 @@ def decodeHuggingFaceBytes(pseudochar_string: str) -> str:
         return pseudochar_string  # Trimming all bytes is equivalent to just returning the garbage you received.
 
 
-def accentMapper(s: str):
+def simplifiedByteMapper(s: str):
     """
     Based on observations, merges in e.g. Dutch only really need accents to be converted.
     Obviously, having been trained on internet data, RobBERT also has Chinese, Russian, etc...
-    yet for our purposes, those merges will never be touched and hence they are useless
+    yet for our purposes, those merges will never be touched and hence they are useless.
+
+    A speed test shows that this method is more expensive than HuggingFace's native decoder,
+    except when the input contains spaces that need to be protected by splitting and joining.
     """
     return s \
-        .replace("Ã¡", "á") \
-        .replace("Ã«", "ë") \
-        .replace("Ã©", "é") \
-        .replace("Ã¨", "è") \
-        .replace("Ãª", "ê") \
-        .replace("Ãī", "É") \
-        .replace("Ã¯", "ï") \
-        .replace("ÃŃ", "í") \
-        .replace("Ã¶", "ö") \
-        .replace("Ã³", "ó") \
-        .replace("Ã¼", "ü") \
-        .replace("âĤ¬", "€")
-
+        .replace("Ã¤", "ä").replace("Ã¡", "á").replace("Ãł", "à") \
+        .replace("ÃĦ", "Ä").replace("Ãģ", "Á").replace("ÃĢ", "À") \
+        .replace("Ã«", "ë").replace("Ã©", "é").replace("Ã¨", "è").replace("Ãª", "ê") \
+        .replace("Ãĭ", "Ë").replace("Ãī", "É").replace("ÃĪ", "È") \
+        .replace("Ã¯", "ï").replace("ÃŃ", "í").replace("Ã¬", "ì") \
+        .replace("Ãı", "Ï").replace("Ãį", "Í").replace("ÃĮ", "Ì") \
+        .replace("Ã¶", "ö").replace("Ã³", "ó").replace("Ã²", "ò") \
+        .replace("Ãĸ", "Ö").replace("Ãĵ", "Ó").replace("ÃĴ", "Ò") \
+        .replace("Ã¼", "ü").replace("Ãº", "ú").replace("Ã¹", "ù") \
+        .replace("Ãľ", "Ü").replace("Ãļ", "Ú").replace("ÃĻ", "Ù") \
+        .replace("âĤ¬", "€") \
+        .replace("ÃŁ", "ß")

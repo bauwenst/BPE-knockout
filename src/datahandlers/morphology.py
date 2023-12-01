@@ -3,7 +3,7 @@ Object-oriented model for morphologically split lemmas.
 
 Contains a general interface for any dataset format, and an
 implementation specific to CELEX/e-Lex; the morphSplit algorithm
-is more general though, and can likely be repurposed.
+is more general though, and can be repurposed for e.g. Morpho Challenge datasets.
 """
 import re
 from typing import List, Tuple, Iterable
@@ -35,6 +35,9 @@ class LemmaMorphology(ABC):
 
     @staticmethod  # Can't make it abstract, but you should implement this.
     def generator(file: Path) -> Iterable["LemmaMorphology"]:
+        """
+        Generator to be used by every script that needs morphological objects.
+        """
         raise NotImplementedError()
 
 
@@ -322,9 +325,13 @@ class CelexLemmaMorphology(LemmaMorphology):
             - ((Cartesiaan)[N],(s)[A|N.])[A]                     Cartesiaans
             - ((elegant)[A],(nce)[N|A.])[N]                      élégance
             - (((centrum)[N],(aal)[A|N.])[A],(Aziatisch)[A])[A]  centraal-Aziatisch
-        For hyphenation, the hyphen is stuck to the previous word. TODO: Might not be the best way to go.
+
+        For hyphenation, if the hyphen isn't surrounded by characters of the same morph, it is split off by this method.
+        Note that this means that the output of this method cannot be aligned with the morpheme list, because there is
+        no morpheme for the hyphen. See _morphSplit() for the raw, alignable split.
         """
-        return CelexLemmaMorphology._morphSplit_viterbi(self.morphtext, self.morphemeSplit())[0]
+        split, _ = CelexLemmaMorphology._morphSplit_viterbi(self.morphtext, self.morphemeSplit())
+        return split.replace("- ", " - ")
 
     @staticmethod
     def _morphSplit_greedy(lemma: str, morphemes: str) -> str:
@@ -477,10 +484,6 @@ class CelexLemmaMorphology(LemmaMorphology):
 
     @staticmethod
     def generator(file: Path, verbose=True) -> Iterable[LemmaMorphology]:
-        """
-        Generator to be used by every script that needs morphological objects.
-        Has access to the project config.
-        """
         with open(file, "r", encoding="utf-8") as handle:
             for line in iterateTxt(handle, verbose=verbose):
                 lemma, morphological_tag = line.split("\t")

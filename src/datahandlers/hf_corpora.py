@@ -1,8 +1,9 @@
 from typing import Callable
 
 import numpy.random as npr
-from datasets import load_dataset, Dataset
+from datasets import load_dataset, Dataset, IterableDataset
 from torch.utils.data import DataLoader
+from tokenizers import Regex
 import tokenizers.normalizers as tn
 import tokenizers.pre_tokenizers as tp
 
@@ -29,31 +30,44 @@ def preprocess(line: str):
 
 
 def generateDataloader_Oscar(lang: str="nl", sentence_preprocessor: Callable[[str],str]=preprocess,
-                             size_limit: int=None, shuffle: bool=False) -> DataLoader:
+                             size_limit: int=None, shuffle: bool=False) -> Tuple[DataLoader, int]:
     """
     Note that the DataLoader is an iteraBLE, not an iteraTOR. It can be iterated over multiple times.
     """
-    logger("Loading dataset... (takes about 5 minutes for NL and 10 minutes for DE)")
-    data: Dataset = load_dataset(path="oscar", name="unshuffled_deduplicated_" + lang, split="train")
-    logger("Finished loading.")
-    data = data.remove_columns(["id"])
-    if size_limit is not None and len(data) > size_limit:
-        # Shuffling has pros and cons:
-        #   Pro: you avoid one topic/document dominating the dataset. Especially useful for small subsets (or large source documents).
-        #   Con: your hard drive isn't doing sequential reads, which has at least two downsides:
-        #           (1) Random disk access is known to be much slower. In practice: 30-hour ETA vs. 2-hour ETA.
-        #           (2) It is strenuous for the device. I can hear my drive crackling very loudly after shuffling.
-        if shuffle:
-            data = data.shuffle(seed=0)
-            indices = range(size_limit)
-            # 10s of millions of indices is >100 MiB of memory. HuggingFace .shuffle() caches indices for a reason.
-            # rng = npr.default_rng(seed=0)
-            # indices = rng.choice(len(data), size=size_limit, replace=False)
-        else:
-            indices = range(size_limit)
+    if lang != "en":
+        logger("Loading dataset... (takes about 5 minutes for NL and 10 minutes for DE)")
+        data: Dataset = load_dataset(path="oscar", name="unshuffled_deduplicated_" + lang, split="train")
+        logger("Finished loading.")
 
-        data = data.select(indices)
+        size = len(data)
+        if size_limit is not None and size > size_limit:
+            size = size_limit
+            # Shuffling has pros and cons:
+            #   Pro: you avoid one topic/document dominating the dataset. Especially useful for small subsets (or large source documents).
+            #   Con: your hard drive isn't doing sequential reads, which has at least two downsides:
+            #           (1) Random disk access is known to be much slower. In practice: 30-hour ETA vs. 2-hour ETA.
+            #           (2) It is strenuous for the device. I can hear my drive crackling very loudly after shuffling.
+            if shuffle:
+                data = data.shuffle(seed=0)
+                indices = range(size_limit)
+                # 10s of millions of indices is >100 MiB of memory. HuggingFace .shuffle() caches indices for a reason.
+                # rng = npr.default_rng(seed=0)
+                # indices = rng.choice(len(data), size=size_limit, replace=False)
+            else:
+                indices = range(size_limit)
 
+            data = data.select(indices)
+
+    else:  # OSCAR-en is literally used by HuggingFace as example of dataset that is too gigantic to download (1.2 TiB...) https://huggingface.co/docs/datasets/stream
+        logger(f"Streaming OSCAR {lang}.")
+        data: IterableDataset = load_dataset(path='oscar', name="unshuffled_deduplicated_en",
+                                             split='train', streaming=True)
+        size = data.info.splits["train"].num_examples  # bruh who invented this interface
+        if size_limit is not None and size > size_limit:
+            size = size_limit
+            data = data.take(size_limit)
+
+    # data = data.remove_columns(["id"])
     def dictionaryProcessor(batched_example):
         """
         If you iterate over 'data', you get dictionaries.
@@ -62,12 +76,17 @@ def generateDataloader_Oscar(lang: str="nl", sentence_preprocessor: Callable[[st
         """
         return sentence_preprocessor([example["text"] for example in batched_example][0])
 
-    return DataLoader(data, shuffle=False, collate_fn=dictionaryProcessor)
+    return DataLoader(data, shuffle=False, collate_fn=dictionaryProcessor), size
 
 
-def dataloaderToWeights(dataloader: DataLoader, output_stem: str):
-    path = iterableToWordsFile(dataloader, PATH_DATA_COMPRESSED / (output_stem + ".txt"),
-                               cache_every=1_000_000, progress_bar_total=len(dataloader))  # For OSCAR, this call ran from 14:56 to 20:52, which is ~6 hours.  TODO: Add caching somewhere here ("if file doesn't exist, ..."). But you should know which file!
+def dataloaderToWeights(dataloader: DataLoader, output_stem: str, progress_bar_total: int=None):
+    path = PATH_DATA_COMPRESSED / (output_stem + ".txt")
+    if not path.exists():
+        path = iterableToWordsFile(dataloader, path,
+                                   cache_every=1_000_000, progress_bar_total=progress_bar_total)
+    else:
+        print(f"Found existing words file at {path.as_posix()}. If you want to regenerate it, delete it first.")
+
     path = cleanWordFile(path)
     path = trimWordFile(path, minimum=10)
     return path
@@ -76,16 +95,11 @@ def dataloaderToWeights(dataloader: DataLoader, output_stem: str):
 from string import punctuation
 punctuation = punctuation + "€£…‘’“”„«»"  # Adding some European punctuations.
 punctuation = punctuation.replace("\\", "") + "\\"  # Put backslash in the back. Makes the pattern clearer.
-punctuation = punctuation.replace("-", "")  # Ignore hyphens!
 def punctuationPretokeniserExceptHyphens():
-    import tokenizers.normalizers as tn
-    normalizer = tn.NFD()
-
-    import tokenizers.pre_tokenizers as pt
-    from tokenizers import Regex
-
-    punctuation_pattern = Regex("[" + punctuation.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]") + "]+")
-    pretokeniser = pt.Split(pattern=punctuation_pattern, behavior="isolated")
+    punctuation_no_hyphen = punctuation.replace("-", "")
+    pretokeniser = tp.Split(pattern=Regex("[" + punctuation_no_hyphen.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]") + "]+"),
+                            behavior="isolated")
+    normalizer = tn.NFKC()  # Turn weird letters into normal letters, and leave accents on top of their letters.
 
     def wordSeparator(s: str) -> str:
         return " ".join([w.strip() for w, _ in pretokeniser.pre_tokenize_str(normalizer.normalize_str(s))])
@@ -97,10 +111,11 @@ if __name__ == "__main__":
     from src.auxiliary.paths import *
     from src.visualisation.timing import Timer
 
+    # TODO: Run this for English.
     t = Timer()
     t.start(echo=True)
-    dataloader = generateDataloader_Oscar(lang="de", sentence_preprocessor=punctuationPretokeniserExceptHyphens(),
-                                          size_limit=30_000_000)
+    dataloader, size = generateDataloader_Oscar(lang="en", sentence_preprocessor=punctuationPretokeniserExceptHyphens(),
+                                                size_limit=30_000_000)
     t.lap(echo=True)
-    dataloaderToWeights(dataloader, output_stem="words_oscar-de")
+    dataloaderToWeights(dataloader, output_stem="oscar-en-raw", progress_bar_total=size)
     t.lap(echo=True)
