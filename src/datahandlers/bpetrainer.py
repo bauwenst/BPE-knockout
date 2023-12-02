@@ -115,5 +115,5 @@ class BPETrainer:
 
 if __name__ == "__main__":
     trainer = BPETrainer(vocab_size=40_000, byte_based=True)
-    trainer.train_hf(PATH_DATA_COMPRESSED / "oscar-nl-raw_cleaned_trimmed.txt",
-                     PATH_MODELS / "clean-nl-bpe")
+    trainer.train_hf(PATH_DATA_COMPRESSED / "oscar-en-raw_cleaned_trimmed.txt",
+                     PATH_MODELS / "clean-en-bpe")

@@ -13,7 +13,7 @@ from abc import ABC, abstractmethod
 import dataclasses
 from dataclasses import dataclass
 from enum import Enum
-from typing import Union, Sequence, Tuple, List, Dict
+from typing import Union, Sequence, Tuple, List, Dict, Callable
 
 import itertools
 from pathlib import Path
@@ -973,7 +973,8 @@ class Table(Diagram):
 
     def commit(self, cell_prefix: str="", cell_suffix: str="",
                column_alignment="c", rowname_alignment="l",
-               borders_between_columns_of_level: List[int]=None):
+               borders_between_columns_of_level: List[int]=None,
+               cell_function: Callable[[float], float]=lambda x: x):
         with ProtectedData(self):
             lines = []
 
@@ -1063,7 +1064,11 @@ class Table(Diagram):
                             break
 
                     # Construct cell
-                    cell_content = cell_prefix + str(leaf.rows.get(rowname, "")) + cell_suffix
+                    if rowname in leaf.rows:
+                        cell_content = cell_prefix + str(cell_function(leaf.rows[rowname])) + cell_suffix
+                    else:
+                        cell_content = ""
+
                     if not right_border:
                         line += " & " + cell_content
                     else:

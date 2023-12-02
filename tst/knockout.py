@@ -282,13 +282,13 @@ def main_intrinsicAll():
         results = test_tokenizers_batch(tkzrs, reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
         addEvaluationToTable(table, results)
 
-    table.commit()
+    table.commit(cell_prefix=r"\tgrad{", cell_suffix=r"}", cell_function=lambda x: round(x,2))
 
 @timeit
 def main_intrinsicMultilingual():
     """
     Only tests BPE without knockout and BPE with morphemic knockout,
-    but does this in two languages.
+    but does this in more than one language.
     """
     old_config = Pℛ𝒪𝒥ℰ𝒞𝒯.config
     ###
@@ -304,7 +304,7 @@ def main_intrinsicMultilingual():
             results = test_tokenizers_batch([bte, bte_knockout], reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
             addEvaluationToTable(table, results)
 
-    table.commit()
+    table.commit(cell_prefix=r"\tgrad{", cell_suffix=r"}", cell_function=lambda x: round(x,2))
 
     ###
     Pℛ𝒪𝒥ℰ𝒞𝒯.config = old_config
@@ -332,7 +332,7 @@ def main_intrinsicPartial():
         )
         addEvaluationToTable(table, results)
 
-    table.commit()
+    table.commit(cell_prefix=r"\tgrad{", cell_suffix=r"}", cell_function=lambda x: round(x,2))
 
 @timeit
 def main_deleteRandomMerges():
