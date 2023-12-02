@@ -13,9 +13,12 @@ from dataclasses import dataclass
 from typing import Callable, Type, Optional, Iterable, Dict, Tuple, List
 from abc import abstractmethod, ABC
 import json
+from transformers import RobertaTokenizerFast
 
+# None of the below files import the config.
 from src.auxiliary.paths import *
-from src.datahandlers.morphology import LemmaMorphology  # Very careful with the imports of the config in this file.
+from src.auxiliary.robbert_tokenizer import AutoTokenizer_from_pretrained
+from src.datahandlers.morphology import LemmaMorphology
 
 
 class TokeniserPath(ABC):
@@ -33,6 +36,10 @@ class TokeniserPath(ABC):
 
     @abstractmethod
     def loadMerges(self) -> List[str]:
+        pass
+
+    @abstractmethod
+    def toFastBPE(self) -> RobertaTokenizerFast:
         pass
 
 
@@ -61,6 +68,10 @@ class SennrichTokeniser(TokeniserPath):
         with open(self.getPaths()[1], "r", encoding="utf-8") as handle:
             return [line.strip() for line in handle]
 
+    def toFastBPE(self) -> RobertaTokenizerFast:
+        vocab, merges = self.getPaths()
+        return RobertaTokenizerFast(vocab_file=vocab.as_posix(), merges_file=merges.as_posix())  # Will apply byte-based pretokeniser.
+
 
 class HuggingFaceTokeniser(TokeniserPath):
     """
@@ -82,6 +93,9 @@ class HuggingFaceTokeniser(TokeniserPath):
 
     def loadMerges(self) -> List[str]:
         return self.getAsDict().get("model", dict()).get("merges", [])
+
+    def toFastBPE(self) -> RobertaTokenizerFast:
+        return AutoTokenizer_from_pretrained(self.path.as_posix())
 
 
 @dataclass
@@ -130,13 +144,12 @@ def setupDutch() -> ProjectConfig:
         from src.auxiliary.robbert_tokenizer import robbert_tokenizer, getMergeList_RobBERT
         base_vocab, base_merges = DUTCH_CONFIG.base_tokeniser.getPaths()
         if not base_vocab.exists():
+            sorted_vocab = dict(sorted(robbert_tokenizer.get_vocab().items(), key=lambda item: item[1]))
             with open(base_vocab, "w", encoding="utf-8") as handle:
-                json.dump(robbert_tokenizer.get_vocab(), handle, ensure_ascii=False, indent=4)
-
+                json.dump(sorted_vocab, handle, ensure_ascii=False, indent=4)
         if not base_merges.exists():
             with open(base_merges, "w", encoding="utf-8") as handle:
-                for merge in getMergeList_RobBERT(do_2022=False):
-                    handle.write(merge + "\n")
+                handle.writelines([merge + "\n" for merge in getMergeList_RobBERT(do_2022=False)])
 
     return DUTCH_CONFIG
 

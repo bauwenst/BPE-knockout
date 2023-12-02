@@ -17,5 +17,7 @@ if __name__ == "__main__":
     main_deleteLastMerges()
     main_deleteLastLeaves()
     main_blameThreshold()
-    main_intrinsicPartial()
     main_intrinsicMultilingual()
+    main_intrinsicPartial()
+    main_intrinsicWeightedTraining()
+    

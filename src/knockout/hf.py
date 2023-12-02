@@ -19,7 +19,7 @@ The parent class of transformers.PreTrainedTokenizer has 10 unimplemented method
 from typing import List, Tuple, Dict, Any, Optional
 from pathlib import Path
 
-from transformers import PreTrainedTokenizer
+from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 from tokenizers import pre_tokenizers, decoders
 import json
 
@@ -128,7 +128,11 @@ class BTEk_HuggingFace(PreTrainedTokenizer):
             return [self.bos_token_id] + token_ids_0 + [self.eos_token_id] + token_ids_1 + [self.eos_token_id]
 
 
-def constructHuggingFaceBPEknockout():  # TODO: Technically this function is only meant for the Dutch version.
+def constructForHF_BPE() -> PreTrainedTokenizerFast:
+    from src.auxiliary.config import Pℛ𝒪𝒥ℰ𝒞𝒯
+    return Pℛ𝒪𝒥ℰ𝒞𝒯.config.base_tokeniser.toFastBPE()
+
+def constructForHF_BPEknockout() -> PreTrainedTokenizer:
     return BTEk_HuggingFace(
         BTE(BteInitConfig(knockout=RefMode.MORPHEMIC, bytebased=ByteBasedMode.INPUT_TO_BYTES, keep_long_merges=False))
     )
@@ -136,9 +140,5 @@ def constructHuggingFaceBPEknockout():  # TODO: Technically this function is onl
 
 if __name__ == "__main__":
     sentence = "Energie-efficiëntie, i.e. zuinig omgaan met stroomverbruik, wordt steeds belangrijker bij het trainen van transformer-architecturen – zoveel is zeker!"
-
-    # from src.auxiliary.robbert_tokenizer import robbert_tokenizer
-    # print(robbert_tokenizer.tokenize(text=sentence))
-
-    knockout = constructHuggingFaceBPEknockout()
+    knockout = constructForHF_BPEknockout()
     print(knockout.tokenize(text=sentence))
