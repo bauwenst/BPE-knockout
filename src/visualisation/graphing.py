@@ -13,7 +13,7 @@ from abc import ABC, abstractmethod
 import dataclasses
 from dataclasses import dataclass
 from enum import Enum
-from typing import Union, Sequence, Tuple, List, Dict
+from typing import Union, Sequence, Tuple, List, Dict, Callable
 
 import itertools
 from pathlib import Path
@@ -145,6 +145,7 @@ class Diagram(ABC):
         """
         self.name = name
         self.data = dict()  # All figure classes are expected to store their data in a dictionary.
+        self.creation_time = time.perf_counter()
 
         self.needs_computation = (caching == CacheMode.NONE or caching == CacheMode.WRITE_ONLY)
         self.will_be_stored    = (caching == CacheMode.WRITE_ONLY)
@@ -194,7 +195,10 @@ class Diagram(ABC):
 
     def save(self, metadata: dict=None):
         Diagram.safeDatapointWrite(stem=self.name, data={
-            "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "time": {
+                "finished": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "start-to-finish-secs": round(time.perf_counter() - self.creation_time, 2),
+            },
             "metadata": metadata or dict(),
             "data": self._save()
         })
@@ -886,105 +890,157 @@ class ScatterPlot(Diagram):
             return fig, ax
 
 
+### Classes for supporting tables
+
+from typing import TypeVar, Generic, Any
+LeafContent = TypeVar("LeafContent")
+
+
+@dataclass
+class NamedTree(Generic[LeafContent]):
+    name: str
+    children: List["NamedTree"]
+    content: LeafContent=None  # Should be mutually exclusive with children; you either have children or you have data.
+
+    @staticmethod
+    def fromDict(asdict: dict):  # inverse of dataclasses.asdict
+        assert "name" in asdict and "children" in asdict and "content" in asdict
+        assert isinstance(asdict["children"], list)
+        return NamedTree(asdict["name"], [NamedTree.fromDict(d) for d in asdict["children"]], asdict["content"])
+
+    def isLeaf(self):
+        return len(self.children) == 0
+
+    def width(self) -> int:
+        if self.isLeaf():
+            return 1
+        else:
+            return sum([col.width() for col in self.children])
+
+    def height(self) -> int:
+        if self.isLeaf():
+            return 1
+        else:
+            return 1 + max([col.height() for col in self.children])
+
+    def getLeaves(self) -> List["NamedTree"]:
+        if self.isLeaf():
+            return [self]
+        else:
+            leaves = []
+            for col in self.children:
+                leaves.extend(col.getLeaves())
+            return leaves
+
+    def getPaths(self) -> List[List["NamedTree"]]:  # For each leaf returns the path from the root to it.
+        if self.isLeaf():
+            return [[self]]
+        else:
+            subpaths = []
+            for child in self.children:
+                subpaths.extend(child.getPaths())
+            for subpath in subpaths:
+                subpath.insert(0, self)
+            return subpaths
+
+    def setdefault(self, name_path: List[str], content_if_missing: LeafContent) -> "NamedTree":
+        current_node = self
+        was_missing = False
+        for name in name_path:
+            for child in current_node.children:
+                if child.name == name:
+                    current_node = child
+                    break
+            else:
+                new_child = NamedTree(name, [], None)
+                current_node.children.append(new_child)
+                current_node = new_child
+                was_missing = True
+
+        if was_missing:
+            current_node.content = content_if_missing
+
+        return current_node
+
+    def __repr__(self):
+        return "'" + self.name + "'"
+
+
+TableRow    = NamedTree[int]
+TableColumn = NamedTree[Dict[int, Any]]
+
+
 class Table(Diagram):
     """
     Structure with named rows and infinitely many nested named columns, AND with an order for all columns and all rows.
     A good example of this kind of table is the morphemic-lexemic unweighted-weighted Pr-Re-F1 tables in my thesis.
+
+    You could choose to either store a dictionary from row to a nested dictionary of all columns it has a value at (and
+    that value), or store a nested dictionary of all columns containing as leaves a dictionary from row to value.
+    The former is more intuitive when indexing (you start with the row), but actually, it makes way more sense to
+    only store the structure of the table once.
+
+    With nested rows, here's the format of the table:
+        - One dictionary stores the tree of row names, where leftmost in the tree is topmost in the table.
+          The leaves contain a unique integer identifier for the path that leads there.
+        - Another dictionary stores the tree of column names. The leaves contain a dictionary from row ID to a value.
+    The identifier system allows inserting rows out of their desired order, without having to rename all column content.
     """
 
-    @dataclass
-    class Column:
-        name: str
-        subcolumns: List["Table.Column"]
-        rows: Dict[str,float]  # Should be mutually exclusive with subcolumns; you either have subcolumns or you have row data.
+    def getAsColumn(self) -> TableColumn:
+        return self.data["column-tree"]
 
-        @staticmethod
-        def fromDict(asdict: dict):  # inverse of dataclasses.asdict
-            assert "name" in asdict and "subcolumns" in asdict and "rows" in asdict
-            assert isinstance(asdict["subcolumns"], list)
-            return Table.Column(asdict["name"], [Table.Column.fromDict(d) for d in asdict["subcolumns"]], asdict["rows"])
+    def getRowTree(self) -> TableRow:
+        return self.data["row-tree"]
 
-        def isLeaf(self):
-            return len(self.subcolumns) == 0
-
-        def width(self) -> int:
-            if self.isLeaf():
-                return 1
-            else:
-                return sum([col.width() for col in self.subcolumns])
-
-        def height(self) -> int:
-            if self.isLeaf():
-                return 1
-            else:
-                return 1 + max([col.height() for col in self.subcolumns])
-
-        def getLeaves(self) -> List["Table.Column"]:
-            if self.isLeaf():
-                return [self]
-            else:
-                leaves = []
-                for col in self.subcolumns:
-                    leaves.extend(col.getLeaves())
-                return leaves
-
-    def set(self, value: float, row: str, column_path: List[str]):
-        """
-        You could choose to either store all columns for all rows, or store all rows for all columns.
-        The former is more intuitive when indexing (you start with the row), but actually, it makes way more sense to
-        only store the structure of the table once.
-        """
+    def set(self, value: float, row_path: List[str], column_path: List[str]):
         if not column_path:
             raise ValueError("Column path needs at least one column.")
 
         if not self.data:
-            self.data["top-column"] = Table.Column("", [], dict())
-            self.data["unique-rows"] = []
+            self.data["rows"] = 0
+            self.data["column-tree"] = TableColumn("", [], dict())
+            self.data["row-tree"]    = TableRow("", [], None)
 
-        current_col: Table.Column = self.getAsColumn()
-        for col in column_path:
-            current_list = current_col.subcolumns
-            for i in range(len(current_list)):
-                if current_list[i].name == col:
-                    current_col = current_list[i]
-                    break
-            else:
-                current_list.append(Table.Column(col, [], dict()))
-                current_col = current_list[-1]
+        # Get row identifier
+        row_leaf = self.getRowTree().setdefault(row_path, -1)
+        if row_leaf.content == -1:
+            self.data["rows"] += 1
+            row_leaf.content = self.data["rows"]
 
-        current_col.rows[row] = value
-        if row not in self.data["unique-rows"]:
-            self.data["unique-rows"].append(row)
-
-    def getAsColumn(self) -> "Table.Column":
-        return self.data["top-column"]
+        # Get column leaf
+        col_leaf = self.getAsColumn().setdefault(column_path, dict())
+        col_leaf.content[row_leaf.content] = value
 
     def _save(self) -> dict:
         return {
-            "top-column": dataclasses.asdict(self.getAsColumn()),
-            "unique-rows": self.data["unique-rows"]
+            "rows": self.data["rows"],
+            "column-tree": dataclasses.asdict(self.getAsColumn()),
+            "row-tree":    dataclasses.asdict(self.getRowTree())
         }
 
     def _load(self, saved_data: dict):
         self.data = {
-            "top-column": Table.Column.fromDict(saved_data["top-column"]),
-            "unique-rows": saved_data["unique-rows"]
+            "rows": saved_data["rows"],
+            "column-tree": TableColumn.fromDict(saved_data["column-tree"]),
+            "row-tree":    TableRow.fromDict(saved_data["row-tree"])
         }
 
     def commit(self, cell_prefix: str="", cell_suffix: str="",
                column_alignment="c", rowname_alignment="l",
-               borders_between_columns_of_level: List[int]=None):
+               borders_between_columns_of_level: List[int]=None, borders_between_toplevel_rows: bool=False,
+               cell_function: Callable[[float], float]=lambda x: x):  # TODO: Needs an option to align &s. Also needs to replace any & in col/row names by \&.
         with ProtectedData(self):
             lines = []
 
-            # Make first line and find header depth
-            first_line = r"\begin{tabular}{" + rowname_alignment + "|"
-            header_height = 0
             table = self.getAsColumn()
-            for ancestor in table.subcolumns:
-                width = ancestor.width()
-                first_line += column_alignment*width  # No default borders. Everything is regulated by multicolumn below.
-                header_height = max(header_height, ancestor.height())
+            header_height = table.height() - 1
+            margin_depth  = self.getRowTree().height() - 1
+
+            # Make first line
+            first_line = r"\begin{tabular}{" + rowname_alignment*margin_depth + "||"
+            for top_level_column in table.children:
+                first_line += column_alignment*top_level_column.width()  # No default borders (indicated with | normally). Everything is regulated by multicolumn below.
             first_line += "}"
             lines.append(first_line)
 
@@ -994,14 +1050,14 @@ class Table(Diagram):
             elif len(borders_between_columns_of_level) > 0 and (min(borders_between_columns_of_level) < 0 or max(borders_between_columns_of_level) >= header_height):
                 raise ValueError(f"This table has {header_height} header levels, with identifiers 0 to {header_height-1}. You gave {borders_between_columns_of_level}.")
 
-            # Determine prefix for header lines
-            header_prefix = max([len(rowname) for rowname in self.data["unique-rows"]])
+            # Determine prefix for header lines  TODO: doesn't work properly right now because you need to include the length of \multirow which is added later on.
+            header_extra_spaces = max([sum([len(cell.name)+3 for cell in path]) for path in self.getRowTree().getPaths()])
 
             # Get all header lines and where the borders are at each header level
             level_has_edge_after_ncols = []
-            frontier = table.subcolumns
+            frontier = table.children
             for header_line_idx in range(header_height):  # Vertical iteration
-                line = "    " + " "*header_prefix
+                line = "    " + " "*header_extra_spaces + "&"*(margin_depth-1)
                 level_has_edge_after_ncols.append([0])
                 cumulative_width = 0
                 new_frontier = []
@@ -1010,7 +1066,7 @@ class Table(Diagram):
                     width = col.width()
                     cumulative_width += width
                     if col.height() >= header_height-header_line_idx:  # This is where you enter all columns on the same header level. Very useful.
-                        new_frontier.extend(col.subcolumns)
+                        new_frontier.extend(col.children)
 
                         # Is this level one with borders, or does it have a border for a previous level, or neither?
                         right_border = False
@@ -1029,7 +1085,7 @@ class Table(Diagram):
                         # Render content
                         if width == 1 and not right_border:  # Simple
                             line += col.name
-                        else:  # Multicolumn width and/or border
+                        else:  # Multicolumn width and/or border  TODO: Left borders are 1 pixel shifted over from right borders. That means you should never use left borders and should instead retroactively add an empty \multicolumn{1}{c|}{} to the left.
                             line += r"\multicolumn{" + str(width) + "}{" + "|"*left_border + column_alignment + "|"*right_border + "}{" + col.name + "}"
 
                         # Border math
@@ -1049,21 +1105,52 @@ class Table(Diagram):
                 level_has_edge_after_ncols[-1] = level_has_edge_after_ncols[-1][:-2]  # Trim off last 0 and also last column since we don't want the edge of the table to have a border.
                 level_has_edge_after_ncols[-1] = [sum(level_has_edge_after_ncols[-1][:i+1]) for i in range(len(level_has_edge_after_ncols[-1]))]  # cumsum
                 frontier = new_frontier
-            lines[-1] += r"\hline"
+            lines[-1] += r"\hline\hline"
 
-            # Make all body rows
-            for rowname in self.data["unique-rows"]:
-                line = "    " + rowname
-                for leaf_id, leaf in enumerate(table.getLeaves()):
+            # Make rows
+            prev_names = ["" for _ in range(margin_depth)]
+            for path_idx, node_path in enumerate(self.getRowTree().getPaths()):
+                line = "    "
+
+                # Part 1: Row margins.
+                node_path = [None for _ in range(margin_depth-len(node_path)+1)] + node_path[1:]
+                has_reprinted_parent = False
+                do_hline = False
+                for i,node in enumerate(node_path):
+                    if i != 0:
+                        line += " & "
+
+                    if node is not None and (has_reprinted_parent or prev_names[i] != node.name):
+                        width = node.width()
+                        if width > 1:
+                            line += r"\multirow{" + str(width) + "}{*}{" + node.name + "}"
+                        else:
+                            line += node.name
+                        prev_names[i] = node.name
+                        has_reprinted_parent = True
+
+                    if has_reprinted_parent and i == 0:  # TODO: Should really just reuse the border map. If you still want to do it without, then anyway, the condition for top-level hlines should actually be "if the amount of Nones in the path changes OR the name changes in the first not-None".
+                        do_hline = borders_between_toplevel_rows
+
+                if path_idx != 0:
+                    lines[-1] += r"\hline"*do_hline
+
+                # Part 2: Table body.
+                for col_id, leaf_column in enumerate(table.getLeaves()):
                     # Is there a border here?
                     right_border = False
                     for level in borders_between_columns_of_level:
-                        if leaf_id+1 in level_has_edge_after_ncols[level]:
+                        if col_id+1 in level_has_edge_after_ncols[level]:
                             right_border = True
                             break
 
                     # Construct cell
-                    cell_content = cell_prefix + str(leaf.rows.get(rowname, "")) + cell_suffix
+                    row_identifier = node_path[-1].content
+                    if row_identifier in leaf_column.content:
+                        cell_content = cell_prefix + str(cell_function(leaf_column.content[row_identifier])) + cell_suffix
+                    else:
+                        cell_content = ""
+
                     if not right_border:
                         line += " & " + cell_content
                     else:
@@ -1078,8 +1165,8 @@ class Table(Diagram):
             with open(PathHandling.getSafePath(PATH_FIGURES, self.name, ".tex"), "w") as file:
                 file.write("\n".join(lines))
 
-            # from src.visualisation.printing import lprint
-            # lprint(lines)
+            from src.visualisation.printing import lprint
+            lprint(lines)
 
 
 ########################
@@ -1146,30 +1233,34 @@ def example_linegraph():
 
 def example_table():
     table = Table("test", caching=CacheMode.NONE)
-    table.set(3.14, "BPE", ["sizes", "$|V|$"])
-    table.set(15, "BPE", ["sizes", "$|M|$"])
+    table.set(3.14,["Dutch", "BPE", "base"], ["sizes", "$|V|$"])
+    table.set(15,  ["Dutch", "BPE", "base"], ["sizes", "$|M|$"])
 
-    table.set(92, "BPE", ["morphemes", "unweighted", "Pr"])
-    table.set(6.5, "BPE", ["morphemes", "unweighted", "Re"])
-    table.set(35, "BPE", ["morphemes", "unweighted", "$F_1$"])
-    table.set(8.9, "BPE", ["morphemes", "weighted", "Pr"])
-    table.set(79, "BPE", ["morphemes", "weighted", "Re"])
-    table.set(3.2, "BPE", ["morphemes", "weighted", "$F_1$"])
+    table.set(92,  ["Dutch", "BPE", "base"], ["morphemes", "unweighted", "Pr"])
+    table.set(6.5, ["Dutch", "BPE", "base"], ["morphemes", "unweighted", "Re"])
+    table.set(35,  ["Dutch", "BPE", "base"], ["morphemes", "unweighted", "$F_1$"])
+    table.set(8.9, ["Dutch", "BPE", "base"], ["morphemes", "weighted", "Pr"])
+    table.set(79,  ["Dutch", "BPE", "base"], ["morphemes", "weighted", "Re"])
+    table.set(3.2, ["Dutch", "BPE", "base"], ["morphemes", "weighted", "$F_1$"])
 
-    table.set(3.8, "BPE", ["inbetween", "left"])
-    table.set(46, "BPE", ["inbetween", "right"])
+    table.set(3.8, ["Dutch", "BPE", "base"], ["inbetween", "left"])
+    table.set(46,  ["Dutch", "BPE", "knockout"], ["inbetween", "right"])
 
-    table.set(26, "BPE", ["lexemes", "unweighted", "Pr"])
-    table.set(4.3, "BPE", ["lexemes", "unweighted", "Re"])
-    table.set(38, "BPE", ["lexemes", "unweighted", "$F_1$"])
-    table.set(3.2, "BPE", ["lexemes", "weighted", "Pr"])
-    table.set(79, "BPE", ["lexemes", "weighted", "Re"])
-    table.set(5.0, "BPE", ["lexemes", "weighted", "$F_1$"])
+    table.set(26,  ["English", "BPE", "base"], ["lexemes", "Pr"])
+    table.set(4.3, ["English", "BPE", "base"], ["lexemes", "Re"])
+    table.set(38,  ["English", "BPE", "base"], ["lexemes", "$F_1$"])
+    table.set(3.2, ["English", "BPE", "base"], ["lexemes", "weighted", "Pr"])
+    table.set(79,  ["English", "BPE", "knockout"], ["lexemes", "weighted", "Re"])
+    table.set(5.0, ["English", "BPE", "knockout"], ["lexemes", "weighted", "$F_1$"])
 
-    table.set("wow!", "ULM", ["morphemes", "weighted", "Re"])
+    table.set("wow!", ["ULM", "base"], ["morphemes", "weighted", "Re"])
+    table.set("wow!", ["ULM", "yuk"], ["morphemes", "weighted", "Pr"])
 
-    table.commit(borders_between_columns_of_level=[0, 1])
+    # print(table.getAsColumn().getPaths())
+
+    table.commit(borders_between_columns_of_level=[0, 1], borders_between_toplevel_rows=True)
 
 
 if __name__ == "__main__":
-    example_linegraph()
+    # example_linegraph()
+    example_table()

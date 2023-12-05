@@ -12,7 +12,6 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 from src.datahandlers.hf_corpora import normalizer
-from src.datahandlers.wordfiles import iterateTxt
 from src.visualisation.printing import PrintTable, warn
 
 DO_WARNINGS = False
@@ -484,7 +483,21 @@ class CelexLemmaMorphology(LemmaMorphology):
 
     @staticmethod
     def generator(file: Path, verbose=True) -> Iterable[LemmaMorphology]:
+        from src.datahandlers.wordfiles import iterateTxt
         with open(file, "r", encoding="utf-8") as handle:
             for line in iterateTxt(handle, verbose=verbose):
                 lemma, morphological_tag = line.split("\t")
                 yield CelexLemmaMorphology(lemma=lemma, celex_struclab=morphological_tag)
+
+    @staticmethod
+    def cleanFile(file: Path):
+        """
+        Removes lines that do not conform to the {spaceless string}\t{spaceless string} format.
+        """
+        from src.datahandlers.wordfiles import iterateTxt
+        with open(file.with_stem(file.stem + "_proper"), "w", encoding="utf-8") as out_handle:
+            with open(file, "r", encoding="utf-8") as in_handle:
+                for line in iterateTxt(in_handle):
+                    parts = line.split("\t")
+                    if len(parts) == 2 and " " not in line:
+                        out_handle.write(line + "\n")

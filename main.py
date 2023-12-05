@@ -13,11 +13,11 @@ if __name__ == "__main__":
     main_mergestats()
     main_vocabstats()
     main_tokenDiffs()
+
+    main_blameThreshold()
     main_deleteRandomMerges()
     main_deleteLastMerges()
     main_deleteLastLeaves()
-    main_blameThreshold()
+
     main_intrinsicMultilingual()
-    main_intrinsicPartial()
-    main_intrinsicWeightedTraining()
     

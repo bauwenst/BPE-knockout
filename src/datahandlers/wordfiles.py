@@ -108,6 +108,7 @@ def wordsFileToCounter(words_path: Path, sep=" ") -> Counter:
     return c
 
 
+@timeit
 def mergeWordFiles(word_files: List[Path], out_file: Path, delete_afterwards: bool=False,
                    trim_hapax_every: int=100000):
     """
@@ -203,18 +204,23 @@ def fixWhiteSpace(words_path: Path, overwrite=True):
     saveWordsFile(actual_counts, words_path.with_stem(words_path.stem + "_fixed") if not overwrite else words_path)
 
 
+@timeit
 def trimWordFile(words_path: Path, minimum: int) -> Path:
     """
     Removes all words with count < minimum.
     For OSCAR, setting minimum = 10 eliminates about 80% of all words to iterate over, greatly speeding up BPE.
     """
+    removed = 0
     new_path = generatePathForTrimmedFile(words_path)
     with open(new_path, "w", encoding="utf-8") as out_handle:
         with open(words_path, "r", encoding="utf-8") as in_handle:
             for w,c in iterateWordsFile(in_handle):
                 if int(c) >= minimum:
                     out_handle.write(f"{w} {c}\n")
+                else:
+                    removed += 1
 
+    print("Removed", removed, "words from the count file.")
     return new_path
 
 

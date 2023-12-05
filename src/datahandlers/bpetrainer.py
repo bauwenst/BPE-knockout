@@ -107,7 +107,7 @@ class BPETrainer:
 
         # Save
         save_path = out_folder / f"BPE_from_{wordfile.stem}.json"
-        hf = HuggingFaceTokeniser(json_path=save_path)
+        hf = HuggingFaceTokeniser(json_path=save_path)  # Calls .mkdir, which is important because otherwise the next line fails.
         tokeniser.save(path=save_path.as_posix())
 
         # Turn into vocab.json + merges.txt
@@ -120,5 +120,5 @@ class BPETrainer:
 
 if __name__ == "__main__":
     trainer = BPETrainer(vocab_size=40_000, byte_based=True)
-    trainer.train_hf(PATH_DATA_COMPRESSED / "oscar-nl-raw_cleaned_trimmed.txt",
-                     PATH_MODELS / "clean-nl-bpe")
+    trainer.train_hf(PATH_DATA_COMPRESSED / "words_oscar-en.txt",
+                     PATH_MODELS / "bpe-oscar-en-clean")
