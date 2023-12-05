@@ -32,8 +32,8 @@ class SegmentationConfusionMatrix:
         return tp, predicted, relevant, total
 
     def compute(self):
-        precision = self.total_tp/self.total_predicted
-        recall    = self.total_tp/self.total_relevant
+        precision = self.total_tp/self.total_predicted if self.total_predicted else 1.0
+        recall    = self.total_tp/self.total_relevant  if self.total_relevant  else 1.0
         f1        = SegmentationConfusionMatrix.f1(precision, recall)
         return precision, recall, f1
 
@@ -82,6 +82,24 @@ class SegmentationConfusionMatrix:
     @staticmethod
     def f1(precision: float, recall: float):
         return 2*(precision*recall)/(precision+recall)
+
+    @staticmethod
+    def computeMatrixMacroAverage(matrices: List["SegmentationConfusionMatrix"]) -> Tuple[float, float, float]:
+        """
+        Computes the macro-average Pr, Re, F1 for a list of confusion matrices.
+
+        Note: although the Pr, Re, F1 returned by .compute() are a micro-average, this method is not the macro-average
+        equivalent of that. This is because .compute() is the micro-average over all added word segmentations, NOT over
+        a list of matrices. It is impossible to reconstruct the macro-average over word segmentations because we don't store
+        their separate Pr, Re, F1.
+        """
+        n = len(matrices)
+        if n == 0:
+            return (1.0, 1.0, 1.0)
+
+        tuples = [matrix.compute() for matrix in matrices]
+        precisions, recalls, f1s = zip(*tuples)
+        return sum(precisions)/n, sum(recalls)/n, sum(f1s)/n
 
 
 # Weight setup
@@ -202,7 +220,7 @@ def morphologyVersusTokenisation(morphology_method: MorphologyVisitor, tokenizer
         # Pr, Re, F1
         cm.computeAndDisplay(indent=2)
         if weighted:
-            print("Weighted:")
+            print("\tWeighted:")
             cm_w.computeAndDisplay(indent=2)
 
         # Confusion matrices (TP, FP, FN, TN).
@@ -239,7 +257,7 @@ def test_tokenizers_batch(tkzrs: list, reweighting_function: Callable[[float],fl
                                  It's useful to not automatically fill this function in, because the reweighting function
                                  used in the config is used in BTE training and nobody says that it needs to be equal here.
     """
-    print("===== EVALUATION SETUP =====")
+    wprint(f"Batch evaluation of {len(tkzrs)} tokenisers...")
     import time
 
     # Load weights
@@ -257,6 +275,10 @@ def test_tokenizers_batch(tkzrs: list, reweighting_function: Callable[[float],fl
             size = len(t.get_vocab())
         except:
             size = "NA"
+
+        # Uncomment this if you need to only simulate the testing framework, rather than get results.
+        # results.append(TokeniserEvaluation(name=name, vocabsize=size, cm_morph=SegmentationConfusionMatrix(), cm_morph_w=SegmentationConfusionMatrix(), cm_lex=SegmentationConfusionMatrix(), cm_lex_w=SegmentationConfusionMatrix()))
+        # continue
 
         # Print and evaluate
         print(name)

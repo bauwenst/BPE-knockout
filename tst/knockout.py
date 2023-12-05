@@ -228,39 +228,69 @@ def main_vocabstats():
                             y_tickspacing=1000, do_kde=False, center_ticks=True, alpha=0.5, x_lims=(0, 15))
 
 
-def addEvaluationToTable(table: Table, results: List[TokeniserEvaluation]):
-    for tokeniser in results:
-        row = tokeniser.name
-        table.set(tokeniser.vocabsize, row, ["|V|"])
+def addEvaluationToTable(table: Table, results: List[TokeniserEvaluation], macro_average_all: bool=False,
+                         row_names: List[str]=None, row_prefix: List[str]=None):
+    """
+    In-place function that determines the table structure for reporting results from Python experiments.
 
-        pr, re, f1 = tokeniser.cm_morph.compute()
+    :param macro_average_all: If true, only one row is written to the table, namely with the first tokeniser's name, and the
+                              average Pr, Re, F1 over all given results.
+    """
+    if not results:
+        return
+
+    if row_prefix is None:
+        row_prefix = []
+    if row_names is None:
+        row_names = []
+
+    language = Pℛ𝒪𝒥ℰ𝒞𝒯.config.language_name.capitalize()
+    for tid, tokeniser in enumerate(results):
+        # Gather data for name imputation
+        raw_name = tokeniser.name
+        if "_" in raw_name:
+            imputed_middlename, imputed_leafname = raw_name.split("_", 1)
+        else:
+            imputed_middlename, imputed_leafname = raw_name, "--"
+
+        row =   (row_prefix     if row_prefix           else [language, imputed_middlename]) \
+              + [row_names[tid] if tid < len(row_names) else imputed_leafname]
+
+        # Add to table
+        table.set(tokeniser.vocabsize, row, ["$|V|$"])
+
+        pr, re, f1 = tokeniser.cm_morph.compute() if not macro_average_all else SegmentationConfusionMatrix.computeMatrixMacroAverage([r.cm_morph for r in results])
         table.set(pr, row, ["morphemic", "unweighted", "Pr"])
         table.set(re, row, ["morphemic", "unweighted", "Re"])
         table.set(f1, row, ["morphemic", "unweighted", "$F_1$"])
 
         if tokeniser.cm_morph_w:
-            pr, re, f1 = tokeniser.cm_morph_w.compute()
+            pr, re, f1 = tokeniser.cm_morph_w.compute()  if not macro_average_all else SegmentationConfusionMatrix.computeMatrixMacroAverage([r.cm_morph_w for r in results])
             table.set(pr, row, ["morphemic", "weighted", "Pr"])
             table.set(re, row, ["morphemic", "weighted", "Re"])
             table.set(f1, row, ["morphemic", "weighted", "$F_1$"])
 
-        pr, re, f1 = tokeniser.cm_lex.compute()
+        pr, re, f1 = tokeniser.cm_lex.compute()  if not macro_average_all else SegmentationConfusionMatrix.computeMatrixMacroAverage([r.cm_lex for r in results])
         table.set(pr, row, ["lexemic", "unweighted", "Pr"])
         table.set(re, row, ["lexemic", "unweighted", "Re"])
         table.set(f1, row, ["lexemic", "unweighted", "$F_1$"])
 
         if tokeniser.cm_lex_w:
-            pr, re, f1 = tokeniser.cm_lex_w.compute()
+            pr, re, f1 = tokeniser.cm_lex_w.compute()  if not macro_average_all else SegmentationConfusionMatrix.computeMatrixMacroAverage([r.cm_lex_w for r in results])
             table.set(pr, row, ["lexemic", "weighted", "Pr"])
             table.set(re, row, ["lexemic", "weighted", "Re"])
             table.set(f1, row, ["lexemic", "weighted", "$F_1$"])
 
+        if macro_average_all:  # Stop after one row
+            break
+
+
 @timeit
-def main_intrinsicAll():
+def main_intrinsicModes():
     """
     Test all combinations of annealing and knockout on intrinsic metrics (morphological Pr-Re-F1).
     """
-    table = Table("bte-intrinsic-all", caching=CacheMode.IF_MISSING)
+    table = Table("bte-intrinsic-modes", caching=CacheMode.IF_MISSING)
     if table.needs_computation:
         # Construct possible tokenisers
         modesets = list(itertools.product((RefMode.NONE,RefMode.MORPHEMIC,RefMode.LEXEMIC),
@@ -288,31 +318,83 @@ def main_intrinsicAll():
 @timeit
 def main_intrinsicMultilingual():
     """
-    Only tests BPE without knockout and BPE with morphemic knockout,
-    but does this in more than one language.
+    Constructs the big table in the paper. This includes evaluation for the following tokenisers:
+        - BPE without knockout:
+            1. BPE
+            2. BPE dropout
+        - BPE with knockout:
+            1. Morphemic knockout using full unweighted dataset for training and testing
+            2. (1) but with weighted training
+            3. (1) but keeping trivial merges
+            4. (1) but with an 80-20 holdout
+    The experiments are repeated for three languages.
+
+    This test takes 18 minutes WITHOUT testing any of the tokenisers. That makes sense:
+        - 1.5 minutes to do knockout.
+        - 3 languages.
+        - 4 knockout tokenisers per language (and 2 non-knockout outside of that).
+    Since every test should take 2 minutes, the estimated runtime is (4*1.5 + 6*2)*3 = 54 minutes.
     """
     old_config = Pℛ𝒪𝒥ℰ𝒞𝒯.config
     ###
 
-    from src.auxiliary.config import setupDutch, setupGerman
+    from src.auxiliary.config import setupDutch, setupGerman, setupEnglish
 
-    table = Table("bte-intrinsic-dutch-german", caching=CacheMode.IF_MISSING)
+    table = Table("bte-intrinsic-bigtable", caching=CacheMode.IF_MISSING)
+    DROPOUT_TESTS = 10
+    DROPOUT_RATE  = 0.1
+    HOLDOUT_SPLIT = 0.8
     if table.needs_computation:
+        LANGUAGES = [setupEnglish(), setupDutch(), setupGerman()]
+
+        # Set seed for reproducibility (dropout is random)
         import transformers
         transformers.set_seed(0)
 
-        def BPEdropout():
-            tkz = Pℛ𝒪𝒥ℰ𝒞𝒯.config.base_tokeniser.toFastBPE()
-            tkz.backend_tokenizer.model.dropout = 0.1
-            return tkz
+        # Same holdout for all tests
+        holdout = Holdout(HOLDOUT_SPLIT)
 
-        for config in [setupDutch(), setupGerman()]:
-            Pℛ𝒪𝒥ℰ𝒞𝒯.config = config
-            bte          = BTE(BteInitConfig())  # Changes depending on the language.
-            bpe_dropout  = BPEdropout()
-            bte_knockout = BTE(BteInitConfig(knockout=RefMode.MORPHEMIC))
-            results = test_tokenizers_batch([bte, bpe_dropout, bte_knockout], reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
-            addEvaluationToTable(table, results)
+        for language in LANGUAGES:
+            Pℛ𝒪𝒥ℰ𝒞𝒯.config = language
+            langstring = language.language_name.capitalize()
+
+            # --- BPE ---
+            bpe          = language.base_tokeniser.toFastBPE()
+            bpe_dropout  = language.base_tokeniser.toFastBPE()
+            bpe_dropout.backend_tokenizer.model.dropout = DROPOUT_RATE
+
+            results = test_tokenizers_batch([bpe], reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
+            addEvaluationToTable(table, results,
+                                 row_prefix=[langstring, "BPE"],
+                                 row_names=["--"])
+
+            results = test_tokenizers_batch([bpe_dropout]*DROPOUT_TESTS, reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
+            addEvaluationToTable(table, results, macro_average_all=True,
+                                 row_prefix=[langstring, "BPE"],
+                                 row_names=["dropout"])
+
+            # --- BPE-knockout ---
+            # for mode in modes_to_test:  # Technically the user should expect this for loop, but no user would realistically want to test multiple training modes across different languages.
+            mode = modes_to_test[0]
+
+            bte_knockout          = BTE(BteInitConfig(knockout=mode))
+            bte_knockout_holdout  = BTE(BteInitConfig(knockout=mode), holdout=holdout)
+            bte_knockout_keeplong = BTE(BteInitConfig(knockout=mode, keep_long_merges=True))
+            bte_knockout_weighted = BTE(BteInitConfig(knockout=mode, weighted_training=True))
+
+            # Using full test set
+            results = test_tokenizers_batch([bte_knockout, bte_knockout_keeplong, bte_knockout_weighted],
+                                            reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=None)
+            addEvaluationToTable(table, results,
+                                 row_prefix=[langstring, "BPE-knockout"],
+                                 row_names=["--", "keep long", "weighted"])
+
+            # Using partial test set
+            results = test_tokenizers_batch([bte_knockout_holdout],
+                                            reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=holdout)
+            addEvaluationToTable(table, results,
+                                 row_prefix=[langstring, "BPE-knockout"],
+                                 row_names=["holdout"])
 
     table.commit(cell_prefix=r"\tgrad{", cell_suffix=r"}", cell_function=lambda x: round(x,2))
 
@@ -321,21 +403,22 @@ def main_intrinsicMultilingual():
 
 
 @timeit
-def main_intrinsicPartial():
-    """
-    Intrinsic evaluation, except you use holdout and/or trivial merge exclusion to get a more nuanced view of the
-    metrics. TODO: Possibly have to do this per language, idk how you want to tabulate it.
-    """
-    table = Table("bte-intrinsic-partial", caching=CacheMode.IF_MISSING)
+def main_intrinsicMonolingual_KeepLong():
+    table = Table("bte-intrinsic-keeplong", caching=CacheMode.IF_MISSING)
     if table.needs_computation:
-        # Trivials
         results = test_tokenizers_batch(
             [BTE(BteInitConfig(knockout=mode, keep_long_merges=True)) for mode in modes_to_test],
             reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter
         )
         addEvaluationToTable(table, results)
 
-        # Holdout
+    table.commit(cell_prefix=r"\tgrad{", cell_suffix=r"}", cell_function=lambda x: round(x,2))
+
+
+@timeit
+def main_intrinsicMonolingual_Holdout():
+    table = Table("bte-intrinsic-holdout", caching=CacheMode.IF_MISSING)
+    if table.needs_computation:
         holdout = Holdout(0.8)
         results = test_tokenizers_batch(
             [BTE(BteInitConfig(knockout=mode, keep_long_merges=False), holdout=holdout) for mode in modes_to_test],
@@ -347,16 +430,46 @@ def main_intrinsicPartial():
 
 
 @timeit
-def main_intrinsicWeightedTraining():
+def main_intrinsicMonolingual_WeightedTraining():
     table = Table("bte-intrinsic-weightedtraining", caching=CacheMode.IF_MISSING)
     if table.needs_computation:
-        results = test_tokenizers_batch(
-            [BTE(BteInitConfig(knockout=mode, weighted_training=True)) for mode in modes_to_test],
-            reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter
-        )
-        addEvaluationToTable(table, results)
+        old_config = Pℛ𝒪𝒥ℰ𝒞𝒯.config
+        ###
 
-    table.commit()  # FIXME: Formatting options haven't been committed yet on my desktop, so I don't have them here.
+        # for mode in modes_to_test:
+        mode = modes_to_test[0]
+
+        for keeplong in [False, True]:
+            tokenisers = []
+            Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter = lambda x: x
+            tokenisers.append(BTE(BteInitConfig(knockout=mode, weighted_training=True, keep_long_merges=keeplong)))
+            Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter = lambda x: 1 + math.log10(x)
+            tokenisers.append(BTE(BteInitConfig(knockout=mode, weighted_training=True, keep_long_merges=keeplong)))
+
+            results_idweighted = test_tokenizers_batch(
+                tokenisers,
+                reweighting_function=lambda x: x
+            )
+            results_logweighted = test_tokenizers_batch(
+                tokenisers,
+                reweighting_function=lambda x: 1 + math.log10(x)
+            )
+
+            if keeplong:
+                name = "keep long"
+            else:
+                name = "normal"
+            addEvaluationToTable(table, results_idweighted,
+                                 row_prefix=[name, "id-tested"],
+                                 row_names=["id-trained", "log-trained"])
+            addEvaluationToTable(table, results_logweighted,
+                                 row_prefix=[name, "log-tested"],
+                                 row_names=["id-trained", "log-trained"])
+
+        ###
+        Pℛ𝒪𝒥ℰ𝒞𝒯.config = old_config
+
+    table.commit(cell_prefix=r"\tgrad{", cell_suffix=r"}", cell_function=lambda x: round(x,2))
 
 
 @timeit
@@ -627,24 +740,5 @@ def sep():
 
 
 if __name__ == "__main__":
-    # assert_equal_applyBPE()
-    # tokenizer = BTE(do_prune=False)
-    # print(tokenizer.segment_as_is_diagnostic("Ġmasterthesistitelbladzijdeachtergrondfiguur"))
-    # print_knockout()
-    # visualise()
-
-    main_tokenDiffs()
-    # sep()
-    # main_mergestats()
-    # sep()
-    # main_vocabstats()
-    # sep()
-    # main_intrinsic_evaluation()
-    # sep()
-    # main_partial_evaluation()
-    # sep()
-    # main_deleteRandomMerges()
-    # sep()
-    # main_deleteLastMerges()
-    # time_iterators()
-    # main_deleteLastLeaves()
+    # main_intrinsicMultilingual()
+    main_intrinsicMonolingual_WeightedTraining()

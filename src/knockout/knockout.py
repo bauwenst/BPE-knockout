@@ -350,7 +350,6 @@ class BTE:
             head = tup[1][1:-1].split(" ")[0]
             self.merges_starting_with[head].append(tup)  # If this raises a KeyError, something is definitely wrong.
 
-    @timeit
     def prune(self):
         print("Knockout...")
         merges_to_remove = self.getBadOldMerges(relative_blame_threshold=BTE.KNOCKOUT_REL_THRESHOLD,
@@ -358,7 +357,6 @@ class BTE:
         for ratio, total, merge in tqdm(merges_to_remove, desc="PRUNING GRAPH"):
             self.merge_graph.knockout(merge.childType())
 
-    @timeit
     def anneal(self):
         print("Annealing...")
         merges_to_add = self.getGoodNewMerges(absolute_threshold=BTE.ANNEAL_ABS_THRESHOLD)

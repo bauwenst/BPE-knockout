@@ -13,12 +13,14 @@ from dataclasses import dataclass
 from typing import Callable, Type, Optional, Iterable, Dict, Tuple, List
 from abc import abstractmethod, ABC
 import json
+import math
+import langcodes
 from transformers import RobertaTokenizerFast
 
 # None of the below files import the config.
 from src.auxiliary.paths import *
 from src.auxiliary.robbert_tokenizer import AutoTokenizer_from_pretrained
-from src.datahandlers.morphology import LemmaMorphology
+from src.datahandlers.morphology import LemmaMorphology, CelexLemmaMorphology
 
 
 class TokeniserPath(ABC):
@@ -100,6 +102,8 @@ class HuggingFaceTokeniser(TokeniserPath):
 
 @dataclass
 class ProjectConfig:
+    # Name of the tested language, e.g. "English". Should exist, so that its standardised language code can be looked up.
+    language_name: str
     # Text file that contains morphological decompositions (e.g. for CELEX, each line is a word, a space, and the "StrucLab" label).
     morphologies: Path
     # Text file that contains the frequencies of words in a large corpus. Each line is a word, a space, and an integer.
@@ -113,84 +117,77 @@ class ProjectConfig:
 
 
 def setupDutch() -> ProjectConfig:
-    import math
-    from src.datahandlers.morphology import CelexLemmaMorphology
-
-    ###
-    DUTCH_CONFIG = ProjectConfig(
+    config = ProjectConfig(
+        language_name="Dutch",
         lemma_weights=PATH_DATA_COMPRESSED / "words_oscar-nl.txt",
         morphologies=PATH_DATA_COMPRESSED / "celex_morphology_nl.txt",
         base_tokeniser=SennrichTokeniser(PATH_DATA_MODELBASE / "bpe-oscar-nl-clean"),
         reweighter=lambda f: 1 + math.log10(f),
         parser=CelexLemmaMorphology
     )
-    ###
-
-    # Impute missing data
-    if DUTCH_CONFIG.lemma_weights is not None and not DUTCH_CONFIG.lemma_weights.exists():
-        print("Dutch lemma weights not found. Counting (wil take about 5 hours)...")
-
-        from src.datahandlers.hf_corpora import dataloaderToWeights, generateDataloader_Oscar, punctuationPretokeniserExceptHyphens
-        dataloader, size = generateDataloader_Oscar(lang="nl", sentence_preprocessor=punctuationPretokeniserExceptHyphens())
-        weights = dataloaderToWeights(dataloader, DUTCH_CONFIG.lemma_weights.stem, size)  # Takes about 4h30m
-        weights.rename(DUTCH_CONFIG.lemma_weights)
-
-    if DUTCH_CONFIG.morphologies is None or not DUTCH_CONFIG.morphologies.exists():  # TODO: Could probably query the MPI database
-        raise ValueError("No Dutch morphologies found.")
-
-    if not DUTCH_CONFIG.base_tokeniser.exists():
-        print("Dutch tokeniser not found. Fetching...")
-
-        from src.auxiliary.robbert_tokenizer import robbert_tokenizer, getMergeList_RobBERT
-        base_vocab, base_merges = DUTCH_CONFIG.base_tokeniser.getPaths()
-        if not base_vocab.exists():
-            sorted_vocab = dict(sorted(robbert_tokenizer.get_vocab().items(), key=lambda item: item[1]))
-            with open(base_vocab, "w", encoding="utf-8") as handle:
-                json.dump(sorted_vocab, handle, ensure_ascii=False, indent=4)
-        if not base_merges.exists():
-            with open(base_merges, "w", encoding="utf-8") as handle:
-                handle.writelines([merge + "\n" for merge in getMergeList_RobBERT(do_2022=False)])
-
-    return DUTCH_CONFIG
+    imputeConfig_OscarCelexSennrich(config)
+    return config
 
 
 def setupGerman() -> ProjectConfig:
-    import math
-    from src.datahandlers.morphology import CelexLemmaMorphology
-    from src.datahandlers.bpetrainer import BPETrainer
-
-    ###
-    GERMAN_CONFIG = ProjectConfig(
+    config = ProjectConfig(
+        language_name="German",
         lemma_weights=PATH_DATA_COMPRESSED / "words_oscar-de.txt",
         morphologies=PATH_DATA_COMPRESSED / "celex_morphology_de.txt",
         base_tokeniser=SennrichTokeniser(PATH_DATA_MODELBASE / "bpe-oscar-de-clean"),
         reweighter=lambda f: 1 + math.log10(f),
         parser=CelexLemmaMorphology
     )
-    ###
+    imputeConfig_OscarCelexSennrich(config)
+    return config
 
-    if GERMAN_CONFIG.lemma_weights is not None and not GERMAN_CONFIG.lemma_weights.exists():
-        print("German lemma weights not found. Counting...")
+
+def setupEnglish() -> ProjectConfig:
+    config = ProjectConfig(
+        language_name="English",
+        lemma_weights=PATH_DATA_COMPRESSED / "words_oscar-en.txt",
+        morphologies=PATH_DATA_COMPRESSED / "celex_morphology_en.txt",
+        base_tokeniser=SennrichTokeniser(PATH_DATA_MODELBASE / "bpe-oscar-en-clean"),
+        reweighter=lambda f: 1 + math.log10(f),
+        parser=CelexLemmaMorphology
+    )
+    imputeConfig_OscarCelexSennrich(config)
+    return config
+
+
+def imputeConfig_OscarCelexSennrich(config_in_progress: ProjectConfig):
+    """
+    Imputation of configs that
+        - should get their weights from OSCAR,
+        - should get their morphologies from CELEX, and
+        - should have separate files for vocab (.json) and merges (.txt).
+    """
+    language_object = langcodes.find(config_in_progress.language_name)
+
+    if config_in_progress.lemma_weights is not None and not config_in_progress.lemma_weights.exists():
+        print(f"{language_object.display_name()} lemma weights not found. Counting...")
         from src.datahandlers.hf_corpora import dataloaderToWeights, generateDataloader_Oscar, punctuationPretokeniserExceptHyphens
-        dataloader, size = generateDataloader_Oscar(lang="de", sentence_preprocessor=punctuationPretokeniserExceptHyphens(),
+        dataloader, size = generateDataloader_Oscar(lang=language_object.to_tag(),
+                                                    sentence_preprocessor=punctuationPretokeniserExceptHyphens(),
                                                     size_limit=30_000_000)
-        weights = dataloaderToWeights(dataloader, GERMAN_CONFIG.lemma_weights.stem, size)
-        weights.rename(GERMAN_CONFIG.lemma_weights)
+        weights = dataloaderToWeights(dataloader, config_in_progress.lemma_weights.stem, size)  # Takes about 28h30m (English), 4h30m (Dutch), ...
+        weights.rename(config_in_progress.lemma_weights)
 
-    if GERMAN_CONFIG.morphologies is None or not GERMAN_CONFIG.morphologies.exists():  # TODO: Could probably query the MPI database
-        raise ValueError("No German morphologies found.")
+    # TODO: Could probably query the MPI database
+    if config_in_progress.morphologies is None or not config_in_progress.morphologies.exists():
+        raise ValueError(f"{language_object.display_name()} morphologies not found.")
 
-    base_vocab, base_merges = GERMAN_CONFIG.base_tokeniser.getPaths()
+    base_vocab, base_merges = config_in_progress.base_tokeniser.getPaths()
     if not base_merges.exists():  # writes merges and vocab
-        print("German tokeniser not found. Training...")
+        from src.datahandlers.bpetrainer import BPETrainer
+        print(f"{language_object.display_name()} tokeniser not found. Training...")
         trainer = BPETrainer(vocab_size=40_000, byte_based=True)
-        trainer.train_hf(wordfile=GERMAN_CONFIG.lemma_weights, out_folder=GERMAN_CONFIG.base_tokeniser.path)
+        trainer.train_hf(wordfile=config_in_progress.lemma_weights, out_folder=config_in_progress.base_tokeniser.path)  # Takes about 3h40m (English).
     elif not base_vocab.exists():  # vocab can be deduced from merges; assume it's byte-based
+        from src.datahandlers.bpetrainer import BPETrainer
         vocab = BPETrainer.deduceVocabFromMerges(base_merges, byte_based=True)
         with open(base_vocab, "w", encoding="utf-8") as handle:
             json.dump(vocab, handle, ensure_ascii=False, indent=4)
-
-    return GERMAN_CONFIG
 
 
 ### Common imports found below ###
