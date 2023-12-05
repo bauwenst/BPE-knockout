@@ -151,6 +151,24 @@ def time_iterators():
         " ".join(tokenizeAsWord(morpho.lemma())).strip()
 
 
+def test_onlyTrivials():
+    from src.visualisation.graphing import Table, CacheMode
+    table = Table("test", caching=CacheMode.NONE)
+
+    if table.needs_computation:
+        bte = BTE(BteInitConfig())
+
+        # Find trivial merges
+        trivials = [merge for merge in bte.merge_graph.merges if merge.isTrivial(minimum=BTE.LONGPART_THRESHOLD)]
+        for trivial in trivials:
+            bte.merge_graph.knockout(trivial.childType())
+
+        # Evaluate
+        results = test_tokenizers_batch([bte], reweighting_function=lambda x: x, holdout=None)
+        addEvaluationToTable(table, results)
+
+    table.commit()
+
 ##############################################################################
 
 @timeit
@@ -648,3 +666,4 @@ if __name__ == "__main__":
     # main_deleteLastMerges()
     # time_iterators()
     # main_deleteLastLeaves()
+    test_onlyTrivials()

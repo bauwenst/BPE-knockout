@@ -59,6 +59,13 @@ class Merge:
     def childType(self) -> str:
         return "".join(self.parts)
 
+    def isTrivial(self, minimum: int) -> bool:
+        """
+        A merge is trivial if all its parts are at least as long as a given number.
+        This indicates that the merge is just making a giant compound, which is, trivially, over-eager.
+        """
+        return all([len(part) >= minimum for part in self.parts])
+
 
 class MergeGraph:
     """
@@ -493,8 +500,7 @@ class BTE:
         # Filter
         filtered_results = [(ratio, total[idx], merge_lookup[idx]) for idx, ratio in blame_ratios.items()
                             if ratio >= relative_blame_threshold
-                            and not all([len(part) >= except_if_all_parts_longer_than
-                                         for part in merge_lookup[idx].parts])]
+                            and not merge_lookup[idx].isTrivial(except_if_all_parts_longer_than)]
         filtered_results.sort(reverse=True)
 
         return filtered_results
