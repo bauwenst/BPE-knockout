@@ -6,7 +6,7 @@ from src.visualisation.graphing import *
 from src.knockout.knockout import *
 from src.auxiliary.measuring import *
 from src.auxiliary.robbert_tokenizer import tokenizeAsWord, robbert_tokenizer, getMergeList_RobBERT
-from src.auxiliary.config import Pℛ𝒪𝒥ℰ𝒞𝒯, morphologyGenerator
+from src.auxiliary.config import Pℛ𝒪𝒥ℰ𝒞𝒯, morphologyGenerator, setupEnglish, setupDutch, setupGerman, ProjectConfig
 from src.datahandlers.wordfiles import ACCENTS
 
 
@@ -14,6 +14,8 @@ print("Loading tests...")
 untrained_bte = BTE(BteInitConfig(), quiet=True)
 # modes_to_test = [RefMode.MORPHEMIC, RefMode.LEXEMIC]  # Thesis, not paper.
 modes_to_test = [RefMode.MORPHEMIC]
+def getAllConfigs():  # In a function to protect against imputation if these are never needed.
+    return [setupEnglish(), setupDutch(), setupGerman()]
 
 
 def assert_tokenisers_equal(tokeniser1=robbert_tokenizer, tokeniser2=untrained_bte):
@@ -154,7 +156,7 @@ def time_iterators():
 
 def test_onlyTrivials():
     from src.visualisation.graphing import Table, CacheMode
-    table = Table("test", caching=CacheMode.NONE)
+    table = Table("bte-intrinsic-onlytrivials", caching=CacheMode.NONE)
 
     if table.needs_computation:
         bte = BTE(BteInitConfig())
@@ -167,15 +169,44 @@ def test_onlyTrivials():
         # Evaluate
         results = test_tokenizers_batch([bte], reweighting_function=lambda x: x)
         addEvaluationToTable(table, results,
-                             row_prefix=["Dutch", "linear test weights"], row_names=["keep long"])
+                             row_prefix=["Dutch", "linear test"], row_names=["nolong"])
         results = test_tokenizers_batch([bte], reweighting_function=lambda x: 1 + math.log10(x))
         addEvaluationToTable(table, results,
-                             row_prefix=["Dutch", "log test weights"], row_names=["keep long"])
+                             row_prefix=["Dutch", "log test"], row_names=["nolong"])
 
     table.commit(cell_function=lambda x: f"{x:.2f}")
 
 
 ##############################################################################
+
+
+class TemporaryContext:
+
+    def __init__(self, context: ProjectConfig):
+        self.old_context = None
+        self.new_context = context
+
+    def __enter__(self):
+        self.old_context = Pℛ𝒪𝒥ℰ𝒞𝒯.config
+        Pℛ𝒪𝒥ℰ𝒞𝒯.config = self.new_context
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        Pℛ𝒪𝒥ℰ𝒞𝒯.config = self.old_context
+
+
+@timeit
+def main_datasetStats():
+    histo = MultiHistogram("languages-morph-per-word", caching=CacheMode.IF_MISSING)
+    if histo.needs_computation:
+        for language in getAllConfigs():
+            with TemporaryContext(language):
+                for obj in morphologyGenerator():
+                    histo.add(language.language_name, len(obj.morphSplit().split()))
+
+    print(histo.toDataframe().groupby(LEGEND_TITLE_CLASS).describe())
+    histo.commit_histplot(center_ticks=True, relative_counts=True, x_lims=(0.5,6.5),
+                          x_label="Morphs", y_label="Fraction of lemmata",
+                          do_hatch=True, do_kde=False)
 
 
 @timeit
@@ -362,16 +393,11 @@ def main_intrinsicMultilingual():
     """
     old_config = Pℛ𝒪𝒥ℰ𝒞𝒯.config
     ###
-
-    from src.auxiliary.config import setupDutch, setupGerman, setupEnglish
-
     table = Table("bte-intrinsic-bigtable", caching=CacheMode.IF_MISSING)
     DROPOUT_TESTS = 10
     DROPOUT_RATE  = 0.1
-    HOLDOUT_SPLIT = 0.8
+    HOLDOUT_SPLIT = 0.5
     if table.needs_computation:
-        LANGUAGES = [setupEnglish(), setupDutch(), setupGerman()]
-
         # Set seed for reproducibility (dropout is random)
         import transformers
         transformers.set_seed(0)
@@ -379,7 +405,7 @@ def main_intrinsicMultilingual():
         # Same holdout for all tests
         holdout = Holdout(HOLDOUT_SPLIT)
 
-        for language in LANGUAGES:
+        for language in getAllConfigs():  # Will FIRST impute all data and THEN iterate.
             Pℛ𝒪𝒥ℰ𝒞𝒯.config = language
             langstring = language.language_name.capitalize()
 
@@ -404,11 +430,11 @@ def main_intrinsicMultilingual():
 
             bte_knockout          = BTE(BteInitConfig(knockout=mode))
             bte_knockout_holdout  = BTE(BteInitConfig(knockout=mode), holdout=holdout)
-            bte_knockout_keeplong = BTE(BteInitConfig(knockout=mode, keep_long_merges=True))
-            bte_knockout_weighted = BTE(BteInitConfig(knockout=mode, weighted_training=True))
+            # bte_knockout_keeplong = BTE(BteInitConfig(knockout=mode, keep_long_merges=True))
+            # bte_knockout_weighted = BTE(BteInitConfig(knockout=mode, weighted_training=True))
 
             # Using full test set
-            results = test_tokenizers_batch([bte_knockout, bte_knockout_keeplong, bte_knockout_weighted],
+            results = test_tokenizers_batch([bte_knockout],  #, bte_knockout_keeplong, bte_knockout_weighted],
                                             reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=None)
             addEvaluationToTable(table, results,
                                  row_prefix=[langstring, "BPE-knockout"],
@@ -676,7 +702,7 @@ def main_deleteLastLeaves():
             g1.add("from the start", p, head_percentage)
             g1.add("from the end",   p, tail_percentage)
 
-    g1.commit(x_label="Fraction of total merges [\\%]", y_label="Fraction that are leaves [\\%]",
+    g1.commit(x_label="Fraction of total merges selected [\\%]", y_label="Fraction that are leaves [\\%]",
               y_lims=(0, 101), x_tickspacing=10, y_tickspacing=10)
 
     # Part 2: Performance
@@ -765,4 +791,5 @@ def sep():
 
 
 if __name__ == "__main__":
-    test_onlyTrivials()
+    # test_onlyTrivials()
+    main_datasetStats()

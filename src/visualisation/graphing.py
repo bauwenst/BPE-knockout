@@ -27,6 +27,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import matplotlib.ticker as tkr
 import matplotlib.font_manager
+import matplotlib.legend as lgd  # Only for type-checking.
 from matplotlib import rc
 
 # Enable LaTeX support
@@ -630,7 +631,7 @@ class MultiHistogram(Diagram):
                         x_lims: Tuple[int,int]=None, aspect_ratio=DEFAULT_ASPECT_RATIO,
                         x_tickspacing: float=1, y_tickspacing: float=None, center_ticks=False,
                         do_kde=True, kde_smoothing=True,
-                        border_colour=None, fill_colour=None,  # Note: colour=None means "use default colour", not "use no colour".
+                        border_colour=None, fill_colour=None, do_hatch=False, # Note: colour=None means "use default colour", not "use no colour".
                         x_label: str="", y_label: str="",
                         **seaborn_args):
         """
@@ -676,6 +677,20 @@ class MultiHistogram(Diagram):
                              color=fill_colour, edgecolor=border_colour,
                              **seaborn_args)  # Do note use displot: https://stackoverflow.com/a/63895570/9352077
 
+            # Cross-hatching
+            if do_hatch:
+                # Note that this is actually quite difficult for multi-histograms: surprisingly, you can't pass all the
+                # hatch patterns you want to sns.histplot, only one. Hence, we need a hack, see
+                #   https://stackoverflow.com/a/40293705/9352077
+                #   and https://stackoverflow.com/a/76233802/9352077
+                HATCHING_PATTERNS = ['/', '\\', '.', '*', '+', '|', '-', 'x', 'O', 'o']  # https://matplotlib.org/stable/gallery/shapes_and_collections/hatch_style_reference.html
+                legend: lgd.Legend = ax.get_legend()
+                for pattern, bar_collection, legend_handle in zip(HATCHING_PATTERNS, ax.containers, legend.legendHandles[::-1]):  # FIXME: .legend_handles in newer versions of matplotlib.
+                    legend_handle.set_hatch(pattern)
+                    for bar in bar_collection:
+                        bar.set_hatch(pattern)
+
+            # Axes
             ax.set_xlabel(x_label)
             ax.set_ylabel(y_label + r" [\%]" * (mode == "percent" and y_label != ""))
             if x_lims:
