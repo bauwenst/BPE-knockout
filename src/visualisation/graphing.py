@@ -13,7 +13,7 @@ from abc import ABC, abstractmethod
 import dataclasses
 from dataclasses import dataclass
 from enum import Enum
-from typing import Union, Sequence, Tuple, List, Dict, Callable
+from typing import Union, Sequence, Tuple, List, Dict, Callable, Iterable
 
 import itertools
 from pathlib import Path
@@ -22,6 +22,7 @@ import json
 import pandas as pd
 import math
 import time
+import scipy
 
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -819,6 +820,22 @@ class Histogram(MultiHistogram):
         ax.set_yticklabels([y_label], rotation=90, va='center')
         self.exportToPdf(fig, stem_suffix="_violinplot")
 
+    def commit_qqplot(self, random_variable: scipy.stats.rv_continuous, tickspacing: float=None):  # TODO: Possibly, you need some new limits/tickspacing math for normal/chi²/... distributions.
+        # Can be done with my own ScatterPlot class:
+        values = self.data["x_values"]
+        quantiles = random_variable.ppf((np.arange(1,len(values)+1) - 0.5)/len(values))
+
+        graph = ScatterPlot(name=self.name)
+        graph.addPointsToFamily("", quantiles, sorted(values))
+        fig, ax = graph.commit(aspect_ratio=(3.25,3.25), x_label="Theoretical quantiles", y_label="Empirical quantiles",
+                               family_sizes={"": 15}, only_for_return=True, legend=False,
+                               grid=True, x_tickspacing=tickspacing, y_tickspacing=tickspacing)
+        ax.axline(xy1=(0,0), slope=1.0, color="red", zorder=1, alpha=1.0, linewidth=0.75)
+        self.exportToPdf(fig, stem_suffix="_qqplot")
+
+        # Doing it with scipy is more complicated because you need to fit your data to your random variable first
+        # (which gives you a FitResult object that has a .plot("qq") method) ... so I'm not going to do that!
+
 
 class ScatterPlot(Diagram):
 
@@ -831,7 +848,7 @@ class ScatterPlot(Diagram):
             new_plot.addPointsToFamily(name, values[0].copy(), values[1].copy())
         return new_plot
 
-    def addPointsToFamily(self, family_name: str, xs, ys):
+    def addPointsToFamily(self, family_name: str, xs: Iterable[float], ys: Iterable[float]):
         """
         Unlike the other diagram types, it seems justified to add scatterplot points in bulk.
         Neither axis is likely to represent time, so you'll probably have many points available at once.
@@ -841,8 +858,8 @@ class ScatterPlot(Diagram):
         self.data[family_name][0].extend(xs)
         self.data[family_name][1].extend(ys)
 
-    def commit(self, aspect_ratio: Tuple[float,float]=DEFAULT_ASPECT_RATIO, x_label="", y_label="",
-               x_lims=None, y_lims=None, logx=False, logy=False, x_tickspacing=None, grid=False, legend=False,
+    def commit(self, aspect_ratio: Tuple[float,float]=DEFAULT_ASPECT_RATIO, x_label="", y_label="", legend=False,
+               x_lims=None, y_lims=None, logx=False, logy=False, x_tickspacing=None, y_tickspacing=None, grid=False,
                family_colours=None, family_sizes=None, randomise_markers=False, only_for_return=False):
         with ProtectedData(self):
             fig, ax = newFigAx(aspect_ratio)
@@ -852,14 +869,17 @@ class ScatterPlot(Diagram):
                 ax.set_xscale("log")  # Needed for a log scatterplot. https://stackoverflow.com/a/52573929/9352077
                 ax.xaxis.set_major_locator(tkr.LogLocator(base=10, numticks=999))  # See comment under https://stackoverflow.com/q/76285293/9352077
                 ax.xaxis.set_major_formatter(tkr.LogFormatterSciNotation())
-            else:
-                if x_tickspacing:
+            elif x_tickspacing:
                     ax.xaxis.set_major_locator(tkr.MultipleLocator(x_tickspacing))
                     ax.xaxis.set_major_formatter(tkr.ScalarFormatter())
+
             if logy:
                 ax.set_yscale("log")
                 ax.yaxis.set_major_locator(tkr.LogLocator(base=10, numticks=999))
                 ax.yaxis.set_major_formatter(tkr.LogFormatterSciNotation())
+            elif y_tickspacing:
+                ax.xaxis.set_major_locator(tkr.MultipleLocator(y_tickspacing))
+                ax.xaxis.set_major_formatter(tkr.ScalarFormatter())
 
             if logx and logy:  # Otherwise you have a skewed view of horizontal vs. vertical distances.
                 ax.set_aspect("equal")
@@ -878,7 +898,7 @@ class ScatterPlot(Diagram):
                 name, family = tup
                 m = markers.pop() if randomise_markers else "."
                 c = family_colours.get(name, cols[idx])
-                s = family_sizes.get(name, 40)
+                s = family_sizes.get(name, 35)
                 result = ax.scatter(family[0], family[1], marker=m, linewidths=0.05, color=c, s=s)
                 scatters.append(result)
                 names.append(name)
@@ -977,12 +997,41 @@ class NamedTree(Generic[LeafContent]):
 
         return current_node
 
+    def renameBranch(self, old_branch: List[str], new_branch: List[str]):
+        nodes = [self]
+        for name in old_branch:
+            for child in nodes[-1].children:
+                if child.name == name:
+                    nodes.append(child)
+                    break
+            else:
+                print("No such tree path exists:", old_branch)
+                return
+
+        for node, name in zip(nodes, new_branch):  # If proposed name is too long, only the first names will be applied. If it is too short, only the first nodes will be renamed.
+            node.name = name
+
     def __repr__(self):
-        return "'" + self.name + "'"
+        return "Column('" + self.name + "')"
 
 
 TableRow    = NamedTree[int]
 TableColumn = NamedTree[Dict[int, Any]]
+
+
+@dataclass
+class ColumnStyle:
+    # Cross-column
+    alignment: str="c"
+    group_extrema_at_rowlevel: int=-1  # Follows the same indexing standard as row borders. -1 computes extrema across all rows.
+    do_bold_maximum: bool=False  # This is applied AFTER the cell functions and BEFORE rounding.
+    do_bold_minimum: bool=False  # idem
+
+    # Cellwise. E.g.: to format a tokeniser's vocabulary size, you'd use function=lambda x: x/1000, digits=1, suffix="k"
+    cell_prefix: str=""
+    cell_function: Callable[[float], float] = lambda x: x   # E.g. x/1000
+    digits: int=2  # This option might seem redundant given that we allow applying any function, but it takes the burden off the user to apply either round() (which drops zeroes) or something like f"{x:.2f}".
+    cell_suffix: str=""
 
 
 class Table(Diagram):
@@ -1002,6 +1051,13 @@ class Table(Diagram):
     The identifier system allows inserting rows out of their desired order, without having to rename all column content.
     """
 
+    def clear(self):
+        self.data = {
+            "rows": 0,
+            "column-tree": TableColumn("", [], dict()),
+            "row-tree": TableRow("", [], None)
+        }
+
     def getAsColumn(self) -> TableColumn:
         return self.data["column-tree"]
 
@@ -1011,11 +1067,8 @@ class Table(Diagram):
     def set(self, value: float, row_path: List[str], column_path: List[str]):
         if not column_path:
             raise ValueError("Column path needs at least one column.")
-
         if not self.data:
-            self.data["rows"] = 0
-            self.data["column-tree"] = TableColumn("", [], dict())
-            self.data["row-tree"]    = TableRow("", [], None)
+            self.clear()
 
         # Get row identifier
         row_leaf = self.getRowTree().setdefault(row_path, -1)
@@ -1026,6 +1079,12 @@ class Table(Diagram):
         # Get column leaf
         col_leaf = self.getAsColumn().setdefault(column_path, dict())
         col_leaf.content[row_leaf.content] = value
+
+    def renameRow(self, old_rowname: List[str], new_rowname: List[str]):
+        self.getRowTree().renameBranch(old_rowname, new_rowname)
+
+    def renameColumn(self, old_colname: List[str], new_colname: List[str]):
+        self.getAsColumn().renameBranch(old_colname, new_colname)
 
     def _save(self) -> dict:
         return {
@@ -1040,39 +1099,60 @@ class Table(Diagram):
             "column-tree": TableColumn.fromDict(saved_data["column-tree"]),
             "row-tree":    TableRow.fromDict(saved_data["row-tree"])
         }
+        # Note: JSON converts the integer keys that index a column's content into strings. We need to convert back.
+        for leaf_column in self.data["column-tree"].getLeaves():
+            leaf_column.content = {int(key): value for key,value in leaf_column.content.items()}
 
-    def commit(self, cell_prefix: str="", cell_suffix: str="",
-               column_alignment="c", rowname_alignment="l",
-               borders_between_columns_of_level: List[int]=None, borders_between_toplevel_rows: bool=False,
-               cell_function: Callable[[float], float]=lambda x: x):  # TODO: Needs an option to align &s. Also needs to replace any & in col/row names by \&.
+    def commit(self, rowname_alignment="l",
+               borders_between_columns_of_level: List[int]=None, borders_between_rows_of_level: List[int]=None,
+               default_column_style: ColumnStyle=None, alternate_column_styles: Dict[Tuple[str,...], ColumnStyle]=None,
+               do_hhline_syntax=True):  # TODO: Needs an option to align &s. Also needs to replace any & in col/row names by \&.
+        """
+        :param rowname_alignment: How to align row names (choose between "l", "c" and "r").
+        :param borders_between_columns_of_level: List of layer indices that cause vertical lines to be drawn in the table
+                                                 when a new column starts at that layer of the table header.
+                                                 The top layer is layer 0, the under it is layer 1, etc.
+        :param borders_between_rows_of_level: Same but for horizontal lines drawn when a new row of a certain layer starts.
+                                              The leftmost layer is layer 0.
+        :param default_column_style: The style to apply to all columns.
+        :param alternate_column_styles: Specifies specific columns to which a different style should be applied.
+        """
         with ProtectedData(self):
-            lines = []
-
             table = self.getAsColumn()
             header_height = table.height() - 1
             margin_depth  = self.getRowTree().height() - 1
 
-            # Make first line
-            first_line = r"\begin{tabular}{" + rowname_alignment*margin_depth + "||"
-            for top_level_column in table.children:
-                first_line += column_alignment*top_level_column.width()  # No default borders (indicated with | normally). Everything is regulated by multicolumn below.
-            first_line += "}"
-            lines.append(first_line)
-
-            # Check validity of border settings
+            # Style imputation
+            if default_column_style is None:
+                default_column_style = ColumnStyle()
+            if alternate_column_styles is None:
+                alternate_column_styles = dict()
             if borders_between_columns_of_level is None:
                 borders_between_columns_of_level = []
             elif len(borders_between_columns_of_level) > 0 and (min(borders_between_columns_of_level) < 0 or max(borders_between_columns_of_level) >= header_height):
                 raise ValueError(f"This table has {header_height} header levels, with identifiers 0 to {header_height-1}. You gave {borders_between_columns_of_level}.")
+            if borders_between_rows_of_level is None:
+                borders_between_rows_of_level = []
+            elif len(borders_between_rows_of_level) > 0 and (min(borders_between_rows_of_level) < 0 or max(borders_between_rows_of_level) >= margin_depth):
+                raise ValueError(f"This table has {margin_depth} row levels, with identifiers 0 to {margin_depth-1}. You gave {borders_between_rows_of_level}.")
 
-            # Determine prefix for header lines  TODO: doesn't work properly right now because you need to include the length of \multirow which is added later on.
-            header_extra_spaces = max([sum([len(cell.name)+3 for cell in path]) for path in self.getRowTree().getPaths()])
+            # STEP 1: Make first line. Note that there are no default borders (indicated with | normally). Everything is regulated by multicolumn below.
+            first_line = r"\begin{tabular}{" + rowname_alignment*margin_depth + "||"
+            for path in table.getPaths():
+                identifier = tuple(node.name for node in path[1:])
+                style = alternate_column_styles.get(identifier, default_column_style)
+                first_line += style.alignment
+            # for top_level_column in table.children:
+            #     first_line += default_column_style.alignment*top_level_column.width()
+            first_line += "}"
 
-            # Get all header lines and where the borders are at each header level
+            # STEP 2: Get all header lines and where the borders are at each header level
+            header_lines = []
+
             level_has_edge_after_ncols = []
             frontier = table.children
             for header_line_idx in range(header_height):  # Vertical iteration
-                line = "    " + " "*header_extra_spaces + "&"*(margin_depth-1)
+                line = "&"*(margin_depth-1)
                 level_has_edge_after_ncols.append([0])
                 cumulative_width = 0
                 new_frontier = []
@@ -1097,11 +1177,14 @@ class Table(Diagram):
                                     right_border = True
                                     break
 
+                        if left_border:  # We know that the cell to the left is empty. Go back and change it to an empty cell with a right border. (What you cannot do is add a left border to the current cell, despite multicolumn allowing this (e.g. |c| instead of c|). The reason is that a right border in cell x and a left border in cell x+1 are offset by 1 pixel.)
+                            line = line[:line.rfind("&")] + r"\multicolumn{1}{c|}{}  &"
+
                         # Render content
                         if width == 1 and not right_border:  # Simple
                             line += col.name
-                        else:  # Multicolumn width and/or border  TODO: Left borders are 1 pixel shifted over from right borders. That means you should never use left borders and should instead retroactively add an empty \multicolumn{1}{c|}{} to the left.
-                            line += r"\multicolumn{" + str(width) + "}{" + "|"*left_border + column_alignment + "|"*right_border + "}{" + col.name + "}"
+                        else:  # Multicolumn width and/or border
+                            line += r"\multicolumn{" + str(width) + "}{c" + "|"*right_border + "}{" + col.name + "}"
 
                         # Border math
                         if level_has_edge_after_ncols[-1][-1] != 0:
@@ -1115,67 +1198,123 @@ class Table(Diagram):
                         line += " & "*(width-1)
                         level_has_edge_after_ncols[-1][-1] += width
                 line += r" \\"
-                lines.append(line)
+                header_lines.append(line)
 
                 level_has_edge_after_ncols[-1] = level_has_edge_after_ncols[-1][:-2]  # Trim off last 0 and also last column since we don't want the edge of the table to have a border.
                 level_has_edge_after_ncols[-1] = [sum(level_has_edge_after_ncols[-1][:i+1]) for i in range(len(level_has_edge_after_ncols[-1]))]  # cumsum
                 frontier = new_frontier
-            lines[-1] += r"\hline\hline"
+            header_lines[-1] += r"\hline\hline" if not do_hhline_syntax else \
+                                r"\hhline{*{" + str(margin_depth+table.width()) + r"}{=}}"
 
-            # Make rows
+            # STEP 3: Find maximal and minimal values per column, possibly per row group
+            extrema_per_column: List[Dict[Tuple[str,...], Tuple[float,float]]] = []  # List over all columns, dict over all group keys.
+            for column_path in table.getPaths():
+                col_path_names = tuple(node.name for node in column_path[1:])
+                style = alternate_column_styles.get(col_path_names, default_column_style)
+                content_node = column_path[-1]
+
+                # This overlaps in work with step 4, but I don't really have a decent alternative.
+                extrema_per_column.append(dict())
+                for row_path in self.getRowTree().getPaths():
+                    identifier = row_path[-1].content
+                    if identifier not in content_node.content:
+                        continue
+                    else:
+                        cell_value = content_node.content[identifier]
+                        if isinstance(cell_value, (int, float)):
+                            cell_value = style.cell_function(cell_value)
+
+                    row_path_names = tuple(node.name for node in row_path[1:])
+                    group_key = row_path_names[:style.group_extrema_at_rowlevel+1]
+                    if group_key not in extrema_per_column[-1]:  # Note: I'm not using the classic approach of using .get(key, float(inf)) because a table can also contain strings, which can be compared but not with floats.
+                        mini = cell_value
+                        maxi = cell_value
+                    else:
+                        mini, maxi = extrema_per_column[-1][group_key]
+                        mini = min(cell_value, mini)
+                        maxi = max(cell_value, maxi)
+                    extrema_per_column[-1][group_key] = (mini,maxi)
+
+            # STEP 4: Make rows
+            body_lines = []
             prev_names = ["" for _ in range(margin_depth)]
-            for path_idx, node_path in enumerate(self.getRowTree().getPaths()):
-                line = "    "
+            for row_idx, row_path in enumerate(self.getRowTree().getPaths()):  # Vertical iteration: for row in rows
+                line = ""
 
-                # Part 1: Row margins.
-                node_path = [None for _ in range(margin_depth-len(node_path)+1)] + node_path[1:]
-                has_reprinted_parent = False
-                do_hline = False
-                for i,node in enumerate(node_path):
-                    if i != 0:
+                # Part 1: Row name.
+                row_path_names = tuple(node.name for node in row_path[1:])
+                row_path = [None for _ in range(margin_depth-len(row_path)+1)] + row_path[1:]
+                row_path_changed = False  # Has to become True at some point
+                cline_start = None
+                for row_depth_idx, node in enumerate(row_path):  # Horizontal iteration: for namepart in row
+                    if row_depth_idx != 0:
                         line += " & "
 
-                    if node is not None and (has_reprinted_parent or prev_names[i] != node.name):
+                    name = node.name if node is not None else None
+                    if prev_names[row_depth_idx] != name:
+                        row_path_changed = True
+                        prev_names[row_depth_idx] = name
+
+                    if row_path_changed and node is not None:  # Reprint every on the path if a parent changed, even if it hasn't changed since the row above.
                         width = node.width()
                         if width > 1:
                             line += r"\multirow{" + str(width) + "}{*}{" + node.name + "}"
                         else:
                             line += node.name
-                        prev_names[i] = node.name
-                        has_reprinted_parent = True
 
-                    if has_reprinted_parent and i == 0:  # TODO: Should really just reuse the border map. If you still want to do it without, then anyway, the condition for top-level hlines should actually be "if the amount of Nones in the path changes OR the name changes in the first not-None".
-                        do_hline = borders_between_toplevel_rows
+                    if row_path_changed and cline_start is None and row_depth_idx in borders_between_rows_of_level:  # "Start the border on the earliest depth where a change occurred and that needs a border"
+                        cline_start = row_depth_idx+1  # \cline is 1-based
 
-                if path_idx != 0:
-                    lines[-1] += r"\hline"*do_hline
+                if row_idx != 0 and cline_start is not None:
+                    body_lines[-1] += r"\cline{" + f"{cline_start}-{margin_depth+table.width()}" + "}" if not do_hhline_syntax else \
+                                      r"\hhline{" + "~"*(cline_start-1) + r"*{" + str(margin_depth+table.width()-cline_start+1) + r"}{-}}"
 
                 # Part 2: Table body.
-                for col_id, leaf_column in enumerate(table.getLeaves()):
+                for col_idx, col_path in enumerate(table.getPaths()):
                     # Is there a border here?
                     right_border = False
                     for level in borders_between_columns_of_level:
-                        if col_id+1 in level_has_edge_after_ncols[level]:
+                        if col_idx+1 in level_has_edge_after_ncols[level]:
                             right_border = True
                             break
 
                     # Construct cell
-                    row_identifier = node_path[-1].content
-                    if row_identifier in leaf_column.content:
-                        cell_content = cell_prefix + str(cell_function(leaf_column.content[row_identifier])) + cell_suffix
+                    column_path_names = tuple(node.name for node in col_path[1:])
+                    style = alternate_column_styles.get(column_path_names, default_column_style)
+
+                    row_identifier = row_path[-1].content
+                    group_key = row_path_names[:style.group_extrema_at_rowlevel+1]
+                    if row_identifier in col_path[-1].content:
+                        cell_value = col_path[-1].content[row_identifier]
+                        if isinstance(cell_value, (int, float)):
+                            cell_value = style.cell_function(cell_value)
+                            cell_string = f"{cell_value:.{style.digits}f}"
+                        else:
+                            cell_string = str(cell_value)
+                        bolded = (style.do_bold_minimum and cell_value == extrema_per_column[col_idx][group_key][0]) or \
+                                 (style.do_bold_maximum and cell_value == extrema_per_column[col_idx][group_key][1])
+                        cell_content = r"\bfseries"*bolded + style.cell_prefix + cell_string + style.cell_suffix
                     else:
                         cell_content = ""
 
                     if not right_border:
-                        line += " & " + cell_content
+                        line += " & " + cell_content  # No alignment needed, since it is set in the table header.
                     else:
-                        line += " & " + r"\multicolumn{1}{" + column_alignment + "|}{" + cell_content + "}"
+                        line += " & " + r"\multicolumn{1}{" + style.alignment + "|}{" + cell_content + "}"
                 line += r" \\"
-                lines.append(line)
-            lines[-1] = lines[-1][:-2]  # Strip off the \\ at the end.
-            lines.append(r"\end{tabular}")
+                body_lines.append(line)
+            body_lines[-1] = body_lines[-1][:-2]  # Strip off the \\ at the end.
 
-            # Write out
+            # Last line
+            last_line = r"\end{tabular}"
+
+            # Construct table
+            header_prefix = max(line.find("&") for line in body_lines)
+            lines = [first_line] + \
+                    ["\t" + " "*header_prefix + line for line in header_lines] + \
+                    ["\t" + line for line in body_lines] + \
+                    [last_line]
+
             print(f"Writing .tex {self.name} ...")
             with open(PathHandling.getSafePath(PATH_FIGURES, self.name, ".tex"), "w") as file:
                 file.write("\n".join(lines))
@@ -1268,12 +1407,12 @@ def example_table():
     table.set(79,  ["English", "BPE", "knockout"], ["lexemes", "weighted", "Re"])
     table.set(5.0, ["English", "BPE", "knockout"], ["lexemes", "weighted", "$F_1$"])
 
-    table.set("wow!", ["ULM", "base"], ["morphemes", "weighted", "Re"])
-    table.set("wow!", ["ULM", "yuk"], ["morphemes", "weighted", "Pr"])
+    table.set(0.1, ["ULM", "base"], ["morphemes", "weighted", "Re"])
+    table.set(0.2, ["ULM", "yuk"], ["morphemes", "weighted", "Pr"])
 
     # print(table.getAsColumn().getPaths())
 
-    table.commit(borders_between_columns_of_level=[0, 1], borders_between_toplevel_rows=True)
+    table.commit(borders_between_columns_of_level=[0,1])
 
 
 if __name__ == "__main__":

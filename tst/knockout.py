@@ -1,6 +1,7 @@
 import itertools
 import math
 import re
+import scipy
 
 from src.visualisation.graphing import *
 from src.knockout.knockout import *
@@ -15,7 +16,7 @@ untrained_bte = BTE(BteInitConfig(), quiet=True)
 # modes_to_test = [RefMode.MORPHEMIC, RefMode.LEXEMIC]  # Thesis, not paper.
 modes_to_test = [RefMode.MORPHEMIC]
 def getAllConfigs():  # In a function to protect against imputation if these are never needed.
-    return [setupEnglish(), setupDutch(), setupGerman()]
+    return [setupEnglish(), setupGerman(), setupDutch()]
 
 
 def assert_tokenisers_equal(tokeniser1=robbert_tokenizer, tokeniser2=untrained_bte):
@@ -48,13 +49,6 @@ def assert_tokenisers_equal(tokeniser1=robbert_tokenizer, tokeniser2=untrained_b
     print("Differences:", errors, "of", total)
 
 
-def ex():
-    s = "masterthesistitelbladzijdeachtergrondfiguur"
-
-    print(robbert_tokenizer.tokenize(" " + s))
-    print(untrained_bte.segment_as_is("Ġ" + s))
-
-
 def print_knockout():
     bte = BTE(BteInitConfig(knockout=RefMode.LEXEMIC), autorun_modes=False)
 
@@ -79,37 +73,6 @@ def visualise():
     graph = MergeGraph(robbert_tokenizer.get_vocab(), getMergeList_RobBERT())
     # graph.getSurroundingGraph("Ġhuishoud")
     graph.getSurroundingGraph("ids")
-
-
-def test_trivial_knockout():
-    TRIVIAL_THRESHOLD = 4
-
-    tkzs = []
-    for mode in modes_to_test:
-        bte = BTE(BteInitConfig(knockout=mode), autorun_modes=False)
-        bte.name = "Testing knockout-" + RefMode.toLetter(mode)
-
-        blame_ratios = bte.getBadOldMerges()
-        print("Proposed deletions:", len(blame_ratios))
-
-        solid_merges = []
-        trivial_merges = []
-        for _, total, merge in sorted(blame_ratios, key=lambda t: (t[1],t[0])):
-            if not all([len(part) >= TRIVIAL_THRESHOLD for part in merge.parts]):
-                solid_merges.append(merge)
-            else:
-                print(total, merge)
-                trivial_merges.append(merge)
-        print("Of which trivial:", len(trivial_merges))
-        # print(trivial_merges)
-
-        for merge in tqdm(solid_merges, desc="PRUNING GRAPH"):
-            bte.merge_graph.knockout(merge.childType())
-        bte.syncWithGraph()
-
-        tkzs.append(bte)
-
-    test_tokenizers_batch(tkzs, reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
 
 
 def test_save_and_load():
@@ -155,7 +118,6 @@ def time_iterators():
 
 
 def test_onlyTrivials():
-    from src.visualisation.graphing import Table, CacheMode
     table = Table("bte-intrinsic-onlytrivials", caching=CacheMode.NONE)
 
     if table.needs_computation:
@@ -174,7 +136,80 @@ def test_onlyTrivials():
         addEvaluationToTable(table, results,
                              row_prefix=["Dutch", "log test"], row_names=["nolong"])
 
-    table.commit(cell_function=lambda x: f"{x:.2f}")
+    table.commit(rowname_alignment="l", borders_between_columns_of_level=[0,1], borders_between_rows_of_level=[0,1],
+                 default_column_style=style_evaluations, alternate_column_styles=style_vocabulary_size)
+
+
+def test_chainEffect():
+    """
+    Goal: Find chains of merges whose result only appear in a single merge, and specifically those
+          that then feed into a leaf.
+    TODO:
+        What we don't detect is chains that are distantly connected. Imagine you have 5 merges.
+        M1's type is only used in M2. M2's type is used in M3 and M4. M3's type is only used in M5. That looks like
+                /--- M3 --- M5
+        M1 --- M2
+                \--- M4
+        wherein M1-M2 and M3-M5 are two separate chains.
+    """
+    from typing import List
+    from src.knockout.knockout import BTE, BteInitConfig, Merge
+    from src.visualisation.printing import lprint
+
+    bte = BTE(BteInitConfig())
+    singletons_in_order = [merge for merge in bte.merge_graph.merges if len(bte.merge_graph.merges_with[merge.childType()]) == 1]
+    singletons = {merge.childType(): merge for merge in singletons_in_order}
+    # print(singletons)
+    # print(len(singletons))
+
+    chains = []
+    exist_in_chains = set()
+    for merge in reversed(singletons_in_order):  # Due to the order, you know that the largest chain to which a type could possibly belong will have been found by the time you get to it.
+        if merge.childType() in exist_in_chains:
+            continue
+
+        chain = []
+        while True:
+            chain.append(merge)
+            for part in merge.parts:  # Try to go DOWN the chain.
+                merge = singletons.get(part)
+                if merge is not None:  # Early exit when you find a type.
+                    break
+            else:  # If there was no type found (no early exit), the chain is done.
+                break
+        exist_in_chains.update([merge.childType() for merge in chain])
+        chains.append(chain[::-1])
+
+    class Chain:
+        def __init__(self, chain: List[Merge]):
+            self.as_list: List[Merge] = chain
+            self.connected_to_leaves: List[Merge] = []
+
+    # chains.sort(key=lambda chain: len(chain))
+    # lprint(chains)
+
+    # Now find the chains that end in a leaf; these are purpose-built chains for that leaf,
+    # or alternatively a compound built from two words that would've been standalone words
+    # but ended up as part of an even bigger standalone word and hence became single-use instead of a leaf.
+    chains = {chain[-1].childType(): Chain(chain) for chain in chains}
+    leaves = [merge for merge in bte.merge_graph.merges if len(bte.merge_graph.merges_with[merge.childType()]) == 0]
+    for leaf in leaves:
+        for part in leaf.parts:
+            chain = chains.get(part)
+            if chain is not None:
+                chain.connected_to_leaves.append(leaf)
+
+    lprint(
+        map(lambda chain: (chain.connected_to_leaves[0].childType(), chain.as_list + chain.connected_to_leaves),  # what is displayed
+            sorted(  # sort them first by chain length and then by leaf type length
+                filter(  # get all chains that end in 1 leaf
+                    lambda chain: len(chain.connected_to_leaves) == 1,
+                    chains.values()
+                ),
+                key=lambda chain: (len(chain.as_list), len(chain.connected_to_leaves[0].childType()))
+            )
+        )
+    )
 
 
 ##############################################################################
@@ -193,6 +228,77 @@ class TemporaryContext:
     def __exit__(self, exc_type, exc_val, exc_tb):
         Pℛ𝒪𝒥ℰ𝒞𝒯.config = self.old_context
 
+
+ROW_NAME_BASE = "base"  # could also use --
+COLUMN_NAME_M = "morphemic"
+COLUMN_NAME_L = "whole-word"
+COLUMN_NAME_UNWEIGHTED = "word types"
+COLUMN_NAME_WEIGHTED   = "word tokens"
+COLUMN_NAME_VOCAB = "$|V|$"
+COLUMN_NAME_Pr = "Pr"
+COLUMN_NAME_Re = "Re"
+COLUMN_NAME_F1 = "$F_1$"
+style_evaluations     = ColumnStyle(alignment="c", group_extrema_at_rowlevel=0, do_bold_maximum=True, cell_prefix=r"\tgrad{", digits=2, cell_suffix="}")
+style_vocabulary_size = {(COLUMN_NAME_VOCAB,): ColumnStyle(alignment="c", cell_prefix=r"\num{", digits=0, cell_suffix="}")}
+
+def addEvaluationToTable(table: Table, results: List[TokeniserEvaluation], macro_average_all: bool=False,
+                         row_names: List[str]=None, row_prefix: List[str]=None):
+    """
+    In-place function that determines the table structure for reporting results from Python experiments.
+
+    :param macro_average_all: If true, only one row is written to the table, namely with the first tokeniser's name, and the
+                              average Pr, Re, F1 over all given results.
+    """
+    if not results:
+        return
+
+    if row_prefix is None:
+        row_prefix = []
+    if row_names is None:
+        row_names = []
+
+    language = Pℛ𝒪𝒥ℰ𝒞𝒯.config.language_name.capitalize()
+    for tid, tokeniser in enumerate(results):
+        # Gather data for name imputation
+        raw_name = tokeniser.name
+        if "_" in raw_name:
+            imputed_middlename, imputed_leafname = raw_name.split("_", 1)
+        else:
+            imputed_middlename, imputed_leafname = raw_name, ROW_NAME_BASE
+
+        row =   (row_prefix     if row_prefix           else [language, imputed_middlename]) \
+              + [row_names[tid] if tid < len(row_names) else imputed_leafname]
+
+        # Add to table
+        table.set(tokeniser.vocabsize, row, [COLUMN_NAME_VOCAB])
+
+        pr, re, f1 = tokeniser.cm_morph.compute() if not macro_average_all else SegmentationConfusionMatrix.computeMatrixMacroAverage([r.cm_morph for r in results])
+        table.set(pr, row, [COLUMN_NAME_M, COLUMN_NAME_UNWEIGHTED, COLUMN_NAME_Pr])
+        table.set(re, row, [COLUMN_NAME_M, COLUMN_NAME_UNWEIGHTED, COLUMN_NAME_Re])
+        table.set(f1, row, [COLUMN_NAME_M, COLUMN_NAME_UNWEIGHTED, COLUMN_NAME_F1])
+
+        if tokeniser.cm_morph_w:
+            pr, re, f1 = tokeniser.cm_morph_w.compute()  if not macro_average_all else SegmentationConfusionMatrix.computeMatrixMacroAverage([r.cm_morph_w for r in results])
+            table.set(pr, row, [COLUMN_NAME_M, COLUMN_NAME_WEIGHTED, COLUMN_NAME_Pr])
+            table.set(re, row, [COLUMN_NAME_M, COLUMN_NAME_WEIGHTED, COLUMN_NAME_Re])
+            table.set(f1, row, [COLUMN_NAME_M, COLUMN_NAME_WEIGHTED, COLUMN_NAME_F1])
+
+        pr, re, f1 = tokeniser.cm_lex.compute()  if not macro_average_all else SegmentationConfusionMatrix.computeMatrixMacroAverage([r.cm_lex for r in results])
+        table.set(pr, row, [COLUMN_NAME_L, COLUMN_NAME_UNWEIGHTED, COLUMN_NAME_Pr])
+        table.set(re, row, [COLUMN_NAME_L, COLUMN_NAME_UNWEIGHTED, COLUMN_NAME_Re])
+        table.set(f1, row, [COLUMN_NAME_L, COLUMN_NAME_UNWEIGHTED, COLUMN_NAME_F1])
+
+        if tokeniser.cm_lex_w:
+            pr, re, f1 = tokeniser.cm_lex_w.compute()  if not macro_average_all else SegmentationConfusionMatrix.computeMatrixMacroAverage([r.cm_lex_w for r in results])
+            table.set(pr, row, [COLUMN_NAME_L, COLUMN_NAME_WEIGHTED, COLUMN_NAME_Pr])
+            table.set(re, row, [COLUMN_NAME_L, COLUMN_NAME_WEIGHTED, COLUMN_NAME_Re])
+            table.set(f1, row, [COLUMN_NAME_L, COLUMN_NAME_WEIGHTED, COLUMN_NAME_F1])
+
+        if macro_average_all:  # Stop after one row
+            break
+
+
+##############################################################################
 
 @timeit
 def main_datasetStats():
@@ -243,29 +349,36 @@ def main_mergestats():
     Histogram of the IDs of the knocked-out merges
     + Histogram of the length of each left and right type.
     """
-    for mode in modes_to_test:
-        ids     =      Histogram(f"knockout_ids_{RefMode.toLetter(mode)}",     caching=CacheMode.IF_MISSING)
-        lengths = MultiHistogram(f"knockout_lengths_{RefMode.toLetter(mode)}", caching=CacheMode.IF_MISSING)
+    import langcodes
 
-        if ids.needs_computation or lengths.needs_computation:
-            bte = BTE(BteInitConfig(knockout=mode), autorun_modes=False)
-            blamed_merges = bte.getBadOldMerges()
-            for _,_, merge in blamed_merges:
-                if ids.needs_computation:
-                    ids.add(merge.priority)
+    for language in getAllConfigs():  # Kinda sucks that you need to build the entire config to just get the name of the language which you need to check if you need to build anything.
+        with TemporaryContext(language):
+            language_object = langcodes.find(language.language_name)
+            for mode in modes_to_test:
+                ids     =      Histogram(f"knockout-ids_{RefMode.toLetter(mode)}-mode_{language_object.to_tag()}",     caching=CacheMode.IF_MISSING)
+                lengths = MultiHistogram(f"knockout-lengths_{RefMode.toLetter(mode)}-mode_{language_object.to_tag()}", caching=CacheMode.IF_MISSING)
 
-                if lengths.needs_computation:
-                    left, right = merge.parts
-                    lengths.add("left types", len(left))
-                    lengths.add("right types", len(right))
+                if ids.needs_computation or lengths.needs_computation:
+                    bte = BTE(BteInitConfig(knockout=mode), autorun_modes=False)
+                    blamed_merges = bte.getBadOldMerges()
+                    for _,_, merge in blamed_merges:
+                        if ids.needs_computation:
+                            ids.add(merge.priority)
 
-        BINWIDTH = 100
-        ids.commit_histplot(binwidth=BINWIDTH, x_tickspacing=2500, x_label="Merge", y_label=f"Amount of knockouts in {BINWIDTH}-merge bin",
-                            aspect_ratio=(7,2), fill_colour="black", border_colour=None,
-                            y_tickspacing=1, do_kde=False)
-        lengths.commit_histplot(binwidth=1, x_tickspacing=1, x_label="Type length", y_label="Amount of knockouts",
-                                aspect_ratio=(4,2.75), border_colour=None,
-                                y_tickspacing=100, do_kde=False, center_ticks=True, alpha=0.5, x_lims=(0,15))
+                        if lengths.needs_computation:
+                            left, right = merge.parts
+                            lengths.add("left types", len(left))
+                            lengths.add("right types", len(right))
+
+                BINWIDTH = 100
+                ids.commit_histplot(binwidth=BINWIDTH, x_tickspacing=2500, x_label="Merge", y_label=f"Amount of knockouts in {BINWIDTH}-merge bin",
+                                    aspect_ratio=(7,2.5), fill_colour="black", border_colour=None, x_lims=(-750,40_750),
+                                    y_tickspacing=1, do_kde=False)
+                ids.commit_qqplot(random_variable=scipy.stats.uniform(loc=0,scale=40_000-0), tickspacing=5000)
+                print(ids.toDataframe().describe())
+                lengths.commit_histplot(binwidth=1, x_tickspacing=1, x_label="Type length", y_label="Amount of knockouts",
+                                        aspect_ratio=(4,2.75), border_colour=None,
+                                        y_tickspacing=100, do_kde=False, center_ticks=True, alpha=0.5, x_lims=(0,15))
 
 @timeit
 def main_vocabstats():
@@ -282,63 +395,6 @@ def main_vocabstats():
     lengths.commit_histplot(binwidth=1, x_tickspacing=1, x_label="Type length", y_label="RobBERT merges",
                             aspect_ratio=(4, 2.75), border_colour=None,
                             y_tickspacing=1000, do_kde=False, center_ticks=True, alpha=0.5, x_lims=(0, 15))
-
-
-def addEvaluationToTable(table: Table, results: List[TokeniserEvaluation], macro_average_all: bool=False,
-                         row_names: List[str]=None, row_prefix: List[str]=None):
-    """
-    In-place function that determines the table structure for reporting results from Python experiments.
-
-    :param macro_average_all: If true, only one row is written to the table, namely with the first tokeniser's name, and the
-                              average Pr, Re, F1 over all given results.
-    """
-    if not results:
-        return
-
-    if row_prefix is None:
-        row_prefix = []
-    if row_names is None:
-        row_names = []
-
-    language = Pℛ𝒪𝒥ℰ𝒞𝒯.config.language_name.capitalize()
-    for tid, tokeniser in enumerate(results):
-        # Gather data for name imputation
-        raw_name = tokeniser.name
-        if "_" in raw_name:
-            imputed_middlename, imputed_leafname = raw_name.split("_", 1)
-        else:
-            imputed_middlename, imputed_leafname = raw_name, "--"
-
-        row =   (row_prefix     if row_prefix           else [language, imputed_middlename]) \
-              + [row_names[tid] if tid < len(row_names) else imputed_leafname]
-
-        # Add to table
-        table.set(tokeniser.vocabsize, row, ["$|V|$"])
-
-        pr, re, f1 = tokeniser.cm_morph.compute() if not macro_average_all else SegmentationConfusionMatrix.computeMatrixMacroAverage([r.cm_morph for r in results])
-        table.set(pr, row, ["morphemic", "unweighted", "Pr"])
-        table.set(re, row, ["morphemic", "unweighted", "Re"])
-        table.set(f1, row, ["morphemic", "unweighted", "$F_1$"])
-
-        if tokeniser.cm_morph_w:
-            pr, re, f1 = tokeniser.cm_morph_w.compute()  if not macro_average_all else SegmentationConfusionMatrix.computeMatrixMacroAverage([r.cm_morph_w for r in results])
-            table.set(pr, row, ["morphemic", "weighted", "Pr"])
-            table.set(re, row, ["morphemic", "weighted", "Re"])
-            table.set(f1, row, ["morphemic", "weighted", "$F_1$"])
-
-        pr, re, f1 = tokeniser.cm_lex.compute()  if not macro_average_all else SegmentationConfusionMatrix.computeMatrixMacroAverage([r.cm_lex for r in results])
-        table.set(pr, row, ["lexemic", "unweighted", "Pr"])
-        table.set(re, row, ["lexemic", "unweighted", "Re"])
-        table.set(f1, row, ["lexemic", "unweighted", "$F_1$"])
-
-        if tokeniser.cm_lex_w:
-            pr, re, f1 = tokeniser.cm_lex_w.compute()  if not macro_average_all else SegmentationConfusionMatrix.computeMatrixMacroAverage([r.cm_lex_w for r in results])
-            table.set(pr, row, ["lexemic", "weighted", "Pr"])
-            table.set(re, row, ["lexemic", "weighted", "Re"])
-            table.set(f1, row, ["lexemic", "weighted", "$F_1$"])
-
-        if macro_average_all:  # Stop after one row
-            break
 
 
 @timeit
@@ -368,7 +424,8 @@ def main_intrinsicModes():
         results = test_tokenizers_batch(tkzrs, reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
         addEvaluationToTable(table, results)
 
-    table.commit(cell_prefix=r"\tgrad{", cell_suffix=r"}", cell_function=lambda x: f"{x:.2f}")
+    table.commit(rowname_alignment="l", borders_between_columns_of_level=[0,1], borders_between_rows_of_level=[0,1],
+                 default_column_style=style_evaluations, alternate_column_styles=style_vocabulary_size)
 
 
 @timeit
@@ -391,8 +448,6 @@ def main_intrinsicMultilingual():
         - 4 knockout tokenisers per language (and 2 non-knockout outside of that).
     Since every test should take 2 minutes, the estimated runtime is (4*1.5 + 6*2)*3 = 54 minutes.
     """
-    old_config = Pℛ𝒪𝒥ℰ𝒞𝒯.config
-    ###
     table = Table("bte-intrinsic-bigtable", caching=CacheMode.IF_MISSING)
     DROPOUT_TESTS = 10
     DROPOUT_RATE  = 0.1
@@ -406,51 +461,49 @@ def main_intrinsicMultilingual():
         holdout = Holdout(HOLDOUT_SPLIT)
 
         for language in getAllConfigs():  # Will FIRST impute all data and THEN iterate.
-            Pℛ𝒪𝒥ℰ𝒞𝒯.config = language
-            langstring = language.language_name.capitalize()
+            with TemporaryContext(language):
+                name_of_language = language.language_name.capitalize()
 
-            # --- BPE ---
-            bpe          = language.base_tokeniser.toFastBPE()
-            bpe_dropout  = language.base_tokeniser.toFastBPE()
-            bpe_dropout.backend_tokenizer.model.dropout = DROPOUT_RATE
+                # --- BPE ---
+                bpe          = language.base_tokeniser.toFastBPE()
+                bpe_dropout  = language.base_tokeniser.toFastBPE()
+                bpe_dropout.backend_tokenizer.model.dropout = DROPOUT_RATE
 
-            results = test_tokenizers_batch([bpe], reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
-            addEvaluationToTable(table, results,
-                                 row_prefix=[langstring, "BPE"],
-                                 row_names=["--"])
+                results = test_tokenizers_batch([bpe], reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
+                addEvaluationToTable(table, results,
+                                     row_prefix=[name_of_language, "BPE"],
+                                     row_names=[ROW_NAME_BASE])
 
-            results = test_tokenizers_batch([bpe_dropout]*DROPOUT_TESTS, reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
-            addEvaluationToTable(table, results, macro_average_all=True,
-                                 row_prefix=[langstring, "BPE"],
-                                 row_names=["dropout"])
+                results = test_tokenizers_batch([bpe_dropout]*DROPOUT_TESTS, reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
+                addEvaluationToTable(table, results, macro_average_all=True,
+                                     row_prefix=[name_of_language, "BPE"],
+                                     row_names=["dropout"])
 
-            # --- BPE-knockout ---
-            # for mode in modes_to_test:  # Technically the user should expect this for loop, but no user would realistically want to test multiple training modes across different languages.
-            mode = modes_to_test[0]
+                # --- BPE-knockout ---
+                # for mode in modes_to_test:  # Technically the user should expect this for loop, but no user would realistically want to test multiple training modes across different languages.
+                mode = modes_to_test[0]
 
-            bte_knockout          = BTE(BteInitConfig(knockout=mode))
-            bte_knockout_holdout  = BTE(BteInitConfig(knockout=mode), holdout=holdout)
-            # bte_knockout_keeplong = BTE(BteInitConfig(knockout=mode, keep_long_merges=True))
-            # bte_knockout_weighted = BTE(BteInitConfig(knockout=mode, weighted_training=True))
+                bte_knockout          = BTE(BteInitConfig(knockout=mode))
+                bte_knockout_holdout  = BTE(BteInitConfig(knockout=mode), holdout=holdout)
+                # bte_knockout_keeplong = BTE(BteInitConfig(knockout=mode, keep_long_merges=True))
+                # bte_knockout_weighted = BTE(BteInitConfig(knockout=mode, weighted_training=True))
 
-            # Using full test set
-            results = test_tokenizers_batch([bte_knockout],  #, bte_knockout_keeplong, bte_knockout_weighted],
-                                            reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=None)
-            addEvaluationToTable(table, results,
-                                 row_prefix=[langstring, "BPE-knockout"],
-                                 row_names=["--", "keep long", "weighted"])
+                # Using full test set
+                results = test_tokenizers_batch([bte_knockout],  #, bte_knockout_keeplong, bte_knockout_weighted],
+                                                reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=None)
+                addEvaluationToTable(table, results,
+                                     row_prefix=[name_of_language, "BPE-knockout"],
+                                     row_names=[ROW_NAME_BASE, "keep long", "weighted"])
 
-            # Using partial test set
-            results = test_tokenizers_batch([bte_knockout_holdout],
-                                            reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=holdout)
-            addEvaluationToTable(table, results,
-                                 row_prefix=[langstring, "BPE-knockout"],
-                                 row_names=["holdout"])
+                # Using partial test set
+                results = test_tokenizers_batch([bte_knockout_holdout],
+                                                reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=holdout)
+                addEvaluationToTable(table, results,
+                                     row_prefix=[name_of_language, "BPE-knockout"],
+                                     row_names=["holdout"])
 
-    table.commit(cell_prefix=r"\tgrad{", cell_suffix=r"}", cell_function=lambda x: f"{x:.2f}")
-
-    ###
-    Pℛ𝒪𝒥ℰ𝒞𝒯.config = old_config
+    table.commit(rowname_alignment="l", borders_between_columns_of_level=[0,1], borders_between_rows_of_level=[0,1],
+                 default_column_style=style_evaluations, alternate_column_styles=style_vocabulary_size)
 
 
 @timeit
@@ -463,21 +516,27 @@ def main_intrinsicMonolingual_KeepLong():
         )
         addEvaluationToTable(table, results)
 
-    table.commit(cell_prefix=r"\tgrad{", cell_suffix=r"}", cell_function=lambda x: f"{x:.2f}")
+    table.commit(rowname_alignment="l", borders_between_columns_of_level=[0,1], borders_between_rows_of_level=[0,1],
+                 default_column_style=style_evaluations, alternate_column_styles=style_vocabulary_size)
 
 
 @timeit
 def main_intrinsicMonolingual_Holdout():
     table = Table("bte-intrinsic-holdout", caching=CacheMode.IF_MISSING)
     if table.needs_computation:
-        holdout = Holdout(0.8)
-        results = test_tokenizers_batch(
-            [BTE(BteInitConfig(knockout=mode, keep_long_merges=False), holdout=holdout) for mode in modes_to_test],
-            reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=holdout
-        )
-        addEvaluationToTable(table, results)
+        HOLDOUTS = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+        mode = modes_to_test[0]
+        for f in reversed(HOLDOUTS):
+            holdout = Holdout(f)
+            results = test_tokenizers_batch(
+                [BTE(BteInitConfig(knockout=mode, keep_long_merges=False), holdout=holdout)],
+                reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=holdout
+            )
+            addEvaluationToTable(table, results,
+                                 row_prefix=["BPE-knockout"], row_names=[f"{int(f*100)}-{100-int(f*100)}"])
 
-    table.commit(cell_prefix=r"\tgrad{", cell_suffix=r"}", cell_function=lambda x: f"{x:.2f}")
+    table.commit(rowname_alignment="l", borders_between_columns_of_level=[0,1], borders_between_rows_of_level=[0,1],
+                 default_column_style=style_evaluations, alternate_column_styles=style_vocabulary_size)
 
 
 @timeit
@@ -520,7 +579,8 @@ def main_intrinsicMonolingual_WeightedTraining():
         ###
         Pℛ𝒪𝒥ℰ𝒞𝒯.config = old_config
 
-    table.commit(cell_prefix=r"\tgrad{", cell_suffix=r"}", cell_function=lambda x: f"{x:.2f}")
+    table.commit(rowname_alignment="l", borders_between_columns_of_level=[0,1], borders_between_rows_of_level=[0,1],
+                 default_column_style=style_evaluations, alternate_column_styles=style_vocabulary_size)
 
 
 @timeit

@@ -116,13 +116,17 @@ class ProjectConfig:
     parser: Type[LemmaMorphology]
 
 
+LINEAR_WEIGHTER  = lambda f: f
+ZIPFIAN_WEIGHTER = lambda f: 1 + math.log10(f)
+
+
 def setupDutch() -> ProjectConfig:
     config = ProjectConfig(
         language_name="Dutch",
         lemma_weights=PATH_DATA_COMPRESSED / "words_oscar-nl.txt",
         morphologies=PATH_DATA_COMPRESSED / "celex_morphology_nl.txt",
         base_tokeniser=SennrichTokeniser(PATH_DATA_MODELBASE / "bpe-oscar-nl-clean"),
-        reweighter=lambda f: 1 + math.log10(f),
+        reweighter=LINEAR_WEIGHTER,
         parser=CelexLemmaMorphology
     )
     imputeConfig_OscarCelexSennrich(config)
@@ -135,7 +139,7 @@ def setupGerman() -> ProjectConfig:
         lemma_weights=PATH_DATA_COMPRESSED / "words_oscar-de.txt",
         morphologies=PATH_DATA_COMPRESSED / "celex_morphology_de.txt",
         base_tokeniser=SennrichTokeniser(PATH_DATA_MODELBASE / "bpe-oscar-de-clean"),
-        reweighter=lambda f: 1 + math.log10(f),
+        reweighter=LINEAR_WEIGHTER,
         parser=CelexLemmaMorphology
     )
     imputeConfig_OscarCelexSennrich(config)
@@ -148,7 +152,7 @@ def setupEnglish() -> ProjectConfig:
         lemma_weights=PATH_DATA_COMPRESSED / "words_oscar-en.txt",
         morphologies=PATH_DATA_COMPRESSED / "celex_morphology_en.txt",
         base_tokeniser=SennrichTokeniser(PATH_DATA_MODELBASE / "bpe-oscar-en-clean"),
-        reweighter=lambda f: 1 + math.log10(f),
+        reweighter=LINEAR_WEIGHTER,
         parser=CelexLemmaMorphology
     )
     imputeConfig_OscarCelexSennrich(config)

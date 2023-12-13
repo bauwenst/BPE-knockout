@@ -1,12 +1,12 @@
 import time
-
+from typing import Iterable
 
 def dprint(d: dict):
     for e in d.items():
         print(e)
 
 
-def lprint(l: list):
+def lprint(l: Iterable):
     for e in l:
         print(e)
 
