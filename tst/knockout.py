@@ -238,7 +238,7 @@ COLUMN_NAME_VOCAB = "$|V|$"
 COLUMN_NAME_Pr = "Pr"
 COLUMN_NAME_Re = "Re"
 COLUMN_NAME_F1 = "$F_1$"
-style_evaluations     = ColumnStyle(alignment="c", group_extrema_at_rowlevel=0, do_bold_maximum=True, cell_prefix=r"\tgrad{", digits=2, cell_suffix="}")
+style_evaluations     = ColumnStyle(alignment="c", aggregate_at_rowlevel=0, do_bold_maximum=True, cell_prefix=r"\tgrad{", digits=2, cell_suffix="}")
 style_vocabulary_size = {(COLUMN_NAME_VOCAB,): ColumnStyle(alignment="c", cell_prefix=r"\num{", digits=0, cell_suffix="}")}
 
 def addEvaluationToTable(table: Table, results: List[TokeniserEvaluation], macro_average_all: bool=False,
@@ -344,7 +344,7 @@ def main_tokenDiffs():
 
 
 @timeit
-def main_mergestats():
+def main_knockoutStats():
     """
     Histogram of the IDs of the knocked-out merges
     + Histogram of the length of each left and right type.
@@ -381,7 +381,7 @@ def main_mergestats():
                                         y_tickspacing=100, do_kde=False, center_ticks=True, alpha=0.5, x_lims=(0,15))
 
 @timeit
-def main_vocabstats():
+def main_baseVocabStats():
     """
     Histogram of the original RobBERT tokeniser's merge type lengths.
     """
@@ -597,7 +597,7 @@ def main_deleteRandomMerges():
     SAMPLES = 10
     PERCENTAGES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 20, 30, 40, 50]
 
-    graph = LineGraph(name="random-type-deletions", caching=CacheMode.IF_MISSING)
+    graph = LineGraph(name="delete-random-types", caching=CacheMode.IF_MISSING)
     if graph.needs_computation:
         def pruneIndices(merge_indices: Tuple[int]):
             # , job_id=[1]):
@@ -683,7 +683,7 @@ def main_deleteLastMerges():
     """
     PERCENTAGES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 20, 30, 40, 50]
 
-    graph = LineGraph(name="last-type-deletions", caching=CacheMode.IF_MISSING)
+    graph = LineGraph(name="delete-last-types", caching=CacheMode.IF_MISSING)
     if graph.needs_computation:
         bte = BTE(BteInitConfig(), quiet=True, autorun_modes=False)
         initial_merges = len(bte.merge_graph.merges)
@@ -768,7 +768,7 @@ def main_deleteLastLeaves():
     # Part 2: Performance
     PERCENTAGES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 20, 30, 40, 50]
 
-    g2 = LineGraph("last-leaf-deletions", caching=CacheMode.IF_MISSING)
+    g2 = LineGraph("delete-last-leaves", caching=CacheMode.IF_MISSING)
     results = []
     if g2.needs_computation:
         for p in PERCENTAGES:
@@ -806,6 +806,40 @@ def main_deleteLastLeaves():
 
     g2.commit(x_label="Merges deleted [\\%]", y_label="Correspondence of split positions",
                  logx=False, y_lims=(0.0, 1.01), y_tickspacing=0.1)
+
+
+def main_wholeWordCeiling():
+    """
+    Goal: Test what the maximum precision could be on whole-word boundaries if you segmented every word perfectly on
+          all of its morpheme boundaries.
+    """
+    table = Table("lexemic-ceilings")
+    for language in getAllConfigs():
+        with TemporaryContext(language):
+            weights = loadAndWeightLexicon(Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
+            cm   = SegmentationConfusionMatrix()
+            cm_w = SegmentationConfusionMatrix()
+
+            for obj in morphologyGenerator():
+                best_possible_segmentation = obj.morphSplit()
+                only_whole_words           = obj.lexemeSplit()
+
+                cm.add(candidate=best_possible_segmentation, reference=only_whole_words)
+                amplification = weights.get(obj.lemma(), 1)
+                cm_w.add(candidate=best_possible_segmentation, reference=only_whole_words, weight=amplification)
+
+            print(language.language_name, "whole-word boundaries:")
+            print("\tUnweighted:")
+            cm.computeAndDisplay(indent=2)
+            print("\tWeighted:")
+            cm_w.computeAndDisplay(indent=2)
+
+            addEvaluationToTable(table, [TokeniserEvaluation(name=language.language_name, vocabsize=0,
+                                                             cm_morph=SegmentationConfusionMatrix(), cm_morph_w=SegmentationConfusionMatrix(),
+                                                             cm_lex=cm, cm_lex_w=cm_w)], row_prefix=[language.language_name, ""], row_names=["ideal"])
+
+    table.commit(rowname_alignment="l", borders_between_columns_of_level=[0,1], borders_between_rows_of_level=[0,1],
+                 default_column_style=style_evaluations, alternate_column_styles=style_vocabulary_size)
 
 
 def main_blameThreshold():

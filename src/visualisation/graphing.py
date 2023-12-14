@@ -146,7 +146,8 @@ class Diagram(ABC):
                         and load those data into the object. Also determines whether commit methods will store data.
         """
         self.name = name
-        self.data = dict()  # All figure classes are expected to store their data in a dictionary.
+        self.data = dict()  # All figure classes are expected to store their data in a dictionary by default, so that saving doesn't need to be re-implemented each time.
+        self.clear()        # Can be used to initialise the content of self.data.
         self.creation_time = time.perf_counter()
 
         self.needs_computation = (caching == CacheMode.NONE or caching == CacheMode.WRITE_ONLY)
@@ -843,7 +844,7 @@ class ScatterPlot(Diagram):
         self.data = saved_data  # FIXME: Needs more sanity checks obviously
 
     def copy(self, new_name: str):
-        new_plot = ScatterPlot(new_name, use_cached=False)
+        new_plot = ScatterPlot(new_name, caching=CacheMode.NONE)
         for name, values in self.data.items():
             new_plot.addPointsToFamily(name, values[0].copy(), values[1].copy())
         return new_plot
@@ -1021,17 +1022,30 @@ TableColumn = NamedTree[Dict[int, Any]]
 
 @dataclass
 class ColumnStyle:
-    # Cross-column
+    # Column-wide
     alignment: str="c"
-    group_extrema_at_rowlevel: int=-1  # Follows the same indexing standard as row borders. -1 computes extrema across all rows.
+    aggregate_at_rowlevel: int=-1  # Follows the same indexing standard as row borders. -1 computes extrema across all rows.
     do_bold_maximum: bool=False  # This is applied AFTER the cell functions and BEFORE rounding.
     do_bold_minimum: bool=False  # idem
+    do_deltas: bool=False  # If true, will output the first row of the group as-is, and for the others, the difference with that row.
 
     # Cellwise. E.g.: to format a tokeniser's vocabulary size, you'd use function=lambda x: x/1000, digits=1, suffix="k"
     cell_prefix: str=""
     cell_function: Callable[[float], float] = lambda x: x   # E.g. x/1000
     digits: int=2  # This option might seem redundant given that we allow applying any function, but it takes the burden off the user to apply either round() (which drops zeroes) or something like f"{x:.2f}".
     cell_suffix: str=""
+
+RowGroupKey = Tuple[str,...]
+
+@dataclass
+class RowGroupInColumn:
+    # Bolding
+    min: float
+    max: float
+
+    # Deltas
+    id_of_first: int     # identifier of the row that appear first in the group (so you don't compute a delta for it)
+    value_of_first: int  # its value (cached so that you're not re-applying the cell function for every delta)
 
 
 class Table(Diagram):
@@ -1206,16 +1220,19 @@ class Table(Diagram):
             header_lines[-1] += r"\hline\hline" if not do_hhline_syntax else \
                                 r"\hhline{*{" + str(margin_depth+table.width()) + r"}{=}}"
 
-            # STEP 3: Find maximal and minimal values per column, possibly per row group
-            extrema_per_column: List[Dict[Tuple[str,...], Tuple[float,float]]] = []  # List over all columns, dict over all group keys.
+            # STEP 3: Find maximal and minimal values per column, possibly per row group (which differs per column!)
+            aggregates_per_column: List[Dict[RowGroupKey, RowGroupInColumn]] = []  # List over all columns, dict over all group keys.
+            groupkeys_per_columns: List[Dict[int,RowGroupKey]] = []  # List over all columns, dict over all row identifiers.
             for column_path in table.getPaths():
                 col_path_names = tuple(node.name for node in column_path[1:])
                 style = alternate_column_styles.get(col_path_names, default_column_style)
                 content_node = column_path[-1]
 
                 # This overlaps in work with step 4, but I don't really have a decent alternative.
-                extrema_per_column.append(dict())
+                aggregates_per_column.append(dict())
+                groupkeys_per_columns.append(dict())
                 for row_path in self.getRowTree().getPaths():
+                    # Determine value of this row in the current column
                     identifier = row_path[-1].content
                     if identifier not in content_node.content:
                         continue
@@ -1224,16 +1241,23 @@ class Table(Diagram):
                         if isinstance(cell_value, (int, float)):
                             cell_value = style.cell_function(cell_value)
 
+                    # Get row's group key in this column
                     row_path_names = tuple(node.name for node in row_path[1:])
-                    group_key = row_path_names[:style.group_extrema_at_rowlevel+1]
-                    if group_key not in extrema_per_column[-1]:  # Note: I'm not using the classic approach of using .get(key, float(inf)) because a table can also contain strings, which can be compared but not with floats.
-                        mini = cell_value
-                        maxi = cell_value
+                    group_key = row_path_names[:style.aggregate_at_rowlevel+1]
+                    groupkeys_per_columns[-1][identifier] = group_key
+
+                    # Update aggregates
+                    if group_key not in aggregates_per_column[-1]:  # Note: I'm not using the classic approach of using .get(key, float(inf)) because a table can also contain strings, which can be compared but not with floats.
+                        aggregates_per_column[-1][group_key] = RowGroupInColumn(
+                            min=cell_value,
+                            max=cell_value,
+                            id_of_first=identifier,
+                            value_of_first=cell_value
+                        )
                     else:
-                        mini, maxi = extrema_per_column[-1][group_key]
-                        mini = min(cell_value, mini)
-                        maxi = max(cell_value, maxi)
-                    extrema_per_column[-1][group_key] = (mini,maxi)
+                        groupdata = aggregates_per_column[-1][group_key]
+                        groupdata.min = min(cell_value, groupdata.min)
+                        groupdata.max = max(cell_value, groupdata.max)
 
             # STEP 4: Make rows
             body_lines = []
@@ -1241,7 +1265,7 @@ class Table(Diagram):
             for row_idx, row_path in enumerate(self.getRowTree().getPaths()):  # Vertical iteration: for row in rows
                 line = ""
 
-                # Part 1: Row name.
+                # 4.1: Row name.
                 row_path_names = tuple(node.name for node in row_path[1:])
                 row_path = [None for _ in range(margin_depth-len(row_path)+1)] + row_path[1:]
                 row_path_changed = False  # Has to become True at some point
@@ -1269,8 +1293,10 @@ class Table(Diagram):
                     body_lines[-1] += r"\cline{" + f"{cline_start}-{margin_depth+table.width()}" + "}" if not do_hhline_syntax else \
                                       r"\hhline{" + "~"*(cline_start-1) + r"*{" + str(margin_depth+table.width()-cline_start+1) + r"}{-}}"
 
-                # Part 2: Table body.
+                # 4.2: Row body.
                 for col_idx, col_path in enumerate(table.getPaths()):
+                    column_content = col_path[-1].content
+
                     # Is there a border here?
                     right_border = False
                     for level in borders_between_columns_of_level:
@@ -1278,21 +1304,34 @@ class Table(Diagram):
                             right_border = True
                             break
 
-                    # Construct cell
+                    # Get column style
                     column_path_names = tuple(node.name for node in col_path[1:])
                     style = alternate_column_styles.get(column_path_names, default_column_style)
 
                     row_identifier = row_path[-1].content
-                    group_key = row_path_names[:style.group_extrema_at_rowlevel+1]
-                    if row_identifier in col_path[-1].content:
-                        cell_value = col_path[-1].content[row_identifier]
+                    if row_identifier in column_content:
+                        # Get the cell value and its group aggregates
+                        cell_value       = column_content[row_identifier]
+                        group_aggregates = aggregates_per_column[col_idx][groupkeys_per_columns[col_idx][row_identifier]]
+
+                        # Process value: apply cell function, subtract reference (optionally), and round.
+                        is_relative = style.do_deltas and group_aggregates.id_of_first != row_identifier
                         if isinstance(cell_value, (int, float)):
+                            # Compute value
                             cell_value = style.cell_function(cell_value)
+                            if is_relative:
+                                cell_value -= group_aggregates.value_of_first
+                            # Format value
                             cell_string = f"{cell_value:.{style.digits}f}"
+                            if is_relative and cell_value >= 0:
+                                cell_string = "+" + cell_string
                         else:
                             cell_string = str(cell_value)
-                        bolded = (style.do_bold_minimum and cell_value == extrema_per_column[col_idx][group_key][0]) or \
-                                 (style.do_bold_maximum and cell_value == extrema_per_column[col_idx][group_key][1])
+
+                        # Compare value
+                        bolded = (style.do_bold_minimum and cell_value == aggregates_per_column[col_idx][group_key].min) or \
+                                 (style.do_bold_maximum and cell_value == aggregates_per_column[col_idx][group_key].max)
+
                         cell_content = r"\bfseries"*bolded + style.cell_prefix + cell_string + style.cell_suffix
                     else:
                         cell_content = ""

@@ -10,8 +10,8 @@ if __name__ == "__main__":
     lexiconWeights()
 
     from tst.knockout import *
-    main_mergestats()
-    main_vocabstats()
+    main_knockoutStats()
+    # main_baseVocabStats()
     main_tokenDiffs()
 
     main_blameThreshold()
@@ -20,4 +20,6 @@ if __name__ == "__main__":
     main_deleteLastLeaves()
 
     main_intrinsicMultilingual()
-    
+    # main_intrinsicMonolingual_WeightedTraining()
+    # main_intrinsicMonolingual_Holdout()
+    # main_wholeWordCeiling()
