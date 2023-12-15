@@ -1,5 +1,5 @@
 """
-Copyright (C) 2021-2023 Thomas Bauwens
+Copyright (C) 2021-2023 [REDACTED]
 This code was written across multiple research papers at university.
 Any copy of this code must contain this copyright notice.
 It may only be distributed with explicit permission from the author.
@@ -8,6 +8,10 @@ TODO:
     - Histogram is a subclass of MultiHistogram, but has some methods that are "more sophisticated" that should be
       integrated into MultiHistogram.
     - The JSON and PDF names are checked for availability independently, so JSON _0 can correspond to PDF _2 etc.
+    - Tables:
+         - Should be easy to drop rows (possibly you should be able to do this before committing though) to get a reduced table
+         - Align &s
+         - Deltas should be able to be coloured. That's a LaTeX issue, though.
 """
 from abc import ABC, abstractmethod
 import dataclasses

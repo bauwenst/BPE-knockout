@@ -6,7 +6,8 @@ import scipy
 from src.visualisation.graphing import *
 from src.knockout.knockout import *
 from src.auxiliary.measuring import *
-from src.auxiliary.robbert_tokenizer import tokenizeAsWord, robbert_tokenizer, getMergeList_RobBERT
+from src.auxiliary.robbert_tokenizer import robbert_tokenizer, getMergeList_RobBERT
+from src.auxiliary.tokenizer_interface import tokenizeAsWord
 from src.auxiliary.config import Pℛ𝒪𝒥ℰ𝒞𝒯, morphologyGenerator, setupEnglish, setupDutch, setupGerman, ProjectConfig
 from src.datahandlers.wordfiles import ACCENTS
 
@@ -114,7 +115,7 @@ def time_iterators():
     # Time to generate objects + get morph split + tokenise fast: 34s
     for morpho in morphologyGenerator():
         morpho.morphSplit()
-        " ".join(tokenizeAsWord(morpho.lemma())).strip()
+        " ".join(tokenizeAsWord(morpho.lemma(), tokenizer=robbert_tokenizer)).strip()
 
 
 def test_onlyTrivials():

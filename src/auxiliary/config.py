@@ -11,93 +11,14 @@ functions.
 """
 from dataclasses import dataclass
 from typing import Callable, Type, Optional, Iterable, Dict, Tuple, List
-from abc import abstractmethod, ABC
 import json
 import math
 import langcodes
-from transformers import RobertaTokenizerFast
 
 # None of the below files import the config.
 from src.auxiliary.paths import *
-from src.auxiliary.robbert_tokenizer import AutoTokenizer_from_pretrained
+from src.auxiliary.tokenizer_interface import TokeniserPath, SennrichTokeniser, HuggingFaceTokeniser
 from src.datahandlers.morphology import LemmaMorphology, CelexLemmaMorphology
-
-
-class TokeniserPath(ABC):
-
-    def __init__(self, path: Path):
-        self.path = path
-
-    @abstractmethod
-    def exists(self) -> bool:
-        pass
-
-    @abstractmethod
-    def loadVocabulary(self) -> Dict[str,int]:
-        pass
-
-    @abstractmethod
-    def loadMerges(self) -> List[str]:
-        pass
-
-    @abstractmethod
-    def toFastBPE(self) -> RobertaTokenizerFast:
-        pass
-
-
-class SennrichTokeniser(TokeniserPath):
-    """
-    Tokeniser stored as a vocab.json file and a merges.txt file in the same folder.
-       - vocab.json: JSON with a single top-level dictionary, mapping each subword type string to an integer id.
-       - merges.txt: Text file of BPE merges, in order of creation. Each merge is a string consisting of the merged types, separated by a space.
-    """
-    def __init__(self, folder: Path):
-        super().__init__(folder)
-        folder.mkdir(exist_ok=True, parents=True)
-
-    def exists(self) -> bool:
-        vocab, merges = self.getPaths()
-        return vocab.exists() and merges.exists()
-
-    def getPaths(self) -> Tuple[Path, Path]:
-        return self.path / "vocab.json", self.path / "merges.txt"
-
-    def loadVocabulary(self) -> Dict[str,int]:
-        with open(self.getPaths()[0], "r", encoding="utf-8") as handle:
-            return json.load(handle)
-
-    def loadMerges(self) -> List[str]:
-        with open(self.getPaths()[1], "r", encoding="utf-8") as handle:
-            return [line.strip() for line in handle]
-
-    def toFastBPE(self) -> RobertaTokenizerFast:
-        vocab, merges = self.getPaths()
-        return RobertaTokenizerFast(vocab_file=vocab.as_posix(), merges_file=merges.as_posix())  # Will apply byte-based pretokeniser.
-
-
-class HuggingFaceTokeniser(TokeniserPath):
-    """
-    Tokeniser as stored by HuggingFace's 'tokenizers' library as a single JSON file.
-    """
-    def __init__(self, json_path: Path):
-        super().__init__(json_path)
-        json_path.parent.mkdir(exist_ok=True, parents=True)
-
-    def exists(self) -> bool:
-        return self.path.exists()
-
-    def getAsDict(self):
-        with open(self.path, "r", encoding="utf-8") as handle:
-            return json.load(handle)
-
-    def loadVocabulary(self) -> Dict[str,int]:
-        return self.getAsDict().get("model", dict()).get("vocab", dict())
-
-    def loadMerges(self) -> List[str]:
-        return self.getAsDict().get("model", dict()).get("merges", [])
-
-    def toFastBPE(self) -> RobertaTokenizerFast:
-        return AutoTokenizer_from_pretrained(self.path.as_posix())
 
 
 @dataclass

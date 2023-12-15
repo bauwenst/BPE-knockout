@@ -9,7 +9,9 @@ from src.datahandlers.wordfiles import *
 from src.datahandlers.holdout import Holdout
 from src.auxiliary.paths import *
 from src.auxiliary.config import Pℛ𝒪𝒥ℰ𝒞𝒯, morphologyGenerator
-from src.auxiliary.robbert_tokenizer import robbert_tokenizer, tokenizeAsWord
+from src.auxiliary.robbert_tokenizer import robbert_tokenizer
+from src.auxiliary.tokenizer_interface import tokenizeAsWord
+
 
 # Segmentation kernel
 SPLIT_MARKER = "|"

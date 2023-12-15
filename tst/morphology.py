@@ -81,16 +81,13 @@ def test_alignments():
 
 
 def test_all():
-    from src.datahandlers.elex import outfilepath_morphologies, SEP
+    from src.auxiliary.config import morphologyGenerator
 
     table = PrintTable()
-    with open(outfilepath_morphologies, "r", encoding="utf-8") as handle:
-        for line in handle:
-            word,morphology = line.strip().split(SEP)
-            o = CelexLemmaMorphology(morphology, word)
-            # if " " in o.lexemeSplit():
-            # if not o.isNNC():
-            table.print(word, "L: " + o.lexemeSplit(), "M: " + o.morphSplit(), "M'eme: " + o.morphemeSplit())
+    for o in morphologyGenerator():
+        # if " " in o.lexemeSplit():
+        # if not o.isNNC():
+        table.print(o.lemma(), "L: " + o.lexemeSplit(), "M: " + o.morphSplit(), "M'eme: " + o.morphemeSplit())
 
 
 def test_wtf():

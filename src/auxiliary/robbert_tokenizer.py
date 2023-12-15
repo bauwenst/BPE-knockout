@@ -1,44 +1,10 @@
-from typing import List
-from pathlib import Path
-
 import json
 import requests
-from transformers import AutoTokenizer, RobertaTokenizerFast, PreTrainedTokenizerFast
 
 from src.auxiliary.paths import PATH_DATA_TEMP
-
-
-def AutoTokenizer_from_pretrained(path_or_name: str) -> PreTrainedTokenizerFast:
-    """
-    HuggingFace's AutoTokenizer.from_pretrained somehow doesn't work with local paths.
-    Fine, I'll do it myself.
-    """
-    path = Path(path_or_name)
-    if path.is_absolute():
-        return PreTrainedTokenizerFast(tokenizer_file=path.as_posix())
-    else:
-        return AutoTokenizer.from_pretrained(path_or_name)
-
+from src.auxiliary.tokenizer_interface import AutoTokenizer_from_pretrained
 
 robbert_tokenizer = AutoTokenizer_from_pretrained("pdelobelle/robbert-v2-dutch-base")
-
-
-def tokenizeAsWord(word: str, tokenizer=robbert_tokenizer) -> List[str]:
-    """
-    Does two things that are commonly needed alongside tokenisation:
-     - Adds a space in front of the input. Many tokenisers need this before they can add their start-of-word symbol.
-     - Post-processes the tokens to be proper strings. Byte-level tokenisers in particular output byte-representing
-       characters (i.e. single characters that have no inherent meaning except that they represent bytes) by default,
-       for which a conversion method exists.
-
-    NOTE: The result will likely have a first token that has a space up front. This is because apart from converting
-    byte-level storage artefacts back to their intended characters, HuggingFace also replaces signalling characters
-    like the start-of-word G-dot.
-
-    TODO: Kinda wondering what happens when you have an EoW. Do you need to add a space after the word too, then?
-    """
-    return [tokenizer.convert_tokens_to_string([token])
-            for token in tokenizer.tokenize(" " + word)]
 
 
 def fetchAndCacheDict(url: str, stem: str):
