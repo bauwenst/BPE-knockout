@@ -1,0 +1,1 @@
+universal_distillation/distillation.py --batch_size=8 --gpus=2 --max_epochs=3 --num_workers=40 --val_check_interval=100000 --limit_val_batches=1000 --save_dir=robbert-2022-model/ --teacher=pdelobelle/robbert-v2-dutch-base --data=/cw/dtaidata/ml/2019-berdt/data/oscar-2022/output_thomas.txt --val_data=/cw/dtaidata/ml/2019-berdt/data/oscar-2022/output_thomas_val.txt
