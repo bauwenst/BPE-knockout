@@ -9,7 +9,7 @@ setup(
     author='',
     author_email='',
     # REPLACE WITH YOUR OWN GITHUB PROJECT LINK
-    url='https://github.com/ipieter/trainer',
+    url='',
     install_requires=['pytorch-lightning'],
     packages=find_packages(),
     classifiers=[

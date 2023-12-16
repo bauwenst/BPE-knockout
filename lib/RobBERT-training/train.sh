@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # Some housekeeping
-export TRANSFORMERS_CACHE=/cw/dtaijupiter/NoCsBack/dtai/pieterd/hf_cache
-export WANDB_CACHE_DIR=/cw/dtaijupiter/NoCsBack/dtai/pieterd/.wandb_cache
-export WANDB_DATA_DIR=/cw/dtaijupiter/NoCsBack/dtai/pieterd/.wandb_staging
+export TRANSFORMERS_CACHE=$MY_STORAGE_FOLDER/hf_cache
+export WANDB_CACHE_DIR=$MY_STORAGE_FOLDER/.wandb_cache
+export WANDB_DATA_DIR=$MY_STORAGE_FOLDER/.wandb_staging
 
 source .env/bin/activate
 

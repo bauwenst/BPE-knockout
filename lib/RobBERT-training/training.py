@@ -28,9 +28,6 @@ import wandb
 
 import os
 
-from knockout.src.knockout.knockout import BTE, BteInitConfig, RefMode
-from knockout.src.knockout.hf import constructForHF_BPEknockout, constructForHF_BPE
-
 from trainer.modules.base import BaseTransformer
 from trainer.data.jit import JITDataModule
 
@@ -42,6 +39,10 @@ from transformers import (
     get_linear_schedule_with_warmup,
     PretrainedConfig,
 )
+
+from src.knockout.knockout import BTE, BteInitConfig, RefMode
+from src.knockout.hf import constructForHF_BPEknockout, constructForHF_BPE
+
 
 # logging.config.dictConfig(config)
 logging.basicConfig(
