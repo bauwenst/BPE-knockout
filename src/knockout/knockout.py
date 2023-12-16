@@ -23,15 +23,14 @@ from tqdm.auto import tqdm
 
 from src.datahandlers.holdout import Holdout
 from src.datahandlers.morphology import LexSplit, MorphSplit
-
 from src.auxiliary.measuring import SPLIT_MARKER_RE, SPLIT_MARKER
 from src.auxiliary.config import Pℛ𝒪𝒥ℰ𝒞𝒯, lexiconWeights, morphologyGenerator
 from src.auxiliary.bytemapping import simplifiedByteMapper
 from tokenizers.decoders import ByteLevel as ByteLevelDecoder  # The simplified byte mapper above suffices for Dutch/German.
 from tokenizers.pre_tokenizers import ByteLevel as ByteLevelPretokeniser
 
-from src.visualisation.printing import doPrint, PrintTable
-from src.visualisation.timing import timeit
+from src.visualisation.printing import doPrint, PrintTable, wprint
+
 
 SOW = "Ġ"
 MergeAsTuple = Tuple[int, str, str]
@@ -358,14 +357,14 @@ class BTE:
             self.merges_starting_with[head].append(tup)  # If this raises a KeyError, something is definitely wrong.
 
     def prune(self):
-        print("Knockout...")
+        wprint("Knockout...")
         merges_to_remove = self.getBadOldMerges(relative_blame_threshold=BTE.KNOCKOUT_REL_THRESHOLD,
                                                 except_if_all_parts_longer_than=BTE.LONGPART_THRESHOLD if not self.do_prune_trivials else 100)
         for ratio, total, merge in tqdm(merges_to_remove, desc="PRUNING GRAPH"):
             self.merge_graph.knockout(merge.childType())
 
     def anneal(self):
-        print("Annealing...")
+        wprint("Annealing...")
         merges_to_add = self.getGoodNewMerges(absolute_threshold=BTE.ANNEAL_ABS_THRESHOLD)
         for ratio, total, merge in tqdm(merges_to_add, desc="ANNEALING GRAPH"):
             self.merge_graph.addArc(merge)

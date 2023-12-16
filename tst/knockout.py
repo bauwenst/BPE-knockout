@@ -809,6 +809,7 @@ def main_deleteLastLeaves():
                  logx=False, y_lims=(0.0, 1.01), y_tickspacing=0.1)
 
 
+@timeit
 def main_wholeWordCeiling():
     """
     Goal: Test what the maximum precision could be on whole-word boundaries if you segmented every word perfectly on
@@ -843,6 +844,7 @@ def main_wholeWordCeiling():
                  default_column_style=style_evaluations, alternate_column_styles=style_vocabulary_size)
 
 
+@timeit
 def main_blameThreshold():
     RATIOS = [1, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 99]
 
