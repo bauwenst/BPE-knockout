@@ -1,14 +1,16 @@
 # BPE-knockout
 Repo hosting all the code used for the BPE-knockout paper.
+Below are the instructions for reproducing and extending the intrinsic evaluations.
+Extrinsic evaluations are done with [RobBERT's](https://github.com/iPieter/RobBERT) framework.
 
 ## Data
-All data is obtainable for free.
-- Morphological decompositions were derived from WebCelex, hosted for free at the [Max Plank Institute](http://celex.mpi.nl/).
+All data is included in the repo, because it is obtainable for free elsewhere and free of license too.
+- Morphological decompositions were derived from [WebCelex at the Max Plank Institute](http://celex.mpi.nl/).
 - Language modelling data is derived from [OSCAR on HuggingFace](https://huggingface.co/datasets/oscar).
 
 ## Running
 1. Unzip the `.rar` file under `data/compressed/`.
-2. Run `py main.py` in a terminal.
+2. Run `py main.py` or `python main.py` in a terminal.
 
 ## Using your own data
 It is possible to use other datasets (even other languages) than the ones used for the paper. 
@@ -23,3 +25,4 @@ Here is how you would do that:
 3. In `src/auxiliary/config.py`, create a new function that creates a `ProjectConfig` object declaring the paths to all 
    the relevant files, as well as the name of the relevant `LemmaMorphology` subclass. Use the `setup()` functions as examples.
 4. In `main.py`, specify this new config.
+
