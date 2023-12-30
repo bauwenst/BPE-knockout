@@ -18,7 +18,27 @@ def AutoTokenizer_from_pretrained(path_or_name: str) -> PreTrainedTokenizerFast:
         return AutoTokenizer.from_pretrained(path_or_name)
 
 
-def tokenizeAsWord(word: str, tokenizer) -> List[str]:
+class BasicStringTokeniser:
+    """
+    Interface for the subset of HuggingFace methods I need for all code to run, plus a name method for identification.
+    """
+    @abstractmethod
+    def getName(self):
+        pass
+
+    @property  # Property because that's how HuggingFace does it. Makes no sense to have getter/setter for this, but ok.
+    @abstractmethod
+    def vocab_size(self):
+        pass
+
+    def tokenize(self, text: str) -> List[str]:
+        pass
+
+    def convert_tokens_to_string(self, tokens: List[str]) -> str:
+        pass
+
+
+def tokenizeAsWord(word: str, tokenizer: BasicStringTokeniser) -> List[str]:
     """
     Does two things that are commonly needed alongside tokenisation:
      - Adds a space in front of the input. Many tokenisers need this before they can add their start-of-word symbol.
@@ -59,7 +79,7 @@ class TokeniserPath(ABC):
         pass
 
 
-class SennrichTokeniser(TokeniserPath):
+class SennrichTokeniserPath(TokeniserPath):
     """
     Tokeniser stored as a vocab.json file and a merges.txt file in the same folder.
        - vocab.json: JSON with a single top-level dictionary, mapping each subword type string to an integer id.
@@ -89,7 +109,7 @@ class SennrichTokeniser(TokeniserPath):
         return RobertaTokenizerFast(vocab_file=vocab.as_posix(), merges_file=merges.as_posix())  # Will apply byte-based pretokeniser.
 
 
-class HuggingFaceTokeniser(TokeniserPath):
+class HuggingFaceTokeniserPath(TokeniserPath):
     """
     Tokeniser as stored by HuggingFace's 'tokenizers' library as a single JSON file.
     """

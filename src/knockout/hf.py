@@ -28,13 +28,17 @@ from src.datahandlers.bpetrainer import SPECIAL_TYPES
 
 
 class BTEk_HuggingFace(PreTrainedTokenizer):
-    # TODO: Note that because this is not a PTTfast, it has no field for pretokenisation and postprocessing.
-    #       This might become an issue if you have a script where the tokeniser is loaded and then those fields are
-    #       changed with the expectation it will do anything.
+    """
+    HuggingFace wrapper for a (Pythonic) BPE-knockout tokeniser.
+
+    Note that because this is not a PTTfast, it has no field for pretokenisation and postprocessing.
+    This might become an issue if you have a script where the tokeniser is loaded and then those fields are
+    changed with the expectation it will do anything.
+    """
 
     def __init__(self, algorithm: BTE, **kwargs):
         self.algorithm = algorithm
-        self.vocab         = self.algorithm.get_vocab()
+        self.vocab         = self.algorithm.merge_graph.vocab
         self.reverse_vocab = {i: s for s,i in self.vocab.items()}  # Assume that the vocabulary is injective (no duplicate IDs)
 
         # Special tokens: you can either add them or declare them. I choose to declare them, because adding them cannot

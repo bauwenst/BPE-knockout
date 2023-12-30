@@ -1,5 +1,5 @@
 """
-Copyright (C) 2021-2023 [REDACTED]
+Copyright (C) 2021-2023 Thomas Bauwens
 This code was written across multiple research papers at university.
 Any copy of this code must contain this copyright notice.
 It may only be distributed with explicit permission from the author.

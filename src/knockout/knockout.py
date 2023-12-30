@@ -11,6 +11,7 @@ TODO:
     - I was wondering if you could use e-Lex morphologies themselves to induce segmentation rules; don't look at the
       character-level patterns, but at the morph-level patterns. This is hard though, because morphologies show you how
       to split, yet BPE is based on merging, not splitting.
+    - Holdout ratio and seed should be part of the config, as should the fact of whether or not knockout has already been run.
 """
 import dataclasses
 from enum import Enum
@@ -26,6 +27,7 @@ from src.datahandlers.morphology import LexSplit, MorphSplit
 from src.auxiliary.measuring import SPLIT_MARKER_RE, SPLIT_MARKER
 from src.auxiliary.config import Pℛ𝒪𝒥ℰ𝒞𝒯, lexiconWeights, morphologyGenerator
 from src.auxiliary.bytemapping import simplifiedByteMapper
+from src.auxiliary.tokenizer_interface import BasicStringTokeniser
 from tokenizers.decoders import ByteLevel as ByteLevelDecoder  # The simplified byte mapper above suffices for Dutch/German.
 from tokenizers.pre_tokenizers import ByteLevel as ByteLevelPretokeniser
 
@@ -112,9 +114,10 @@ class MergeGraph:
         self.merges_with[type_to_add] = []
         self.merges_of[type_to_add]   = []
 
-    def addArc(self, merge_to_add: str):
+    def addArc(self, merge_to_add: str) -> Merge:
         """
         Adds arcs to the merge graph, and the resulting type if necessary.
+        Also returns the constructed merge object for diagnostic purposes.
         :param merge_to_add: Space-separated merge, e.g. "ab cd e".
         """
         parts = merge_to_add.split(" ")
@@ -134,6 +137,7 @@ class MergeGraph:
         self.merges_of[new_type].append(new_merge)
 
         self.next_merge += 1
+        return new_merge
 
     def knockout(self, type_to_delete: str):
         """
@@ -239,6 +243,24 @@ class ByteBasedMode(str, Enum):
     VOCAB_TO_CHARS = 2  # Take a vocab produced by HuggingFace's BBPE (which consists of the 256 byte-representing characters) and convert it to the corresponding characters.
     INPUT_TO_BYTES = 3  # Take UTF-8 input and map it to HuggingFace's 256 byte-representing characters.
 
+    def toInputProcessors(self) -> Tuple[Callable[[str],str], Callable[[List[str]],str]]:
+        """
+        Returns a word preprocessor (e.g. to convert its characters to bytes) and the inverse plus a concatenator.
+        In a bigger pipeline, you would use these two as follows:
+            - Encoder: text --pretokeniser--> spaceless words --WORD PREPROCESSOR--> bytewords --tokeniser--> tokens
+            - Decoder: tokens --INVERSE--> spacehaving words --concatenate--> text
+        """
+        if self == ByteBasedMode.INPUT_TO_BYTES:
+            character_converter_plus_segmenter = ByteLevelPretokeniser(add_prefix_space=False)
+            character_converter_inverse        = ByteLevelDecoder()
+            word_preprocessor = lambda word: "".join([t for t,_ in character_converter_plus_segmenter.pre_tokenize_str(word)])  # We don't need the segmentation.
+            tokens_to_word    = lambda tokens: character_converter_inverse.decode(tokens)
+        else:
+            word_preprocessor = lambda word: word
+            tokens_to_word    = lambda tokens: "".join(tokens)
+
+        return word_preprocessor, tokens_to_word
+
 
 @dataclasses.dataclass
 class BteInitConfig:
@@ -256,7 +278,7 @@ class BteInitConfig:
     bytebased: ByteBasedMode = ByteBasedMode.INPUT_TO_BYTES  # Because all our tests assume byte-based vocabularies, we use this as default to not specify it every time.
 
 
-class BTE:
+class BTE(BasicStringTokeniser):
     """
     Byte-tuple encoding (BTE): implementation of BPE that can deal with merges of more than 2 parts.
     """
@@ -275,14 +297,7 @@ class BTE:
         self.config = init_config
 
         # Character mapping (not pretokenisation)
-        if self.config.bytebased == ByteBasedMode.INPUT_TO_BYTES:
-            character_converter_plus_segmenter = ByteLevelPretokeniser(add_prefix_space=False)
-            character_converter_inverse        = ByteLevelDecoder()
-            self.word_preprocessor = lambda word: "".join([t for t,_ in character_converter_plus_segmenter.pre_tokenize_str(word)])  # We don't need the segmentation.
-            self.tokens_to_word    = lambda tokens: character_converter_inverse.decode(tokens)
-        else:
-            self.word_preprocessor = lambda word: word
-            self.tokens_to_word    = lambda tokens: "".join(tokens)
+        self.word_preprocessor, self.tokens_to_word = self.config.bytebased.toInputProcessors()
 
         # Training regime
         self.knockout_segmentation = RefMode.toMethod(self.config.knockout)
@@ -321,23 +336,13 @@ class BTE:
         if not self.config.do_swap_stages:
             if self.knockout_segmentation is not None:
                 self.prune()
-                self.syncWithGraph()
             if self.anneal_segmentation is not None:
                 self.anneal()
-                self.syncWithGraph()
         else:
             if self.anneal_segmentation is not None:
                 self.anneal()
-                self.syncWithGraph()
             if self.knockout_segmentation is not None:
                 self.prune()
-                self.syncWithGraph()
-
-    def getName(self):
-        return self.name
-
-    def get_vocab(self):
-        return self.merge_graph.vocab
 
     def syncWithGraph(self):
         """
@@ -358,16 +363,23 @@ class BTE:
 
     def prune(self):
         wprint("Knockout...")
-        merges_to_remove = self.getBadOldMerges(relative_blame_threshold=BTE.KNOCKOUT_REL_THRESHOLD,
-                                                except_if_all_parts_longer_than=BTE.LONGPART_THRESHOLD if not self.do_prune_trivials else 100)
-        for ratio, total, merge in tqdm(merges_to_remove, desc="PRUNING GRAPH"):
+        merges_to_remove = self.getBadOldMerges(relative_blame_threshold=BTE.KNOCKOUT_REL_THRESHOLD, except_if_all_parts_longer_than=BTE.LONGPART_THRESHOLD if not self.do_prune_trivials else 100)
+        self._removeMerges([m for _,_,m in merges_to_remove])
+
+    def _removeMerges(self, merges_to_remove: List[Merge]):
+        for merge in tqdm(merges_to_remove, desc="PRUNING GRAPH"):
             self.merge_graph.knockout(merge.childType())
+        self.syncWithGraph()
 
     def anneal(self):
         wprint("Annealing...")
         merges_to_add = self.getGoodNewMerges(absolute_threshold=BTE.ANNEAL_ABS_THRESHOLD)
-        for ratio, total, merge in tqdm(merges_to_add, desc="ANNEALING GRAPH"):
-            self.merge_graph.addArc(merge)
+        self._addMerges([m for _,_,m in merges_to_add])
+
+    def _addMerges(self, merges_to_add: List[str]):
+        for merge_string in tqdm(merges_to_add, desc="ANNEALING GRAPH"):
+            self.merge_graph.addArc(merge_string)
+        self.syncWithGraph()
 
     def tokenize(self, word: str) -> List[str]:  # TODO: This doesn't support "attached SoW/EoW" and leaves SoW/EoW to the user. Not good.
         return self.segment_as_is(self.word_preprocessor(word)
@@ -434,7 +446,7 @@ class BTE:
 
         return buffer[1:-1].split(" "), mergepoint_to_mergeid
 
-    def getBadOldMerges(self, relative_blame_threshold=0.5, except_if_all_parts_longer_than=100):
+    def getBadOldMerges(self, relative_blame_threshold=0.5, except_if_all_parts_longer_than=100) -> List[Tuple[float,int,Merge]]:
         """
         Compares BPE tokenisation to morphological tokenisation, and records the amount of times each BPE merge is used as
         well as the amount of times each merge makes a split disappear that the morphological tokenisation mandates.
@@ -449,9 +461,9 @@ class BTE:
         prnt = doPrint(False)
         weights = lexiconWeights() if self.config.weighted_training else dict()
 
-        merge_lookup = self.merge_graph.merges
-        blame = [0 for _ in merge_lookup]
-        total = [0 for _ in merge_lookup]
+        merge_lookup = {m.priority: m for m in self.merge_graph.merges}
+        blame        = {m.priority: 0 for m in self.merge_graph.merges}
+        total        = {m.priority: 0 for m in self.merge_graph.merges}
 
         for obj in self.holdout(morphologyGenerator(), train=True):
             lemma = obj.lemma()
@@ -462,8 +474,8 @@ class BTE:
             reference_segmentation = self.knockout_segmentation(obj)
 
             # Get BPE split and the ID of the merge that caused a space to disappear at each index.
-            # TODO: This line and the ones below are specific to using RobBERT's vocabulary as starting vocab. Any BPE
-            #       tokeniser that doesn't have an SoW (or doesn't have Ġ specifically) won't work currently.
+            # FIXME: This line and the ones below are specific to using RobBERT's vocabulary as starting vocab. Any BPE
+            #        tokeniser that doesn't have an SoW (or doesn't have Ġ specifically) won't work currently.
             tokens, merge_ids = self.segment_as_is_diagnostic(SOW + lemma)
 
             # One modification: because we neglect the RobBERT's start-of-word character Ġ when doing morphological
@@ -482,7 +494,7 @@ class BTE:
             prnt("\t", reference_segmentation, "->", bpe_segmentation)
             prnt("\t", merge_ids)
             for merge_id in merge_ids.values():
-                total[merge_id] += weight  # FIXME: This crashes when you have already run knockout once. The reason is that 'total' is a list and not a dictionary. Quite easy to fix.
+                total[merge_id] += weight  # FIXME: This should not error since my fix.
             for index in indices_that_shouldve_never_merged:
                 merge_id = merge_ids[index]
                 blame[merge_id] += weight
@@ -490,19 +502,19 @@ class BTE:
 
         # Calculate ratios
         blame_ratios = dict()
-        for idx in range(len(blame)):
-            blame_ratios[idx] = blame[idx]/total[idx] \
-                                if total[idx] != 0 else 0  # Protect against DBZ.
+        for merge_id in blame.keys():
+            blame_ratios[merge_id] = blame[merge_id]/total[merge_id] \
+                                     if total[merge_id] != 0 else 0  # Protect against DBZ.
 
         # Filter
-        filtered_results = [(ratio, total[idx], merge_lookup[idx]) for idx, ratio in blame_ratios.items()
+        filtered_results = [(ratio, total[merge_id], merge_lookup[merge_id]) for merge_id, ratio in blame_ratios.items()
                             if ratio >= relative_blame_threshold
-                            and not merge_lookup[idx].isTrivial(except_if_all_parts_longer_than)]
+                            and not merge_lookup[merge_id].isTrivial(except_if_all_parts_longer_than)]
         filtered_results.sort(reverse=True)
 
         return filtered_results
 
-    def getGoodNewMerges(self, absolute_threshold=25):
+    def getGoodNewMerges(self, absolute_threshold=25) -> List[Tuple[float,int,str]]:
         """
         Suggest merges which improve morphological splits if applied.
         Note: this is the post-processing implementation.
@@ -632,6 +644,13 @@ class BTE:
         with open(out_path, "w", encoding="utf-8") as handle:
             json.dump(data, handle, indent=4, ensure_ascii=False)
         return out_path
+
+    def getName(self):
+        return self.name
+
+    @property
+    def vocab_size(self):
+        return len(self.merge_graph.vocab)
 
     def convert_tokens_to_string(self, tokens: List[str]) -> str:
         """

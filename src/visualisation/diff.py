@@ -3,7 +3,7 @@ from typing import List
 import re
 
 from src.auxiliary.paths import *
-from src.auxiliary.tokenizer_interface import SennrichTokeniser
+from src.auxiliary.tokenizer_interface import SennrichTokeniserPath
 
 
 TEXCHARS = re.compile(r"([&#$%{}_^\\])")
@@ -69,6 +69,6 @@ if __name__ == "__main__":
     # npr.shuffle(l2)
     # matchListElements(l1, l2)
 
-    l1 = SennrichTokeniser(PATH_DATA_MODELBASE / "robbert").loadMerges()
-    l2 = SennrichTokeniser(PATH_DATA_MODELBASE / "bpe-oscar-nl-clean").loadMerges()
+    l1 = SennrichTokeniserPath(PATH_DATA_MODELBASE / "robbert").loadMerges()
+    l2 = SennrichTokeniserPath(PATH_DATA_MODELBASE / "bpe-oscar-nl-clean").loadMerges()
     matchListElements(l1, l2, max_length=500)

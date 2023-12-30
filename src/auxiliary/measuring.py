@@ -10,8 +10,7 @@ from src.datahandlers.holdout import Holdout
 from src.auxiliary.paths import *
 from src.auxiliary.config import Pℛ𝒪𝒥ℰ𝒞𝒯, morphologyGenerator
 from src.auxiliary.robbert_tokenizer import robbert_tokenizer
-from src.auxiliary.tokenizer_interface import tokenizeAsWord
-
+from src.auxiliary.tokenizer_interface import tokenizeAsWord, BasicStringTokeniser
 
 # Segmentation kernel
 SPLIT_MARKER = "|"
@@ -247,7 +246,7 @@ class TokeniserEvaluation:
 
 
 # @timeit
-def test_tokenizers_batch(tkzrs: list, reweighting_function: Callable[[float],float]=None, holdout: Holdout=None) -> List[TokeniserEvaluation]:
+def test_tokenizers_batch(tkzrs: List[BasicStringTokeniser], reweighting_function: Callable[[float], float]=None, holdout: Holdout=None) -> List[TokeniserEvaluation]:
     """
     Generates, for each given tokeniser, 12 metrics:
         - Morph split unweighted and weighted precision, recall, F1 of split positions vs. e-Lex;
@@ -273,10 +272,8 @@ def test_tokenizers_batch(tkzrs: list, reweighting_function: Callable[[float],fl
             name = t.getName()
         except:
             name = t.__class__.__name__
-        try:
-            size = len(t.get_vocab())
-        except:
-            size = "NA"
+
+        size = t.vocab_size
 
         # Uncomment this if you need to only simulate the testing framework, rather than get results.
         # results.append(TokeniserEvaluation(name=name, vocabsize=size, cm_morph=SegmentationConfusionMatrix(), cm_morph_w=SegmentationConfusionMatrix(), cm_lex=SegmentationConfusionMatrix(), cm_lex_w=SegmentationConfusionMatrix()))
@@ -285,13 +282,11 @@ def test_tokenizers_batch(tkzrs: list, reweighting_function: Callable[[float],fl
         # Print and evaluate
         print(name)
         print("|V|:", size)
-        print("\tMorph split accuracy:")
-        time.sleep(0.01)
+        wprint("\tMorph split accuracy:")
         cm1, cm1_w = morphologyVersusTokenisation(MorphSplit(), tokenizer=t, do_write_errors=False, log_name=name,
                                                   weights=lemma_weights, holdout=holdout)
 
-        print("\tLemmatic split accuracy:")
-        time.sleep(0.01)
+        wprint("\tLemmatic split accuracy:")
         cm2, cm2_w = morphologyVersusTokenisation(LexSplit(), tokenizer=t, do_write_errors=False, log_name=name,
                                                   weights=lemma_weights, holdout=holdout)
         print()

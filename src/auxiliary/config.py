@@ -17,7 +17,7 @@ import langcodes
 
 # None of the below files import the config.
 from src.auxiliary.paths import *
-from src.auxiliary.tokenizer_interface import TokeniserPath, SennrichTokeniser, HuggingFaceTokeniser
+from src.auxiliary.tokenizer_interface import TokeniserPath, SennrichTokeniserPath, HuggingFaceTokeniserPath
 from src.datahandlers.morphology import LemmaMorphology, CelexLemmaMorphology
 
 
@@ -46,7 +46,7 @@ def setupDutch() -> ProjectConfig:
         language_name="Dutch",
         lemma_weights=PATH_DATA_COMPRESSED / "words_oscar-nl.txt",
         morphologies=PATH_DATA_COMPRESSED / "celex_morphology_nl.txt",
-        base_tokeniser=SennrichTokeniser(PATH_DATA_MODELBASE / "bpe-oscar-nl-clean"),
+        base_tokeniser=SennrichTokeniserPath(PATH_DATA_MODELBASE / "bpe-oscar-nl-clean"),
         reweighter=LINEAR_WEIGHTER,
         parser=CelexLemmaMorphology
     )
@@ -59,7 +59,7 @@ def setupGerman() -> ProjectConfig:
         language_name="German",
         lemma_weights=PATH_DATA_COMPRESSED / "words_oscar-de.txt",
         morphologies=PATH_DATA_COMPRESSED / "celex_morphology_de.txt",
-        base_tokeniser=SennrichTokeniser(PATH_DATA_MODELBASE / "bpe-oscar-de-clean"),
+        base_tokeniser=SennrichTokeniserPath(PATH_DATA_MODELBASE / "bpe-oscar-de-clean"),
         reweighter=LINEAR_WEIGHTER,
         parser=CelexLemmaMorphology
     )
@@ -72,7 +72,7 @@ def setupEnglish() -> ProjectConfig:
         language_name="English",
         lemma_weights=PATH_DATA_COMPRESSED / "words_oscar-en.txt",
         morphologies=PATH_DATA_COMPRESSED / "celex_morphology_en.txt",
-        base_tokeniser=SennrichTokeniser(PATH_DATA_MODELBASE / "bpe-oscar-en-clean"),
+        base_tokeniser=SennrichTokeniserPath(PATH_DATA_MODELBASE / "bpe-oscar-en-clean"),
         reweighter=LINEAR_WEIGHTER,
         parser=CelexLemmaMorphology
     )

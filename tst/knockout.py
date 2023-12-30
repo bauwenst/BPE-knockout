@@ -80,11 +80,11 @@ def test_save_and_load():
     from src.auxiliary.paths import PATH_DATA_TEMP
 
     bte = BTE(init_config=BteInitConfig(knockout=RefMode.MORPHEMIC), autorun_modes=True)
-    print(len(bte.get_vocab()))
+    print(bte.vocab_size)
     out_path = bte.save(PATH_DATA_TEMP)
 
     bte = BTE.load(out_path)
-    print(len(bte.get_vocab()))
+    print(bte.vocab_size)
 
 
 def time_iterators():
@@ -137,8 +137,7 @@ def test_onlyTrivials():
         addEvaluationToTable(table, results,
                              row_prefix=["Dutch", "log test"], row_names=["nolong"])
 
-    table.commit(rowname_alignment="l", borders_between_columns_of_level=[0,1], borders_between_rows_of_level=[0,1],
-                 default_column_style=style_evaluations, alternate_column_styles=style_vocabulary_size)
+    commitEvaluationTable(table)
 
 
 def test_chainEffect():
@@ -239,8 +238,6 @@ COLUMN_NAME_VOCAB = "$|V|$"
 COLUMN_NAME_Pr = "Pr"
 COLUMN_NAME_Re = "Re"
 COLUMN_NAME_F1 = "$F_1$"
-style_evaluations     = ColumnStyle(alignment="c", aggregate_at_rowlevel=0, do_bold_maximum=True, cell_prefix=r"\tgrad{", digits=2, cell_suffix="}")
-style_vocabulary_size = {(COLUMN_NAME_VOCAB,): ColumnStyle(alignment="c", cell_prefix=r"\num{", digits=0, cell_suffix="}")}
 
 def addEvaluationToTable(table: Table, results: List[TokeniserEvaluation], macro_average_all: bool=False,
                          row_names: List[str]=None, row_prefix: List[str]=None):
@@ -297,6 +294,13 @@ def addEvaluationToTable(table: Table, results: List[TokeniserEvaluation], macro
 
         if macro_average_all:  # Stop after one row
             break
+
+
+style_evaluations     = ColumnStyle(alignment="c", aggregate_at_rowlevel=0, do_bold_maximum=True, cell_prefix=r"\tgrad{", digits=2, cell_suffix="}")
+style_vocabulary_size = {(COLUMN_NAME_VOCAB,): ColumnStyle(alignment="c", cell_prefix=r"\num{", digits=0, cell_suffix="}")}
+def commitEvaluationTable(table: Table):
+    table.commit(rowname_alignment="l", borders_between_columns_of_level=[0,1], borders_between_rows_of_level=[0,1],
+                 default_column_style=style_evaluations, alternate_column_styles=style_vocabulary_size)
 
 
 ##############################################################################
@@ -425,8 +429,7 @@ def main_intrinsicModes():
         results = test_tokenizers_batch(tkzrs, reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
         addEvaluationToTable(table, results)
 
-    table.commit(rowname_alignment="l", borders_between_columns_of_level=[0,1], borders_between_rows_of_level=[0,1],
-                 default_column_style=style_evaluations, alternate_column_styles=style_vocabulary_size)
+    commitEvaluationTable(table)
 
 
 @timeit
@@ -503,8 +506,7 @@ def main_intrinsicMultilingual():
                                      row_prefix=[name_of_language, "BPE-knockout"],
                                      row_names=["holdout"])
 
-    table.commit(rowname_alignment="l", borders_between_columns_of_level=[0,1], borders_between_rows_of_level=[0,1],
-                 default_column_style=style_evaluations, alternate_column_styles=style_vocabulary_size)
+    commitEvaluationTable(table)
 
 
 @timeit
@@ -517,8 +519,7 @@ def main_intrinsicMonolingual_KeepLong():
         )
         addEvaluationToTable(table, results)
 
-    table.commit(rowname_alignment="l", borders_between_columns_of_level=[0,1], borders_between_rows_of_level=[0,1],
-                 default_column_style=style_evaluations, alternate_column_styles=style_vocabulary_size)
+    commitEvaluationTable(table)
 
 
 @timeit
@@ -536,8 +537,7 @@ def main_intrinsicMonolingual_Holdout():
             addEvaluationToTable(table, results,
                                  row_prefix=["BPE-knockout"], row_names=[f"{int(f*100)}-{100-int(f*100)}"])
 
-    table.commit(rowname_alignment="l", borders_between_columns_of_level=[0,1], borders_between_rows_of_level=[0,1],
-                 default_column_style=style_evaluations, alternate_column_styles=style_vocabulary_size)
+    commitEvaluationTable(table)
 
 
 @timeit
@@ -580,9 +580,11 @@ def main_intrinsicMonolingual_WeightedTraining():
         ###
         Pℛ𝒪𝒥ℰ𝒞𝒯.config = old_config
 
-    table.commit(rowname_alignment="l", borders_between_columns_of_level=[0,1], borders_between_rows_of_level=[0,1],
-                 default_column_style=style_evaluations, alternate_column_styles=style_vocabulary_size)
+    commitEvaluationTable(table)
 
+
+DELETION_PERCENTAGES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 20, 30, 40, 50]
+# DELETION_PERCENTAGES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 20, 30, 40, 50, 60, 70, 80, 90, 99]
 
 @timeit
 def main_deleteRandomMerges():
@@ -596,7 +598,6 @@ def main_deleteRandomMerges():
     import traceback
 
     SAMPLES = 10
-    PERCENTAGES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 20, 30, 40, 50]
 
     graph = LineGraph(name="delete-random-types", caching=CacheMode.IF_MISSING)
     if graph.needs_computation:
@@ -632,7 +633,7 @@ def main_deleteRandomMerges():
         rng = npr.default_rng(seed=0)
         amount_of_merges = len(BTE(BteInitConfig()).merge_graph.merges)
         all_index_lists = [tuple(rng.choice(amount_of_merges, size=int(amount_of_merges * p/100), replace=False))
-                           for p in PERCENTAGES
+                           for p in DELETION_PERCENTAGES
                            for _ in range(SAMPLES if p != 0 else 1)]
         print("Constructing", len(all_index_lists), "tokenisers...")
 
@@ -657,7 +658,7 @@ def main_deleteRandomMerges():
 
         # Reduce the results by computing an average over all samples of the same parameter value.
         idx = 0
-        for p in PERCENTAGES:
+        for p in DELETION_PERCENTAGES:
             sum_pr = 0
             sum_re = 0
             sum_f1 = 0
@@ -674,7 +675,7 @@ def main_deleteRandomMerges():
             graph.add("$F_1$", p, sum_f1/n)
 
     graph.commit(x_label="Merges deleted [\\%]", y_label="Correspondence of split positions (average of $10$ trials)",
-                 logx=False, y_lims=(0.0, 1.01), y_tickspacing=0.1)
+                 logx=False, x_tickspacing=10, y_lims=(0.0, 1.01), y_tickspacing=0.1)
 
 @timeit
 def main_deleteLastMerges():
@@ -682,15 +683,13 @@ def main_deleteLastMerges():
     Same test except you just trim the merge list.
     You can re-use the same tokeniser for this.
     """
-    PERCENTAGES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 20, 30, 40, 50]
-
     graph = LineGraph(name="delete-last-types", caching=CacheMode.IF_MISSING)
     if graph.needs_computation:
         bte = BTE(BteInitConfig(), quiet=True, autorun_modes=False)
         initial_merges = len(bte.merge_graph.merges)
         results = []
 
-        for p in PERCENTAGES:
+        for p in DELETION_PERCENTAGES:
             goal_merges    = int(initial_merges * (100-p)/100)
             current_merges = len(bte.merge_graph.merges)
             to_knock_out   = current_merges - goal_merges
@@ -709,13 +708,13 @@ def main_deleteLastMerges():
 
             results.append((pr,re,f1))
 
-        for p, (pr,re,f1) in zip(PERCENTAGES, results):
+        for p, (pr,re,f1) in zip(DELETION_PERCENTAGES, results):
             graph.add("Pr",    p, pr)
             graph.add("Re",    p, re)
             graph.add("$F_1$", p, f1)
 
     graph.commit(x_label="Merges deleted [\\%]", y_label="Correspondence of split positions",
-                 logx=False, y_lims=(0.0, 1.01), y_tickspacing=0.1)
+                 logx=False, x_tickspacing=10, y_lims=(0.0, 1.01), y_tickspacing=0.1)
 
 @timeit
 def main_deleteLastLeaves():
@@ -767,12 +766,10 @@ def main_deleteLastLeaves():
               y_lims=(0, 101), x_tickspacing=10, y_tickspacing=10)
 
     # Part 2: Performance
-    PERCENTAGES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 20, 30, 40, 50]
-
     g2 = LineGraph("delete-last-leaves", caching=CacheMode.IF_MISSING)
     results = []
     if g2.needs_computation:
-        for p in PERCENTAGES:
+        for p in DELETION_PERCENTAGES:
             # Re-initialise a new BTE each time because I'm scared of re-using one (leaf status changes with knockout)
             bte = BTE(BteInitConfig(), quiet=True)
             amount_of_merges = len(bte.merge_graph.merges)
@@ -800,13 +797,13 @@ def main_deleteLastLeaves():
 
             results.append((pr,re,f1))
 
-        for p, (pr,re,f1) in zip(PERCENTAGES, results):
+        for p, (pr,re,f1) in zip(DELETION_PERCENTAGES, results):
             g2.add("Pr",    p, pr)
             g2.add("Re",    p, re)
             g2.add("$F_1$", p, f1)
 
     g2.commit(x_label="Merges deleted [\\%]", y_label="Correspondence of split positions",
-                 logx=False, y_lims=(0.0, 1.01), y_tickspacing=0.1)
+                 logx=False, x_tickspacing=10, y_lims=(0.0, 1.01), y_tickspacing=0.1)
 
 
 @timeit
@@ -840,8 +837,7 @@ def main_wholeWordCeiling():
                                                              cm_morph=SegmentationConfusionMatrix(), cm_morph_w=SegmentationConfusionMatrix(),
                                                              cm_lex=cm, cm_lex_w=cm_w)], row_prefix=[language.language_name, ""], row_names=["ideal"])
 
-    table.commit(rowname_alignment="l", borders_between_columns_of_level=[0,1], borders_between_rows_of_level=[0,1],
-                 default_column_style=style_evaluations, alternate_column_styles=style_vocabulary_size)
+    commitEvaluationTable(table)
 
 
 @timeit

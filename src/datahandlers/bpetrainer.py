@@ -5,7 +5,7 @@ from typing import Dict, Set, Tuple
 from tokenizers import Tokenizer, models, normalizers, pre_tokenizers, trainers
 
 from src.auxiliary.paths import *
-from src.auxiliary.config import SennrichTokeniser, HuggingFaceTokeniser
+from src.auxiliary.config import SennrichTokeniserPath, HuggingFaceTokeniserPath
 from src.datahandlers.wordfiles import wordfileToBpeCorpus
 from lib.sbpe.learn_bpe import learn_bpe, SowEowSpecification
 
@@ -39,7 +39,7 @@ class BPETrainer:
         self.normaliser = normalizers.NFKC()
 
     def train(self, wordfile: Path, out_folder: Path):
-        paths = SennrichTokeniser(folder=out_folder)
+        paths = SennrichTokeniserPath(folder=out_folder)
         path_vocab, path_merges = paths.getPaths()
 
         # Learn merges
@@ -107,11 +107,11 @@ class BPETrainer:
 
         # Save
         save_path = out_folder / f"BPE_from_{wordfile.stem}.json"
-        hf = HuggingFaceTokeniser(json_path=save_path)  # Calls .mkdir, which is important because otherwise the next line fails.
+        hf = HuggingFaceTokeniserPath(json_path=save_path)  # Calls .mkdir, which is important because otherwise the next line fails.
         tokeniser.save(path=save_path.as_posix())
 
         # Turn into vocab.json + merges.txt
-        vocab, merges = SennrichTokeniser(folder=out_folder).getPaths()
+        vocab, merges = SennrichTokeniserPath(folder=out_folder).getPaths()
         with open(vocab, "w", encoding="utf-8") as out_handle:
             json.dump(hf.loadVocabulary(), out_handle, ensure_ascii=False, indent=4)
         with open(merges, "w", encoding="utf-8") as out_handle:
