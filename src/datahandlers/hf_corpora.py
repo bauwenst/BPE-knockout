@@ -93,11 +93,14 @@ def dataloaderToWeights(dataloader: DataLoader, output_stem: str, progress_bar_t
 
 
 from string import punctuation
-punctuation = punctuation + "€£…‘’“”„«»"  # Adding some European punctuations.
+punctuation = punctuation + "€£…‘’“”„«»–"  # Add some European punctuations.
 punctuation = punctuation.replace("\\", "") + "\\"  # Put backslash in the back. Makes the pattern clearer.
+punctuation = "-" + punctuation.replace("-", "")    # Put hyphen in the front. Prevents regex from thinking it's a span.
+punctuation_regex_str = "[" + punctuation.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]").replace("-", "\\-") + "]+"
+
 def punctuationPretokeniserExceptHyphens():
-    punctuation_no_hyphen = punctuation.replace("-", "")
-    pretokeniser = tp.Split(pattern=Regex("[" + punctuation_no_hyphen.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]") + "]+"),
+    punctuation_regex_str_no_hyphenish = punctuation_regex_str.replace("\\-", "").replace("–", "").replace("_", "")
+    pretokeniser = tp.Split(pattern=Regex(punctuation_regex_str_no_hyphenish),
                             behavior="isolated")
     normalizer = tn.NFKC()  # Turn weird letters into normal letters, and leave accents on top of their letters.
 
