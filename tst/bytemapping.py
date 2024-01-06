@@ -14,6 +14,7 @@ from src.auxiliary.tokenizer_interface import tokenizeAsWord
 from src.auxiliary.bytemapping import *
 from src.knockout.knockout import BTE, BteInitConfig, RefMode, ByteBasedMode
 from src.visualisation.timing import timeit
+from src.visualisation.graphing import LineGraph, CacheMode
 
 
 def robbert():
@@ -105,7 +106,6 @@ def huggingFaceByteAlphabet():
 
     index_of_256chr_in_alphabet = [[alphabet.index(token) for token in tokens] for tokens in chr_tokens]
 
-    from src.visualisation.graphing import LineGraph, CacheMode
     graph = LineGraph("chr-vs-alphabet", caching=CacheMode.NONE)
     for i, lst in enumerate(index_of_256chr_in_alphabet):
         for j, token_position in enumerate(lst):
@@ -155,7 +155,6 @@ def huggingFaceByteMap():
     index_to_byte = [(alphabet.index(char), byte) for char, byte in char_to_byte.items()]
     index_to_byte.sort()
 
-    from src.visualisation.graphing import LineGraph, CacheMode
     graph = LineGraph("utf8-vs-alphabet", caching=CacheMode.NONE)
     for i,b in index_to_byte:
         graph.add("represented by", i, alphabet[i].encode("utf-8")[-1])

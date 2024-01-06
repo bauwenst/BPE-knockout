@@ -314,7 +314,7 @@ def main_datasetStats():
                 for obj in morphologyGenerator():
                     histo.add(language.language_name, len(obj.morphSplit().split()))
 
-    print(histo.toDataframe().groupby(LEGEND_TITLE_CLASS).describe())
+    print(histo.toDataframe().groupby(FIJECT_DEFAULTS.LEGEND_TITLE_CLASS).describe())
     histo.commit_histplot(center_ticks=True, relative_counts=True, x_lims=(0.5,6.5),
                           x_label="Morphs", y_label="Fraction of lemmata",
                           do_hatch=True, do_kde=False)
