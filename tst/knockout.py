@@ -296,7 +296,7 @@ def addEvaluationToTable(table: Table, results: List[TokeniserEvaluation], macro
             break
 
 
-style_evaluations     = ColumnStyle(alignment="c", aggregate_at_rowlevel=0, do_bold_maximum=True, cell_prefix=r"\tgrad{", digits=2, cell_suffix="}")
+style_evaluations     = ColumnStyle(alignment="c", aggregate_at_rowlevel=0, do_bold_maximum=True, cell_prefix=r"\tgrad{", digits=3, cell_suffix="}")
 style_vocabulary_size = {(COLUMN_NAME_VOCAB,): ColumnStyle(alignment="c", cell_prefix=r"\num{", digits=0, cell_suffix="}")}
 def commitEvaluationTable(table: Table):
     table.commit(rowname_alignment="l", borders_between_columns_of_level=[0,1], borders_between_rows_of_level=[0,1],

@@ -1270,7 +1270,6 @@ class Table(Diagram):
                 line = ""
 
                 # 4.1: Row name.
-                row_path_names = tuple(node.name for node in row_path[1:])
                 row_path = [None for _ in range(margin_depth-len(row_path)+1)] + row_path[1:]
                 row_path_changed = False  # Has to become True at some point
                 cline_start = None
@@ -1333,8 +1332,8 @@ class Table(Diagram):
                             cell_string = str(cell_value)
 
                         # Compare value
-                        bolded = (style.do_bold_minimum and cell_value == aggregates_per_column[col_idx][group_key].min) or \
-                                 (style.do_bold_maximum and cell_value == aggregates_per_column[col_idx][group_key].max)
+                        bolded = (style.do_bold_minimum and cell_value == group_aggregates.min) or \
+                                 (style.do_bold_maximum and cell_value == group_aggregates.max)
 
                         cell_content = r"\bfseries"*bolded + style.cell_prefix + cell_string + style.cell_suffix
                     else:

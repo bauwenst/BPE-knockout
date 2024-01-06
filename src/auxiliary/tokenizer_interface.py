@@ -4,6 +4,7 @@ from abc import abstractmethod, ABC
 import json
 
 from transformers import AutoTokenizer, RobertaTokenizerFast, PreTrainedTokenizerFast
+from src.datahandlers.holdout import Holdout
 
 
 def AutoTokenizer_from_pretrained(path_or_name: str) -> PreTrainedTokenizerFast:
@@ -56,8 +57,21 @@ def tokenizeAsWord(word: str, tokenizer: BasicStringTokeniser) -> List[str]:
             for token in tokenizer.tokenize(" " + word)]
 
 
+class Evaluator(ABC):
+    """
+    Interface for evaluating a tokeniser.
+    Can be used as an optional argument in tokeniser source code without having to import a testing/visualisation framework in your source.
+    """
+
+    @abstractmethod
+    def evaluate(self, tokeniser: BasicStringTokeniser, holdout: Holdout, experiment_names: List[str]):
+        pass
+
 
 class TokeniserPath(ABC):
+    """
+    Interface for representing a BPE tokeniser on disk.
+    """
 
     def __init__(self, path: Path):
         self.path = path
