@@ -1,7 +1,7 @@
 import json
 import requests
 
-from src.auxiliary.paths import PATH_DATA_TEMP
+from src.project.paths import PATH_DATA_TEMP
 from src.auxiliary.tokenizer_interface import AutoTokenizer_from_pretrained
 
 robbert_tokenizer = AutoTokenizer_from_pretrained("pdelobelle/robbert-v2-dutch-base")

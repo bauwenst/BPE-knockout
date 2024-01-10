@@ -20,7 +20,6 @@ from typing import List, Tuple, Dict, Any, Optional
 from pathlib import Path
 
 from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
-from tokenizers import pre_tokenizers, decoders
 import json
 
 from src.knockout.knockout import BTE, BteInitConfig, RefMode, ByteBasedMode
@@ -133,7 +132,7 @@ class BTEk_HuggingFace(PreTrainedTokenizer):
 
 
 def constructForHF_BPE() -> PreTrainedTokenizerFast:
-    from src.auxiliary.config import Pℛ𝒪𝒥ℰ𝒞𝒯
+    from src.project.config import Pℛ𝒪𝒥ℰ𝒞𝒯
     return Pℛ𝒪𝒥ℰ𝒞𝒯.config.base_tokeniser.toFastBPE()
 
 def constructForHF_BPEknockout() -> PreTrainedTokenizer:

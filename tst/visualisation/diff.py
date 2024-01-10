@@ -2,7 +2,7 @@ import itertools
 from typing import List
 import re
 
-from src.auxiliary.paths import *
+from src.project.paths import *
 from src.auxiliary.tokenizer_interface import SennrichTokeniserPath
 
 

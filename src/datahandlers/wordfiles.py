@@ -1,14 +1,14 @@
-from typing import Iterable, TextIO, List, Tuple
-from collections import Counter, defaultdict
+from typing import Iterable, TextIO, List, Tuple, Optional, Callable, Dict
+from collections import Counter
 
 import re
 import time
 import gc
 from tqdm.auto import tqdm
 
-from src.auxiliary.paths import *
-from src.visualisation.timing import timeit
-from src.visualisation.printing import wprint, intsep
+from src.project.paths import *
+from src.auxiliary.timing import timeit
+from src.auxiliary.printing import wprint, intsep
 
 
 def iterableToWordsFile(line_iterable: Iterable[str], output_file: Path,
@@ -350,19 +350,15 @@ def recomposeAccents(word_file: Path):
     saveWordsFile(new_counts, word_file)
 
 
-def reaccentWordFile(word_file: Path):
+def reaccentWordFile(word_file: Path, lemmata_with_accents: Iterable[str]):
     """
-    Uses the lemmata generated in the morphologyGenerator, which presumably come from a corpus WITH accents, to put
-    accents into the word file at those lemmata.
+    Uses lemmata which presumably come from a corpus WITH accents, to put accents into the word file at those lemmata.
     """
     import tokenizers.normalizers as tn
-    from src.auxiliary.config import morphologyGenerator
-
     normalizer = tn.Sequence([tn.NFD(), tn.StripAccents()])  # Need the "D" because it "D"ecomposes an accented letter into the letter and its accent, e.g. ä -> a¨ (in Unicode, that looks like: ä)
 
     accent_map = dict()
-    for obj in morphologyGenerator():
-        lemma = obj.lemma()
+    for lemma in lemmata_with_accents:
         if ACCENTS.search(lemma):
             accent_map[normalizer.normalize_str(lemma)] = lemma
     print(accent_map)
@@ -418,3 +414,70 @@ def wordfileToBpeCorpus(wordfile: Path, do_pretokenise=False) -> Iterable[str]:
                 diff      = count - new_count
                 count -= diff
                 yield diff*(" " + word)
+
+
+def intersectLexiconCounts(all_lemmata_wordfile: Path,
+                           subset_lexicon: Iterable[str], subset_name: str) -> Optional[Counter]:
+    """
+    Get the intersection between the morphological lexicon and the word count lexicon.
+
+    Why would you not use the counts from the morphological lexicon (if it has them in the first place)?
+        - Frequencies in e-Lex are often 0, and the max (for "de" and "en") is 250k.
+        - Frequencies in OSCAR have max ~250M, which is 1000x more information. According to Zipf's law, all counts should have
+          increased proportionally, meaning their relative contribution is the same (~ 1/rank), so any weighting done with
+          a larger corpus shouldn't skew towards the higher frequencies.
+
+    Here's what we could do:
+        1. Collect all surface forms for a lemma in e-Lex that has morphology.
+        2. Use OSCAR's cleaned frequencies to assign those counts.
+        3. Sum the counts per lemma and store that as lemma weights.
+        4. Recalculate the above metric using the frequencies.
+
+    An easier way, purely matching on lemmas:
+        1. Find lemma in OSCAR.
+        2. Use that frequency.
+    Note that this approach neglects all verb conjugations and all plural nouns.
+    """
+    if all_lemmata_wordfile is None:  # Impossible to identify which cache file it would be.
+        return None
+
+    cache_path = PATH_DATA_TEMP / f"{all_lemmata_wordfile.stem} ⊗ {subset_name}.txt"  # Path depends on the two files it intersects, otherwise it would be used even if you switched languages.
+    if not cache_path.exists():
+        if not all_lemmata_wordfile.exists():  # Impossible to fill the cache.
+            return None
+
+        counter = Counter()
+
+        # Collect subset
+        for w in subset_lexicon:
+            counter[w] = 1  # We effectively add the lexicon to the corpus.
+
+        # Look up their counts
+        with open(all_lemmata_wordfile, "r", encoding="utf-8") as handle:
+            for word, count in iterateWordsFile(handle):
+                if word in counter:
+                    counter[word] += int(count)
+
+        # Cache these filtered counts
+        with open(cache_path, "w", encoding="utf-8") as handle:
+            for word, count in counter.items():
+                handle.write(f"{word} {count}\n")
+
+    return wordsFileToCounter(cache_path)
+
+
+def loadAndWeightLexicon(all_lemmata_wordfile: Path,
+                         subset_lexicon: Iterable[str], subset_name: str,
+                         reweighting_function: Callable[[float],float]) -> Dict[str, float]:
+    """
+    Takes care of converting word counts (integers) to weights (floats)
+    and returns a queriable object even if no counts exist.
+    """
+    lemma_weights = intersectLexiconCounts(all_lemmata_wordfile, subset_lexicon, subset_name)  # Fill the cache.
+    if lemma_weights is None:  # Possible if there was no weights file found.
+        return dict()
+    else:
+        lemma_weights = dict(lemma_weights)
+        for word, frequency in lemma_weights.items():
+            lemma_weights[word] = reweighting_function(frequency)  # Note that it's only disallowed to ADD items in an iterable, not change them.
+        return lemma_weights

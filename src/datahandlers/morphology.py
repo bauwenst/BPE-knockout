@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 from src.datahandlers.hf_corpora import normalizer
-from src.visualisation.printing import PrintTable, warn
+from src.auxiliary.printing import PrintTable, warn
 
 DO_WARNINGS = False
 

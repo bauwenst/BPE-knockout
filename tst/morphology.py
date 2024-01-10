@@ -81,7 +81,7 @@ def test_alignments():
 
 
 def test_all():
-    from src.auxiliary.config import morphologyGenerator
+    from src.project.config import morphologyGenerator
 
     table = PrintTable()
     for o in morphologyGenerator():

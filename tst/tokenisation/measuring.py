@@ -1,16 +1,14 @@
-import re
-from collections import Counter
 from typing import Callable, Dict, Optional
 from dataclasses import dataclass
 
-from src.visualisation.timing import timeit
 from src.datahandlers.morphology import *
 from src.datahandlers.wordfiles import *
 from src.datahandlers.holdout import Holdout
-from src.auxiliary.paths import *
-from src.auxiliary.config import Pℛ𝒪𝒥ℰ𝒞𝒯, morphologyGenerator
+from src.project.paths import *
+from src.project.config import morphologyGenerator, lexiconWeights
 from src.auxiliary.robbert_tokenizer import robbert_tokenizer
 from src.auxiliary.tokenizer_interface import tokenizeAsWord, BasicStringTokeniser
+
 
 # Segmentation kernel
 SPLIT_MARKER = "|"
@@ -101,71 +99,6 @@ class SegmentationConfusionMatrix:
         tuples = [matrix.compute() for matrix in matrices]
         precisions, recalls, f1s = zip(*tuples)
         return sum(precisions)/n, sum(recalls)/n, sum(f1s)/n
-
-
-# Weight setup
-def intersectLexiconCounts() -> Optional[Counter]:
-    """
-    Get the intersection between the morphological lexicon and the word count lexicon.
-
-    Why would you not use the counts from the morphological lexicon (if it has them in the first place)?
-        - Frequencies in e-Lex are often 0, and the max (for "de" and "en") is 250k.
-        - Frequencies in OSCAR have max ~250M, which is 1000x more information. According to Zipf's law, all counts should have
-          increased proportionally, meaning their relative contribution is the same (~ 1/rank), so any weighting done with
-          a larger corpus shouldn't skew towards the higher frequencies.
-
-    Here's what we could do:
-        1. Collect all surface forms for a lemma in e-Lex that has morphology.
-        2. Use OSCAR's cleaned frequencies to assign those counts.
-        3. Sum the counts per lemma and store that as lemma weights.
-        4. Recalculate the above metric using the frequencies.
-
-    An easier way, purely matching on lemmas:
-        1. Find lemma in OSCAR.
-        2. Use that frequency.
-    Note that this approach neglects all verb conjugations and all plural nouns.
-    """
-    if Pℛ𝒪𝒥ℰ𝒞𝒯.config.lemma_weights is None:  # Impossible to identify which cache file it would be.
-        return None
-
-    cache_path = PATH_DATA_TEMP / f"{Pℛ𝒪𝒥ℰ𝒞𝒯.config.lemma_weights.stem} ⊗ {Pℛ𝒪𝒥ℰ𝒞𝒯.config.morphologies.stem}.txt"  # Path depends on the two files it intersects, otherwise it would be used even if you switched languages.
-    if not cache_path.exists():
-        if not Pℛ𝒪𝒥ℰ𝒞𝒯.config.lemma_weights.exists():  # Impossible to fill the cache.
-            return None
-
-        counter = Counter()
-
-        # Collect lemmata with morphologies
-        for obj in morphologyGenerator():
-            counter[obj.lemma()] = 1  # We effectively add the lexicon to the corpus.
-
-        # Look up their counts
-        with open(Pℛ𝒪𝒥ℰ𝒞𝒯.config.lemma_weights, "r", encoding="utf-8") as handle:
-            for word, count in iterateWordsFile(handle):
-                if word in counter:
-                    counter[word] += int(count)
-
-        # Cache these filtered counts
-        with open(cache_path, "w", encoding="utf-8") as handle:
-            for word, count in counter.items():
-                handle.write(f"{word} {count}\n")
-
-    return wordsFileToCounter(cache_path)
-
-
-def loadAndWeightLexicon(reweighting_function: Callable[[float],float]) -> Dict[str, float]:
-    """
-    Takes care of converting word counts (integers) to weights (floats)
-    and returns a queriable object even if no counts exist.
-    """
-    lemma_weights = intersectLexiconCounts()  # Fill the cache using the config.
-    if lemma_weights is None:  # Possible if there was no weights file found.
-        return dict()
-    else:
-        lemma_weights = dict(lemma_weights)
-        for word, frequency in lemma_weights.items():
-            lemma_weights[word] = reweighting_function(frequency)  # Note that it's only disallowed to ADD items in an iterable, not change them.
-        return lemma_weights
 
 
 #########################
@@ -259,10 +192,9 @@ def test_tokenizers_batch(tkzrs: List[BasicStringTokeniser], reweighting_functio
                                  used in the config is used in BTE training and nobody says that it needs to be equal here.
     """
     wprint(f"Batch evaluation of {len(tkzrs)} tokenisers...")
-    import time
 
     # Load weights
-    lemma_weights = loadAndWeightLexicon(reweighting_function) if reweighting_function is not None else None  # If it is None, this is used as a signal to say "I don't want weighting".
+    lemma_weights = lexiconWeights(reweighting_function) if reweighting_function is not None else None  # If it is None, this is used as a signal to say "I don't want weighting".
 
     # Evaluation loop
     results = []

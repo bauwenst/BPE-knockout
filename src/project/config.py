@@ -10,15 +10,16 @@ It itself cannot run anything. Imputation should only be done by calling its
 functions.
 """
 from dataclasses import dataclass
-from typing import Callable, Type, Optional, Iterable, Dict, Tuple, List
+from typing import Callable, Type, Optional, Iterable, Dict
 import json
 import math
 import langcodes
 
 # None of the below files import the config.
-from src.auxiliary.paths import *
-from src.auxiliary.tokenizer_interface import TokeniserPath, SennrichTokeniserPath, HuggingFaceTokeniserPath
+from src.project.paths import *
+from src.auxiliary.tokenizer_interface import TokeniserPath, SennrichTokeniserPath
 from src.datahandlers.morphology import LemmaMorphology, CelexLemmaMorphology
+from src.datahandlers.wordfiles import loadAndWeightLexicon
 
 
 @dataclass
@@ -148,11 +149,13 @@ def morphologyGenerator(**kwargs) -> Iterable[LemmaMorphology]:
     return Pℛ𝒪𝒥ℰ𝒞𝒯.config.parser.generator(Pℛ𝒪𝒥ℰ𝒞𝒯.config.morphologies, **kwargs)  # https://discuss.python.org/t/difference-between-return-generator-vs-yield-from-generator/2997
 
 
-def lexiconWeights() -> Dict[str, float]:
+def lexiconWeights(override_reweighter: Callable[[float],float]=None) -> Dict[str, float]:
     """
-    Alias for loadAndWeightLexicon that automatically uses the project's reweighting function.
-    Note that internally, loadAndWeightLexicon calls intersectLexiconCounts which itself automatically uses
-    the project's file path for word counts and which internally calls morphologyGenerator.
+    Alias for loadAndWeightLexicon that automatically uses the project's word file, morphologies, and reweighting function.
     """
-    from src.auxiliary.measuring import loadAndWeightLexicon
-    return loadAndWeightLexicon(Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
+    return loadAndWeightLexicon(
+        all_lemmata_wordfile=Pℛ𝒪𝒥ℰ𝒞𝒯.config.lemma_weights,
+        subset_lexicon=(obj.lemma() for obj in morphologyGenerator()),
+        subset_name=Pℛ𝒪𝒥ℰ𝒞𝒯.config.morphologies.stem,
+        reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter if override_reweighter is None else override_reweighter
+    )

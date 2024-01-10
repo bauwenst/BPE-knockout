@@ -1,14 +1,16 @@
 import itertools
 import math
-import re
 import scipy
 
-from src.visualisation.graphing import *
+from tst.visualisation.graphing import *
+from tst.tokenisation.measuring import *
+
 from src.knockout.knockout import *
-from src.auxiliary.measuring import *
+from src.auxiliary.printing import lprint
 from src.auxiliary.robbert_tokenizer import robbert_tokenizer, getMergeList_RobBERT
 from src.auxiliary.tokenizer_interface import tokenizeAsWord
-from src.auxiliary.config import Pℛ𝒪𝒥ℰ𝒞𝒯, morphologyGenerator, setupEnglish, setupDutch, setupGerman, ProjectConfig
+from src.project.config import Pℛ𝒪𝒥ℰ𝒞𝒯, morphologyGenerator, lexiconWeights, setupEnglish, setupDutch, setupGerman, ProjectConfig
+from src.project.paths import PATH_DATA_TEMP
 from src.datahandlers.wordfiles import ACCENTS
 
 
@@ -77,8 +79,6 @@ def visualise():
 
 
 def test_save_and_load():
-    from src.auxiliary.paths import PATH_DATA_TEMP
-
     bte = BTE(init_config=BteInitConfig(knockout=RefMode.MORPHEMIC), autorun_modes=True)
     print(bte.vocab_size)
     out_path = bte.save(PATH_DATA_TEMP)
@@ -152,10 +152,6 @@ def test_chainEffect():
                 \--- M4
         wherein M1-M2 and M3-M5 are two separate chains.
     """
-    from typing import List
-    from src.knockout.knockout import BTE, BteInitConfig, Merge
-    from src.visualisation.printing import lprint
-
     bte = BTE(BteInitConfig())
     singletons_in_order = [merge for merge in bte.merge_graph.merges if len(bte.merge_graph.merges_with[merge.childType()]) == 1]
     singletons = {merge.childType(): merge for merge in singletons_in_order}
@@ -815,7 +811,7 @@ def main_wholeWordCeiling():
     table = Table("lexemic-ceilings")
     for language in getAllConfigs():
         with TemporaryContext(language):
-            weights = loadAndWeightLexicon(Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
+            weights = lexiconWeights(Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
             cm   = SegmentationConfusionMatrix()
             cm_w = SegmentationConfusionMatrix()
 

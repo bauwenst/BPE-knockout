@@ -1,11 +1,10 @@
 import json
-from pathlib import Path
-from typing import Dict, Set, Tuple
+from typing import Dict
 
 from tokenizers import Tokenizer, models, normalizers, pre_tokenizers, trainers
 
-from src.auxiliary.paths import *
-from src.auxiliary.config import SennrichTokeniserPath, HuggingFaceTokeniserPath
+from src.project.paths import *
+from src.project.config import SennrichTokeniserPath, HuggingFaceTokeniserPath
 from src.datahandlers.wordfiles import wordfileToBpeCorpus
 from lib.sbpe.learn_bpe import learn_bpe, SowEowSpecification
 

@@ -2,5 +2,5 @@ from fiject import *  # Fiject project found at https://github.com/bauwenst/fije
 from fiject import setFijectOutputFolder, FIJECT_DEFAULTS
 from fiject.visuals.tables import ColumnStyle
 
-from src.auxiliary.paths import PATH_DATA_OUT
+from src.project.paths import PATH_DATA_OUT
 setFijectOutputFolder(PATH_DATA_OUT)

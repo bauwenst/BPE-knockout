@@ -21,17 +21,17 @@ import time
 from collections import Counter
 from pathlib import Path
 from tqdm.auto import tqdm
+import re
 
 from src.datahandlers.holdout import Holdout
 from src.datahandlers.morphology import LexSplit, MorphSplit
-from src.auxiliary.measuring import SPLIT_MARKER_RE, SPLIT_MARKER
-from src.auxiliary.config import Pℛ𝒪𝒥ℰ𝒞𝒯, lexiconWeights, morphologyGenerator
+from src.project.config import Pℛ𝒪𝒥ℰ𝒞𝒯, lexiconWeights, morphologyGenerator
 from src.auxiliary.tokenizer_interface import BasicStringTokeniser, Evaluator
 from src.auxiliary.bytemapping import simplifiedByteMapper
 from tokenizers.decoders import ByteLevel as ByteLevelDecoder  # The simplified byte mapper above suffices for Dutch/German.
 from tokenizers.pre_tokenizers import ByteLevel as ByteLevelPretokeniser
 
-from src.visualisation.printing import doPrint, PrintTable, wprint
+from src.auxiliary.printing import doPrint, wprint
 
 
 SOW = "Ġ"
@@ -280,6 +280,9 @@ class BteInitConfig:
     weighted_training: bool = False
     bytebased: ByteBasedMode = ByteBasedMode.INPUT_TO_BYTES  # Because all our tests assume byte-based vocabularies, we use this as default to not specify it every time.
 
+
+SPLIT_MARKER = "|"
+SPLIT_MARKER_RE = re.compile(re.escape(SPLIT_MARKER))
 
 class BTE(BasicStringTokeniser):
     """
@@ -619,7 +622,7 @@ class BTE(BasicStringTokeniser):
         Iterative knockout, with attempts to turn tuple merges back into binary merges (reification) in between.
 
         TODO: The reification part should become a separate function.
-        TODO: The testing code for this should become part of tst.knockout
+        TODO: The testing code for this, currently in draft.py, should become part of tst.knockout
         TODO: This function is currently only called by draft functions with autorun_modes=False. Ideally, because iterative
               knockout is a superset of knockout, you can add stuff to the config and then have this function actually be the main runner.
         ---

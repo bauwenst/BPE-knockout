@@ -13,8 +13,8 @@ from src.auxiliary.robbert_tokenizer import robbert_tokenizer
 from src.auxiliary.tokenizer_interface import tokenizeAsWord
 from src.auxiliary.bytemapping import *
 from src.knockout.knockout import BTE, BteInitConfig, RefMode, ByteBasedMode
-from src.visualisation.timing import timeit
-from src.visualisation.graphing import LineGraph, CacheMode
+from src.auxiliary.timing import timeit
+from tst.visualisation.graphing import LineGraph, CacheMode
 
 
 def robbert():
@@ -178,7 +178,7 @@ def testMapping():
 
 
 def convertMerges():
-    from src.auxiliary.paths import PATH_DATA_MODELBASE
+    from src.project.paths import PATH_DATA_MODELBASE
 
     changed = 0
     with open(PATH_DATA_MODELBASE / "robbert" / "merges.txt", "r", encoding="utf-8") as handle:

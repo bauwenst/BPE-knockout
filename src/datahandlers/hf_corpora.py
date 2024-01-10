@@ -1,6 +1,3 @@
-from typing import Callable
-
-import numpy.random as npr
 from datasets import load_dataset, Dataset, IterableDataset
 from torch.utils.data import DataLoader
 from tokenizers import Regex
@@ -8,7 +5,7 @@ import tokenizers.normalizers as tn
 import tokenizers.pre_tokenizers as tp
 
 from src.datahandlers.wordfiles import *
-from src.visualisation.printing import *
+from src.auxiliary.printing import *
 
 
 # https://huggingface.co/docs/tokenizers/components
@@ -51,6 +48,7 @@ def generateDataloader_Oscar(lang: str="nl", sentence_preprocessor: Callable[[st
                 data = data.shuffle(seed=0)
                 indices = range(size_limit)
                 # 10s of millions of indices is >100 MiB of memory. HuggingFace .shuffle() caches indices for a reason.
+                # import numpy.random as npr
                 # rng = npr.default_rng(seed=0)
                 # indices = rng.choice(len(data), size=size_limit, replace=False)
             else:
@@ -108,17 +106,3 @@ def punctuationPretokeniserExceptHyphens():
         return " ".join([w.strip() for w, _ in pretokeniser.pre_tokenize_str(normalizer.normalize_str(s))])
 
     return wordSeparator
-
-
-if __name__ == "__main__":
-    from src.auxiliary.paths import *
-    from src.visualisation.timing import Timer
-
-    # TODO: Run this for English.
-    t = Timer()
-    t.start(echo=True)
-    dataloader, size = generateDataloader_Oscar(lang="en", sentence_preprocessor=punctuationPretokeniserExceptHyphens(),
-                                                size_limit=30_000_000)
-    t.lap(echo=True)
-    dataloaderToWeights(dataloader, output_stem="oscar-en-raw", progress_bar_total=size)
-    t.lap(echo=True)
