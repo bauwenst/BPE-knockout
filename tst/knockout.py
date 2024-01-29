@@ -9,8 +9,10 @@ from src.knockout.knockout import *
 from src.auxiliary.printing import lprint
 from src.auxiliary.robbert_tokenizer import robbert_tokenizer, getMergeList_RobBERT
 from src.auxiliary.tokenizer_interface import tokenizeAsWord
-from src.project.config import Pℛ𝒪𝒥ℰ𝒞𝒯, morphologyGenerator, lexiconWeights, setupEnglish, setupDutch, setupGerman, ProjectConfig
+
+from src.project.config import Pℛ𝒪𝒥ℰ𝒞𝒯, morphologyGenerator, lexiconWeights, setupEnglish, setupDutch, setupGerman, ProjectConfig, TemporaryContext
 from src.project.paths import PATH_DATA_TEMP
+
 from src.datahandlers.wordfiles import ACCENTS
 
 
@@ -211,20 +213,6 @@ def test_chainEffect():
 ##############################################################################
 
 
-class TemporaryContext:
-
-    def __init__(self, context: ProjectConfig):
-        self.old_context = None
-        self.new_context = context
-
-    def __enter__(self):
-        self.old_context = Pℛ𝒪𝒥ℰ𝒞𝒯.config
-        Pℛ𝒪𝒥ℰ𝒞𝒯.config = self.new_context
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        Pℛ𝒪𝒥ℰ𝒞𝒯.config = self.old_context
-
-
 ROW_NAME_BASE = "base"  # could also use --
 COLUMN_NAME_M = "morphemic"
 COLUMN_NAME_L = "whole-word"
@@ -302,13 +290,15 @@ def commitEvaluationTable(table: Table):
 ##############################################################################
 
 @timeit
-def main_datasetStats():
+def main_datasetStats(include_monomorphemic=True):
     histo = MultiHistogram("languages-morph-per-word", caching=CacheMode.IF_MISSING)
     if histo.needs_computation:
         for language in getAllConfigs():
             with TemporaryContext(language):
                 for obj in morphologyGenerator():
-                    histo.add(language.language_name, len(obj.morphSplit().split()))
+                    n = len(obj.morphSplit().split())
+                    if include_monomorphemic or n != 1:
+                        histo.add(language.language_name, n)
 
     print(histo.toDataframe().groupby(FIJECT_DEFAULTS.LEGEND_TITLE_CLASS).describe())
     histo.commit_histplot(center_ticks=True, relative_counts=True, x_lims=(0.5,6.5),
