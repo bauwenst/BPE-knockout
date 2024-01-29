@@ -399,6 +399,25 @@ def main_baseVocabStats():
 
 
 @timeit
+def main_effectiveDropoutRate():
+    bte = BTE(BteInitConfig(knockout=RefMode.MORPHEMIC), autorun_modes=False)
+
+    total_merges               = 0
+    total_dropped_merges       = 0
+    total_applications         = 0
+    total_dropped_applications = 0
+    for R, N, m in bte.getBadOldMerges(relative_blame_threshold=0.0):
+        total_applications += N
+        total_merges += 1
+        if R >= 0.5:
+            total_dropped_applications += N
+            total_dropped_merges += 1
+
+    print(f"Merge dropout rate: {total_dropped_applications}/{total_applications} = {total_dropped_applications/total_applications}")
+    print(f"Vocab dropout rate: {total_dropped_merges}/{total_merges} = {total_dropped_merges/total_merges}")
+
+
+@timeit
 def main_intrinsicModes():
     """
     Test all combinations of annealing and knockout on intrinsic metrics (morphological Pr-Re-F1).

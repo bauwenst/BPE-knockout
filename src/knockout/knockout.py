@@ -34,6 +34,7 @@ from tokenizers.pre_tokenizers import ByteLevel as ByteLevelPretokeniser
 from src.auxiliary.printing import doPrint, wprint
 
 
+log = doPrint(False)
 SOW = "Ġ"
 MergeAsTuple = Tuple[int, str, str]
 
@@ -265,6 +266,12 @@ class ByteBasedMode(str, Enum):
         return word_preprocessor, tokens_to_word
 
 
+class ReifyMode(str, Enum):
+    NONE                 = 1
+    BACKWARDS_COMPATIBLE = 2  # Reify only those merges available after knockout that already exist.
+    ALL                  = 3  # Reify any available merges after knockout.
+
+
 @dataclasses.dataclass
 class BteInitConfig:
     """
@@ -275,6 +282,9 @@ class BteInitConfig:
     """
     knockout: RefMode = RefMode.NONE
     anneal:   RefMode = RefMode.NONE
+    reify:  ReifyMode = ReifyMode.NONE
+    iterations: int = 1
+
     do_swap_stages:   bool = False
     keep_long_merges: bool = False
     weighted_training: bool = False
@@ -315,6 +325,8 @@ class BTE(BasicStringTokeniser):
                     + ("-knockout-" + RefMode.toLetter(self.config.knockout))*(do_prune and not self.config.do_swap_stages)\
                     + ("-anneal-"   + RefMode.toLetter(self.config.anneal))  * do_anneal \
                     + ("-knockout-" + RefMode.toLetter(self.config.knockout))*(do_prune and self.config.do_swap_stages)\
+                    + ("-reify"                                             *(self.config.reify != ReifyMode.NONE))\
+                    + f"_x{self.config.iterations}"\
                     + (f"_{int(100*holdout.threshold)}-{int(100-100*holdout.threshold)}-holdout" if holdout is not None else "")\
                     + "_keeptrivial"*self.config.keep_long_merges
 
@@ -338,16 +350,19 @@ class BTE(BasicStringTokeniser):
             self.runModes()
 
     def runModes(self):
-        if not self.config.do_swap_stages:
-            if self.knockout_segmentation is not None:
-                self.prune()
-            if self.anneal_segmentation is not None:
-                self.anneal()
-        else:
-            if self.anneal_segmentation is not None:
-                self.anneal()
-            if self.knockout_segmentation is not None:
-                self.prune()
+        self.iterative(self.config.iterations)
+
+        # TODO: We need compatibility with annealing, but how?
+        # if not self.config.do_swap_stages:
+        #     if self.knockout_segmentation is not None:
+        #         self.prune()
+        #     if self.anneal_segmentation is not None:
+        #         self.anneal()
+        # else:
+        #     if self.anneal_segmentation is not None:
+        #         self.anneal()
+        #     if self.knockout_segmentation is not None:
+        #         self.prune()
 
     def syncWithGraph(self):
         """
@@ -465,7 +480,6 @@ class BTE(BasicStringTokeniser):
 
         Can be repeated before and after knockout; there will always be merges to blame.
         """
-        prnt = doPrint(False)
         weights = lexiconWeights() if self.config.weighted_training else dict()
 
         merge_lookup = {m.priority: m for m in self.merge_graph.merges}
@@ -475,7 +489,7 @@ class BTE(BasicStringTokeniser):
         for obj in self.holdout(morphologyGenerator(), train=True):
             lemma = obj.lemma()
             weight = weights.get(lemma, 1)
-            prnt(lemma)
+            log(lemma)
 
             # Get morphological split
             reference_segmentation = self.knockout_segmentation(obj)
@@ -498,14 +512,14 @@ class BTE(BasicStringTokeniser):
             indices_that_shouldve_never_merged = {index//2 for index in ref_split_indices - bpe_split_indices}  # In an ideal tokeniser, subtracting the BPE split positions should result in an empty set. When it doesn't, BPE is missing split positions, i.e., it merged too many.
 
             # Blame the merges that caused these indices to contract.
-            prnt("\t", reference_segmentation, "->", bpe_segmentation)
-            prnt("\t", merge_ids)
+            log("\t", reference_segmentation, "->", bpe_segmentation)
+            log("\t", merge_ids)
             for merge_id in merge_ids.values():
                 total[merge_id] += weight  # FIXME: This should not error since my fix.
             for index in indices_that_shouldve_never_merged:
                 merge_id = merge_ids[index]
                 blame[merge_id] += weight
-                prnt("\t", f"Blamed: space after '{lemma[index]}' merged by", merge_lookup[merge_ids[index]])
+                log("\t", f"Blamed: space after '{lemma[index]}' merged by", merge_lookup[merge_ids[index]])
 
         # Calculate ratios
         blame_ratios = dict()
@@ -534,7 +548,6 @@ class BTE(BasicStringTokeniser):
             ade+mb and mb+uis
         yet by merging those together, you don't get the correct split.
         """
-        prnt = doPrint(False)
         weights = lexiconWeights() if self.config.weighted_training else dict()
 
         do_fuse_spans = False  # Not sure how you would count "total" for this one, unless in a second pass when you already know all the merge spans.
@@ -544,7 +557,7 @@ class BTE(BasicStringTokeniser):
         for obj in self.holdout(morphologyGenerator(), train=True):
             lemma = obj.lemma()
             weight = weights.get(lemma, 1)
-            prnt(lemma)
+            log(lemma)
 
             # Get morphological split
             reference_segmentation = self.anneal_segmentation(obj)
@@ -591,16 +604,16 @@ class BTE(BasicStringTokeniser):
                 # spans         = list(zip(boundaries[:-1], boundaries[1:]))
 
             # Counting, finally.
-            prnt(bpe_segmentation, "->", reference_segmentation)
+            log(bpe_segmentation, "->", reference_segmentation)
             for span_start,span_end in token_spans_to_merge:
                 merge_string = " ".join(tokens[span_start:span_end+1])
                 amenability_count[merge_string] += weight
-                prnt("\tAmenable:", merge_string)
+                log("\tAmenable:", merge_string)
 
             for start_token,end_token in zip(tokens[:-1], tokens[1:]):
                 merge_string = start_token + " " + end_token
                 total_count[merge_string] += weight
-                prnt("\tTotal:", start_token, end_token)
+                log("\tTotal:", start_token, end_token)
 
         print("Found", len(total_count), "token combos of which", len(amenability_count), "mended at least one gap.")
 
@@ -617,11 +630,10 @@ class BTE(BasicStringTokeniser):
         results.sort(reverse=True)
         return results
 
-    def iterative(self, iterations: int=10, backwards_compatible: bool=False, evaluator: Evaluator=None):
+    def iterative(self, iterations: int=10, evaluator: Evaluator=None):
         """
         Iterative knockout, with attempts to turn tuple merges back into binary merges (reification) in between.
 
-        TODO: The reification part should become a separate function.
         TODO: The testing code for this, currently in draft.py, should become part of tst.knockout
         TODO: This function is currently only called by draft functions with autorun_modes=False. Ideally, because iterative
               knockout is a superset of knockout, you can add stuff to the config and then have this function actually be the main runner.
@@ -673,14 +685,15 @@ class BTE(BasicStringTokeniser):
         Do note that other merges are affected by any reordering, but we will assume this isn't detrimental as long as we don't disable them.
         To test if a merge has been fully disabled, a simple check is to see if the subword as a string can still be merged.
         """
-        prnt = doPrint(False)
+        if evaluator:
+            evaluator.evaluate(self, self.holdout, [f"{0} it", "base"])
 
         # Stopping conditions
         END_IF_NO_MORE_DELETIONS = False  # If False, it's possible to just be reifying merges recursively (you reify, do no knockout, then reify again). Note that it's possible to have no knockout in one iteration, but do knockout in the next after adding some novel merges.
         END_IF_NO_MORE_ADDITIONS = False  # If True, will cause early stopping when there are no more non-disqualified merges to be suggested, or when all that are suggested exist above their triplet.
         DO_KNOCKOUT_IF_NOT_ENDED_ON_IT = True  # Recommendable because the latest additions might be morphologically bad.
+        needs_final_knockout = True
 
-        ended_on_knockout = False
         all_disqualified_merges: Set[str] = set()  # Cache merges that mustn't be retried.
         for iteration in range(1, iterations+1):
             print(f"\n=== ITERATION {iteration} ===")
@@ -688,140 +701,148 @@ class BTE(BasicStringTokeniser):
             # --- KNOCKOUT PHASE ---
             bad_merges = [m for _, _, m in self.getBadOldMerges()]
             self._removeMerges(bad_merges)
-
-            all_disqualified_merges.update(" ".join(m.parts) for m in bad_merges)
-            ended_on_knockout = True
+            needs_final_knockout = False
 
             if END_IF_NO_MORE_DELETIONS and not bad_merges:
                 print("Early stop: no merges knocked out.")
                 break
 
-            # TODO: Ideally, there is an "if not do_reify: continue" check right here. The problem is that the evaluator
-            #       for knockout appears only after reification, and I don't want to nest the reification code inside an "if do_reify".
-            #       Solved if you can move the part that reifies to a function, but then that function needs to include the sync call.
-
-            # --- REIFICATION PHASE ---
-            # In the remaining merges, check which submerges they suggest that aren't disqualified.
-            # E.g.: there used to be a merge bru + ids. The merge id + s was knocked out.
-            #       - There is now a triplet merge bru + id + s.
-            #       - The submerge id + s is disqualified.
-            #       - The submerge bru + id is available.
-            # In the code below, when I use "triplet", I mean "thing with submerges". Often it has more than 3 subwords,
-            # even after just one iteration of knockout, meaning it also suggests more than one submerge.
-            suggested_merge_strings: Dict[str, Set[Merge]] = dict()
-            for m in self.merge_graph.merges:
-                if len(m.parts) == 2:  # Shortcut; we know that no extra binary merge can be added between the parts because m is literally that merge.
-                    continue
-
-                for p1, p2 in zip(m.parts[:-1], m.parts[1:]):
-                    new_binary_merge = p1 + " " + p2
-                    if new_binary_merge not in all_disqualified_merges:  # Aha, this is a valid merge to try!
-                        suggested_merge_strings.setdefault(new_binary_merge, set()).add(m)  # Using a set because the same submerge can appear multiple times in one triplet.
-
-            # Implementation of case 2 and a weak version of case 1.
-            #   - Check if submerge doesn't already exist.
-            #       - If no: execute case 2 (make the merge with slightly lower priority than the lowest triplet it appears in).
-            #       - If yes: check for each triplet it appears in whether it is below it.
-            #           - If yes, replace it in the triplet. Not because the triplet results in a different token with or without it, but rather because right now it is preventing the triplet from being applied at all.
-            #           - If not, don't do anything (the triplet stays a triplet like vanilla BPE-knockout, and will steal a fraction of all pairs that would go to the merge).
-            existing_merge_strings = {" ".join(m.parts) for m in self.merge_graph.merges}
-            any_merge_changed = False
-            for merge_string, triplets_this_appears_in in tqdm(suggested_merge_strings.items(), desc="REIFICATION"):
-                parts = merge_string.split()
-                subtype = "".join(parts)
-
-                # First of all: it is possible that another submerge took away the opportunity to do this submerge in some of
-                # the triplets (e.g. triplet a+b+c+d with suggested merge strings b+c and c+d, and b+c has been carried through
-                # in a previous iteration of this loop), so the submerge appears in 0 positions. On the other hand, it might
-                # appear not just in one position, but multiple. Both detections are made with the following dict.
-                indices_occurs_in_triplet: Dict[Merge, List[int]] = dict()
-                for triplet in triplets_this_appears_in:
-                    ignore = False  # A sequence of parts like a+a+a+a only counts as two merges a+a a+a, not three.
-                    for idx, (p1, p2) in enumerate(zip(triplet.parts[:-1], triplet.parts[1:])):
-                        if ignore:
-                            ignore = False
-                            continue
-                        if parts[0] == p1 and parts[1] == p2:  # The merges are all binary, so this is fine.
-                            indices_occurs_in_triplet.setdefault(triplet, []).append(idx)
-                            ignore = True
-
-                if len(indices_occurs_in_triplet) == 0:
-                    continue
-
-                # Make or find the new merge.
-                if merge_string not in existing_merge_strings:
-                    if backwards_compatible:  # Although yes, these merges will be suggested again and again, the overhead for this is minimal. It also has no effect on the outcome of the algorithm (e.g. early stopping) that these merges keep being detected as possible.
-                        continue
-
-                    prnt(f"Merge '{merge_string}' will be created.")
-                    submerge = self.merge_graph.addArc(merge_string)
-
-                    # Set the priority to be under the lowest triplet of all triplets that contain it.
-                    lowest_triplet = min(indices_occurs_in_triplet.keys())  # TODO: If this triplet is the lowest triplet for another submerge, that submerge will get the same priority... You probably want a heuristic to order these submerges of the same triplet, such that BPE does the best one first. Also, this problem cascades into more priority collisions when submerges create submerges themselves.
-                    submerge.priority = lowest_triplet.priority - 0.05
-                else:
-                    prnt(f"Merge '{merge_string}' already exists.")
-                    one_of_these = self.merge_graph.merges_of[subtype]
-                    submerge = None
-                    for merge in one_of_these:
-                        if merge.parts == parts:  # Equivalent to merge_string == " ".join(merge.parts)
-                            submerge = merge
-                            break
-                    assert submerge is not None
-
-                # In the triplets that are currently blocked by the existence of the submerge (a problem which vanilla BPE-knockout even has), replace the relevant parts by the submerge result.
-                for triplet in filter(lambda triplet: submerge < triplet, indices_occurs_in_triplet.keys()):
-                    # 1. Update the tuple inside the triplet's merge node.
-                    new_parts = []
-                    i = 0
-                    while i < len(triplet.parts):
-                        if i in indices_occurs_in_triplet[triplet]:
-                            new_parts.append(subtype)
-                            i += 2
-                            any_merge_changed = True
-                        else:
-                            new_parts.append(triplet.parts[i])
-                            i += 1
-                    triplet.parts = new_parts
-
-                    # 2. Link the subtype to the triplet if it isn't already (which would be the case for submerge a+b in a+b+c+ab, but I don't think that happens in practice).
-                    if triplet not in self.merge_graph.merges_with[subtype]:
-                        self.merge_graph.merges_with[subtype].append(triplet)
-                    else:
-                        print(triplet, "already known to part", subtype, "which should be impossible")
-                        assert False
-
-                    # 3. Unlink the parts of this new merge from the triplet (but only if such a part appears nowhere else in the triplet).
-                    for part in set(parts):  # In case of a merge like a+a.
-                        if part not in triplet.parts:
-                            self.merge_graph.merges_with[part].remove(triplet)
-
-            if END_IF_NO_MORE_ADDITIONS and not any_merge_changed:
-                print("Early stop: no new sub-merges available that weren't knocked out before, nor that exist below their triplet(s).")
-                break
-
-            if not bad_merges and not any_merge_changed:
-                print("Early stop: tokeniser fully converged (no more deletions, no more additions).")
-                break
-
-            # We know that in the above break conditions, no merges changed, so not having synced isn't a problem.
             if evaluator:
                 evaluator.evaluate(self, self.holdout, [f"{iteration} it", "+knockout"])
 
-            self.syncWithGraph()
-            ended_on_knockout = False
+            # --- REIFICATION PHASE ---
+            if self.config.reify == ReifyMode.NONE:
+                continue
+
+            all_disqualified_merges.update(" ".join(m.parts) for m in bad_merges)
+            applied_merges = self.reify(all_disqualified_merges)
+            needs_final_knockout = len(applied_merges) > 0
+
+            if END_IF_NO_MORE_ADDITIONS and not applied_merges:
+                print("Early stop: no new sub-merges available that weren't knocked out before, nor that exist below their triplet(s).")
+                break
+
+            if not bad_merges and not applied_merges:
+                print("Early stop: tokeniser fully converged (no more deletions, no more additions).")
+                break
 
             if evaluator:
                 evaluator.evaluate(self, self.holdout, [f"{iteration} it", "+reify"])
 
-        early_termination = ended_on_knockout
-        if not ended_on_knockout and DO_KNOCKOUT_IF_NOT_ENDED_ON_IT:
+        if needs_final_knockout and DO_KNOCKOUT_IF_NOT_ENDED_ON_IT:
             print("\n=== FINAL PRUNE ===")
             self.prune()
-            ended_on_knockout = True
+            if evaluator:
+                evaluator.evaluate(self, self.holdout, [f"{iteration+1} it", "+knockout"])
 
-        if evaluator and ended_on_knockout:  # Early termination or full loop with knockout at the end. Missing an evaluation, hence.
-            evaluator.evaluate(self, self.holdout, [f"{iteration + (not early_termination)} it", "+knockout"])
+    def reify(self, all_disqualified_merges: Set[str]=None):
+        """
+        In the remaining merges, check which submerges they suggest that aren't disqualified.
+        E.g.: there used to be a merge bru + ids. The merge id + s was knocked out.
+              - There is now a triplet merge bru + id + s.
+              - The submerge id + s is disqualified.
+              - The submerge bru + id is available.
+        In the code below, when I use "triplet", I mean "thing with submerges". Often it has more than 3 subwords,
+        even after just one iteration of knockout, meaning it also suggests more than one submerge.
+        """
+        if all_disqualified_merges is None:
+            all_disqualified_merges = set()
+
+        suggested_merge_strings: Dict[str, Set[Merge]] = dict()
+        for m in self.merge_graph.merges:
+            if len(m.parts) == 2:  # Shortcut; we know that no extra binary merge can be added between the parts because m is literally that merge.
+                continue
+
+            for p1, p2 in zip(m.parts[:-1], m.parts[1:]):
+                new_binary_merge = p1 + " " + p2
+                if new_binary_merge not in all_disqualified_merges:  # Aha, this is a valid merge to try!
+                    suggested_merge_strings.setdefault(new_binary_merge, set()).add(m)  # Using a set because the same submerge can appear multiple times in one triplet.
+
+        # Implementation of case 2 and a weak version of case 1.
+        #   - Check if submerge doesn't already exist.
+        #       - If no: execute case 2 (make the merge with slightly lower priority than the lowest triplet it appears in).
+        #       - If yes: check for each triplet it appears in whether it is below it.
+        #           - If yes, replace it in the triplet. Not because the triplet results in a different token with or without it, but rather because right now it is preventing the triplet from being applied at all.
+        #           - If not, don't do anything (the triplet stays a triplet like vanilla BPE-knockout, and will steal a fraction of all pairs that would go to the merge).
+        existing_merge_strings = {" ".join(m.parts) for m in self.merge_graph.merges}
+        applied_merges = set()
+        for merge_string, triplets_this_appears_in in tqdm(suggested_merge_strings.items(), desc="REIFICATION"):
+            parts = merge_string.split()
+            subtype = "".join(parts)
+
+            # First of all: it is possible that another submerge took away the opportunity to do this submerge in some of
+            # the triplets (e.g. triplet a+b+c+d with suggested merge strings b+c and c+d, and b+c has been carried through
+            # in a previous iteration of this loop), so the submerge appears in 0 positions. On the other hand, it might
+            # appear not just in one position, but multiple. Both detections are made with the following dict.
+            indices_occurs_in_triplet: Dict[Merge, List[int]] = dict()
+            for triplet in triplets_this_appears_in:
+                ignore = False  # A sequence of parts like a+a+a+a only counts as two merges a+a a+a, not three.
+                for idx, (p1, p2) in enumerate(zip(triplet.parts[:-1], triplet.parts[1:])):
+                    if ignore:
+                        ignore = False
+                        continue
+                    if parts[0] == p1 and parts[1] == p2:  # The merges are all binary, so this is fine.
+                        indices_occurs_in_triplet.setdefault(triplet, []).append(idx)
+                        ignore = True
+
+            if len(indices_occurs_in_triplet) == 0:
+                continue
+
+            # Make or find the new merge.
+            if merge_string not in existing_merge_strings:
+                if self.config.reify == ReifyMode.BACKWARDS_COMPATIBLE:  # Although yes, these merges will be suggested again and again, the overhead for this is minimal. It also has no effect on the outcome of the algorithm (e.g. early stopping) that these merges keep being detected as possible.
+                    continue
+
+                log(f"Merge '{merge_string}' will be created.")
+                submerge = self.merge_graph.addArc(merge_string)
+
+                # Set the priority to be under the lowest triplet of all triplets that contain it.
+                lowest_triplet = min(indices_occurs_in_triplet.keys())  # TODO: If this triplet is the lowest triplet for another submerge, that submerge will get the same priority... You probably want a heuristic to order these submerges of the same triplet, such that BPE does the best one first. Also, this problem cascades into more priority collisions when submerges create submerges themselves.
+                submerge.priority = lowest_triplet.priority - 0.05
+            else:
+                log(f"Merge '{merge_string}' already exists.")
+                one_of_these = self.merge_graph.merges_of[subtype]
+                submerge = None
+                for merge in one_of_these:
+                    if merge.parts == parts:  # Equivalent to merge_string == " ".join(merge.parts)
+                        submerge = merge
+                        break
+                assert submerge is not None
+
+            # In the triplets that are currently blocked by the existence of the submerge (a problem which vanilla BPE-knockout even has), replace the relevant parts by the submerge result.
+            merge_was_applied = False  # "was loop not empty"
+            for triplet in filter(lambda triplet: submerge < triplet, indices_occurs_in_triplet.keys()):
+                merge_was_applied = True
+
+                # 1. Update the tuple inside the triplet's merge node.
+                new_parts = []
+                i = 0
+                while i < len(triplet.parts):
+                    if i in indices_occurs_in_triplet[triplet]:
+                        new_parts.append(subtype)
+                        i += 2
+                    else:
+                        new_parts.append(triplet.parts[i])
+                        i += 1
+                triplet.parts = new_parts
+
+                # 2. Link the subtype to the triplet if it isn't already (which would be the case for submerge a+b in a+b+c+ab, but I don't think that happens in practice).
+                if triplet not in self.merge_graph.merges_with[subtype]:
+                    self.merge_graph.merges_with[subtype].append(triplet)
+                else:
+                    print(triplet, "already known to part", subtype, "which should be impossible")
+                    assert False
+
+                # 3. Unlink the parts of this new merge from the triplet (but only if such a part appears nowhere else in the triplet).
+                for part in set(parts):  # In case of a merge like a+a.
+                    if part not in triplet.parts:
+                        self.merge_graph.merges_with[part].remove(triplet)
+
+            if merge_was_applied:
+                applied_merges.add(submerge)
+
+        self.syncWithGraph()
+        return applied_merges
 
     def getDisabledTypes(self) -> List[str]:
         """

@@ -1,10 +1,10 @@
 import json
 from typing import Dict
 
-from tokenizers import Tokenizer, models, normalizers, pre_tokenizers, trainers
+from tokenizers import Tokenizer, models, normalizers, pre_tokenizers, trainers, decoders
 
 from src.project.paths import *
-from src.project.config import SennrichTokeniserPath, HuggingFaceTokeniserPath
+from src.auxiliary.tokenizer_interface import SennrichTokeniserPath, HuggingFaceTokeniserPath
 from src.datahandlers.wordfiles import wordfileToBpeCorpus
 from lib.sbpe.learn_bpe import learn_bpe, SowEowSpecification
 
@@ -92,8 +92,10 @@ class BPETrainer:
         tokeniser = Tokenizer(models.BPE())
         if self.byte_based:
             tokeniser.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False, trim_offsets=True)
+            tokeniser.decoder       = decoders.ByteLevel()
         else:
             tokeniser.pre_tokenizer = pre_tokenizers.Metaspace(replacement=SOW)
+            tokeniser.decoder       = decoders.Metaspace(replacement=SOW)
 
         # Trainer interface according to https://huggingface.co/docs/tokenizers/api/trainers (ignore the type hints that complain):
         trainer = trainers.BpeTrainer(

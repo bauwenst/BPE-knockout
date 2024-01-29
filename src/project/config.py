@@ -29,7 +29,7 @@ class ProjectConfig:
     # Text file that contains morphological decompositions (e.g. for CELEX, each line is a word, a space, and the "StrucLab" label).
     morphologies: Path
     # Text file that contains the frequencies of words in a large corpus. Each line is a word, a space, and an integer.
-    lemma_weights: Optional[Path]
+    lemma_counts: Optional[Path]
     # File(s) for constructing the base tokeniser (see above).
     base_tokeniser: TokeniserPath
     # Function to run over the frequencies to turn them into the weights that are used later on.
@@ -45,7 +45,7 @@ ZIPFIAN_WEIGHTER = lambda f: 1 + math.log10(f)
 def setupDutch() -> ProjectConfig:
     config = ProjectConfig(
         language_name="Dutch",
-        lemma_weights=PATH_DATA_COMPRESSED / "words_oscar-nl.txt",
+        lemma_counts=PATH_DATA_COMPRESSED / "words_oscar-nl.txt",
         morphologies=PATH_DATA_COMPRESSED / "celex_morphology_nl.txt",
         base_tokeniser=SennrichTokeniserPath(PATH_DATA_MODELBASE / "bpe-oscar-nl-clean"),
         reweighter=LINEAR_WEIGHTER,
@@ -58,7 +58,7 @@ def setupDutch() -> ProjectConfig:
 def setupGerman() -> ProjectConfig:
     config = ProjectConfig(
         language_name="German",
-        lemma_weights=PATH_DATA_COMPRESSED / "words_oscar-de.txt",
+        lemma_counts=PATH_DATA_COMPRESSED / "words_oscar-de.txt",
         morphologies=PATH_DATA_COMPRESSED / "celex_morphology_de.txt",
         base_tokeniser=SennrichTokeniserPath(PATH_DATA_MODELBASE / "bpe-oscar-de-clean"),
         reweighter=LINEAR_WEIGHTER,
@@ -71,7 +71,7 @@ def setupGerman() -> ProjectConfig:
 def setupEnglish() -> ProjectConfig:
     config = ProjectConfig(
         language_name="English",
-        lemma_weights=PATH_DATA_COMPRESSED / "words_oscar-en.txt",
+        lemma_counts=PATH_DATA_COMPRESSED / "words_oscar-en.txt",
         morphologies=PATH_DATA_COMPRESSED / "celex_morphology_en.txt",
         base_tokeniser=SennrichTokeniserPath(PATH_DATA_MODELBASE / "bpe-oscar-en-clean"),
         reweighter=LINEAR_WEIGHTER,
@@ -90,14 +90,14 @@ def imputeConfig_OscarCelexSennrich(config_in_progress: ProjectConfig):
     """
     language_object = langcodes.find(config_in_progress.language_name)
 
-    if config_in_progress.lemma_weights is not None and not config_in_progress.lemma_weights.exists():
+    if config_in_progress.lemma_counts is not None and not config_in_progress.lemma_counts.exists():
         print(f"{language_object.display_name()} lemma weights not found. Counting...")
         from src.datahandlers.hf_corpora import dataloaderToWeights, generateDataloader_Oscar, punctuationPretokeniserExceptHyphens
         dataloader, size = generateDataloader_Oscar(lang=language_object.to_tag(),
                                                     sentence_preprocessor=punctuationPretokeniserExceptHyphens(),
                                                     size_limit=30_000_000)
-        weights = dataloaderToWeights(dataloader, config_in_progress.lemma_weights.stem, size)  # Takes about 28h30m (English), 4h30m (Dutch), ...
-        weights.rename(config_in_progress.lemma_weights)
+        weights = dataloaderToWeights(dataloader, config_in_progress.lemma_counts.stem, size)  # Takes about 28h30m (English), 4h30m (Dutch), ...
+        weights.rename(config_in_progress.lemma_counts)
 
     # TODO: Could probably query the MPI database
     if config_in_progress.morphologies is None or not config_in_progress.morphologies.exists():
@@ -108,7 +108,7 @@ def imputeConfig_OscarCelexSennrich(config_in_progress: ProjectConfig):
         from src.datahandlers.bpetrainer import BPETrainer
         print(f"{language_object.display_name()} tokeniser not found. Training...")
         trainer = BPETrainer(vocab_size=40_000, byte_based=True)
-        trainer.train_hf(wordfile=config_in_progress.lemma_weights, out_folder=config_in_progress.base_tokeniser.path)  # Takes about 3h40m (English).
+        trainer.train_hf(wordfile=config_in_progress.lemma_counts, out_folder=config_in_progress.base_tokeniser.path)  # Takes about 3h40m (English).
     elif not base_vocab.exists():  # vocab can be deduced from merges; assume it's byte-based
         from src.datahandlers.bpetrainer import BPETrainer
         vocab = BPETrainer.deduceVocabFromMerges(base_merges, byte_based=True)
@@ -154,7 +154,7 @@ def lexiconWeights(override_reweighter: Callable[[float],float]=None) -> Dict[st
     Alias for loadAndWeightLexicon that automatically uses the project's word file, morphologies, and reweighting function.
     """
     return loadAndWeightLexicon(
-        all_lemmata_wordfile=Pℛ𝒪𝒥ℰ𝒞𝒯.config.lemma_weights,
+        all_lemmata_wordfile=Pℛ𝒪𝒥ℰ𝒞𝒯.config.lemma_counts,
         subset_lexicon=(obj.lemma() for obj in morphologyGenerator()),
         subset_name=Pℛ𝒪𝒥ℰ𝒞𝒯.config.morphologies.stem,
         reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter if override_reweighter is None else override_reweighter
