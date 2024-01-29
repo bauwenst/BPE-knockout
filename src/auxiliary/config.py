@@ -36,6 +36,9 @@ class ProjectConfig:
     # The class used to interpret the morphologies of your file's format.
     parser: Type[LemmaMorphology]
 
+    def langTag(self) -> str:
+        return langcodes.find(self.language_name).to_tag()
+
 
 LINEAR_WEIGHTER  = lambda f: f
 ZIPFIAN_WEIGHTER = lambda f: 1 + math.log10(f)
@@ -138,6 +141,20 @@ Pℛ𝒪𝒥ℰ𝒞𝒯 = Project(setupDutch())
 # project: one is the default above, the other is the one in main.py. The one above is used for all executions that do
 # not use main.py (every instance of 'if __name__ == "__main__"' and also all executions starting from outside this
 # codebase, e.g. those that import BTE), the other is used only for executing main.py.
+
+
+class TemporaryContext:
+
+    def __init__(self, context: ProjectConfig):
+        self.old_context = None
+        self.new_context = context
+
+    def __enter__(self):
+        self.old_context = Pℛ𝒪𝒥ℰ𝒞𝒯.config
+        Pℛ𝒪𝒥ℰ𝒞𝒯.config = self.new_context
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        Pℛ𝒪𝒥ℰ𝒞𝒯.config = self.old_context
 
 
 def morphologyGenerator(**kwargs) -> Iterable[LemmaMorphology]:

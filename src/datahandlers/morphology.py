@@ -487,8 +487,11 @@ class CelexLemmaMorphology(LemmaMorphology):
         with open(file, "r", encoding="utf-8") as handle:
             for line in iterateTxt(handle, verbose=verbose):
                 lemma, morphological_tag = line.split("\t")
-                if "[F]" not in morphological_tag:  # TODO: From what I can guess (there is no manual for CELEX tags!), the [F] tag is used to indicate participles (past and present), which are treated as a single morpheme even though they clearly are not. For some, you can deduce the decomposition by re-using the verb's decomposition, so you could write some kind of a dataset sanitiser for that.
-                    yield CelexLemmaMorphology(lemma=lemma, celex_struclab=morphological_tag)
+                try:
+                    if "[F]" not in morphological_tag:  # TODO: From what I can guess (there is no manual for CELEX tags!), the [F] tag is used to indicate participles (past and present), which are treated as a single morpheme even though they clearly are not. For some, you can deduce the decomposition by re-using the verb's decomposition, so you could write some kind of a dataset sanitiser for that.
+                        yield CelexLemmaMorphology(lemma=lemma, celex_struclab=morphological_tag)
+                except:
+                    print(f"Failed to parse morphology: '{lemma}' tagged as '{morphological_tag}'")
 
     @staticmethod
     def cleanFile(file: Path):

@@ -93,6 +93,13 @@ class BPETrainer:
         tokeniser = Tokenizer(models.BPE())
         if self.byte_based:
             tokeniser.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False, trim_offsets=True)
+            # TODO: Spaces are a massive issue.
+            #     - Somewhere in the HuggingFace library, out of the user's control, all spaces passed to the training loop are
+            #       converted to Ġ. This means you can't add it yourself (its UTF-8 encoding is \xc4\xa0 which is represented as Äł
+            #       in the tokeniser file -- because \xc4 is Ä in Latin-1 and \xa0 is somehow remapped to ł by HuggingFace, given that
+            #       the only charset where ł has 1 byte is latin2 where it is actually \xb3).
+            #     - So then, how do you ensure intra-word boundaries (around hyphens)? Can't use a space...
+            #       > ByteLevel pretokenisation takes care of this by accident, but this doesn't work if you want an end-of-word.
         else:
             tokeniser.pre_tokenizer = pre_tokenizers.Metaspace(replacement=SOW)
 
