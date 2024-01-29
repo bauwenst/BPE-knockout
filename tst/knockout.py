@@ -210,6 +210,30 @@ def test_chainEffect():
     )
 
 
+def test_iterative():
+    HOLDOUTS = [(None, "normal"), (Holdout(0.8), "holdout")]
+    MAX_ITERATIONS = 20
+    table = Table("iterative-with-reification", caching=CacheMode.WRITE_ONLY)  # "Always run and always cache, but don't use the cache."
+    if table.needs_computation:
+        for holdout, prefix in HOLDOUTS:
+            # Make the intermediate testing framework by capturing the table AND the holdout prefix.
+            class ForIntermediateTests(Evaluator):
+                def evaluate(self, tokeniser: BasicStringTokeniser, holdout: Holdout, experiment_names: List[str]):
+                    results = test_tokenizers_batch([tokeniser],
+                                                    reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter,
+                                                    holdout=holdout)
+                    addEvaluationToTable(table, results,
+                                         row_prefix=[prefix] + experiment_names[:-1],
+                                         row_names=[experiment_names[-1]])
+
+            # Do reification
+            bte = BTE(BteInitConfig(knockout=RefMode.MORPHEMIC, reify=ReifyMode.ALL, iterations=MAX_ITERATIONS),
+                      autorun_modes=False, holdout=holdout)
+            bte.iterative(iterations=MAX_ITERATIONS, evaluator=ForIntermediateTests())
+
+    commitEvaluationTable(table)
+
+
 ##############################################################################
 
 

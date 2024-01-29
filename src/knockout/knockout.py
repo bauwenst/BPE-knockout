@@ -352,18 +352,6 @@ class BTE(BasicStringTokeniser):
     def runModes(self):
         self.iterative(self.config.iterations)
 
-        # TODO: We need compatibility with annealing, but how?
-        # if not self.config.do_swap_stages:
-        #     if self.knockout_segmentation is not None:
-        #         self.prune()
-        #     if self.anneal_segmentation is not None:
-        #         self.anneal()
-        # else:
-        #     if self.anneal_segmentation is not None:
-        #         self.anneal()
-        #     if self.knockout_segmentation is not None:
-        #         self.prune()
-
     def syncWithGraph(self):
         """
         Synchronise the class's caching structures with the merge graph, which is the actual knowledge representation of
@@ -633,10 +621,6 @@ class BTE(BasicStringTokeniser):
     def iterative(self, iterations: int=10, evaluator: Evaluator=None):
         """
         Iterative knockout, with attempts to turn tuple merges back into binary merges (reification) in between.
-
-        TODO: The testing code for this, currently in draft.py, should become part of tst.knockout
-        TODO: This function is currently only called by draft functions with autorun_modes=False. Ideally, because iterative
-              knockout is a superset of knockout, you can add stuff to the config and then have this function actually be the main runner.
         ---
         There are subtle problems this implementation addresses, to do with the many-to-many properties of this task:
             - Nested knockout: it is actually the case that some types are knocked out whose own types were knocked out too.
@@ -688,6 +672,13 @@ class BTE(BasicStringTokeniser):
         if evaluator:
             evaluator.evaluate(self, self.holdout, [f"{0} it", "base"])
 
+        # Doing annealing at the start might have some benefit when e.g. two leaf merges will be knocked out, but their
+        # combination is a viable merge. In that case, annealing learns the merge, and knockout turns it into a quadruplet.
+        if self.config.do_swap_stages and self.anneal_segmentation is not None:
+            self.anneal()
+            if evaluator:
+                evaluator.evaluate(self, self.holdout, [f"{0} it", "+anneal"])
+
         # Stopping conditions
         END_IF_NO_MORE_DELETIONS = False  # If False, it's possible to just be reifying merges recursively (you reify, do no knockout, then reify again). Note that it's possible to have no knockout in one iteration, but do knockout in the next after adding some novel merges.
         END_IF_NO_MORE_ADDITIONS = False  # If True, will cause early stopping when there are no more non-disqualified merges to be suggested, or when all that are suggested exist above their triplet.
@@ -734,6 +725,13 @@ class BTE(BasicStringTokeniser):
             self.prune()
             if evaluator:
                 evaluator.evaluate(self, self.holdout, [f"{iteration+1} it", "+knockout"])
+
+        # Unlike reification, annealing is a linguistically sound post-processing step. It needs no knockout after.
+        # You could see it as "filling in the gaps" when you have vocabulary capacity left to e.g. consolidate oversegmented word stems.
+        if not self.config.do_swap_stages and self.anneal_segmentation is not None:
+            self.anneal()
+            if evaluator:
+                evaluator.evaluate(self, self.holdout, [f"{iteration+1} it", "+anneal"])
 
     def reify(self, all_disqualified_merges: Set[str]=None):
         """
