@@ -1,4 +1,4 @@
-from src.datahandlers.bpetrainer import *
+from bpe_knockout.datahandlers.bpetrainer import *
 
 corpus = PATH_DATA / "scratch" / "corpus.txt"
 test_tokeniser = PATH_DATA_OUT / f"BPE_from_{corpus.stem}.json"

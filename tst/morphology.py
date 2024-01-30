@@ -1,4 +1,4 @@
-from src.datahandlers.morphology import *
+from bpe_knockout.datahandlers.morphology import *
 
 
 def test_parsing():

@@ -5,15 +5,15 @@ import scipy
 from tst.visualisation.graphing import *
 from tst.tokenisation.measuring import *
 
-from src.knockout.knockout import *
-from src.auxiliary.printing import lprint
-from src.auxiliary.robbert_tokenizer import robbert_tokenizer, getMergeList_RobBERT
-from src.auxiliary.tokenizer_interface import tokenizeAsWord
+from bpe_knockout.knockout.core import *
+from bpe_knockout.auxiliary.printing import lprint
+from bpe_knockout.auxiliary.robbert_tokenizer import robbert_tokenizer, getMergeList_RobBERT
+from bpe_knockout.auxiliary.tokenizer_interface import tokenizeAsWord
 
-from src.project.config import Pℛ𝒪𝒥ℰ𝒞𝒯, morphologyGenerator, lexiconWeights, setupEnglish, setupDutch, setupGerman, ProjectConfig, TemporaryContext
-from src.project.paths import PATH_DATA_TEMP
+from bpe_knockout.project.config import Pℛ𝒪𝒥ℰ𝒞𝒯, morphologyGenerator, lexiconWeights, setupEnglish, setupDutch, setupGerman, ProjectConfig, TemporaryContext
+from bpe_knockout.project.paths import PATH_DATA_TEMP
 
-from src.datahandlers.wordfiles import ACCENTS
+from bpe_knockout.datahandlers.wordfiles import ACCENTS
 
 
 print("Loading tests...")

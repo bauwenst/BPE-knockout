@@ -1,13 +1,13 @@
 from typing import Callable, Dict, Optional
 from dataclasses import dataclass
 
-from src.datahandlers.morphology import *
-from src.datahandlers.wordfiles import *
-from src.datahandlers.holdout import Holdout
-from src.project.paths import *
-from src.project.config import morphologyGenerator, lexiconWeights
-from src.auxiliary.robbert_tokenizer import robbert_tokenizer
-from src.auxiliary.tokenizer_interface import tokenizeAsWord, BasicStringTokeniser
+from bpe_knockout.datahandlers.morphology import *
+from bpe_knockout.datahandlers.wordfiles import *
+from bpe_knockout.datahandlers.holdout import Holdout
+from bpe_knockout.project.paths import *
+from bpe_knockout.project.config import morphologyGenerator, lexiconWeights
+from bpe_knockout.auxiliary.robbert_tokenizer import robbert_tokenizer
+from bpe_knockout.auxiliary.tokenizer_interface import tokenizeAsWord, BasicStringTokeniser
 
 
 # Segmentation kernel

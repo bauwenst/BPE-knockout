@@ -10,10 +10,10 @@ from typing import List
 from enum import Enum
 import re
 
-from src.auxiliary.tokenizer_interface import BasicStringTokeniser
-from src.datahandlers.hf_corpora import punctuation_regex_str, punctuation
-from src.knockout.knockout import ByteBasedMode
-from src.auxiliary.bytemapping import BYTE_ALPHABET
+from bpe_knockout.auxiliary.tokenizer_interface import BasicStringTokeniser
+from bpe_knockout.auxiliary.bytemapping import BYTE_ALPHABET
+from bpe_knockout.datahandlers.hf_corpora import punctuation_regex_str, punctuation
+from bpe_knockout.knockout.knockout import ByteBasedMode
 
 SPACE_TYPE = "[SPACE]"
 Punctuation = re.compile("(" + punctuation_regex_str + ")")
