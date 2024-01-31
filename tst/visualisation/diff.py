@@ -2,8 +2,8 @@ import itertools
 from typing import List
 import re
 
-from src.project.paths import *
-from src.auxiliary.tokenizer_interface import SennrichTokeniserPath
+from bpe_knockout.project.paths import *
+from bpe_knockout.auxiliary.tokenizer_interface import SennrichTokeniserPath
 
 
 TEXCHARS = re.compile(r"([&#$%{}_^\\])")

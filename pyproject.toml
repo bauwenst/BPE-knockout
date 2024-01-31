@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bpe_knockout"
+version = "2024.02.01"
+dependencies = [
+  "transformers",
+  "tokenizers"
+]
+requires-python = ">= 3.10"
+authors = [
+  {name = "Thomas Bauwens", email = "thomas.bauwens@kuleuven.be"}
+]
+maintainers = [
+  {name = "Thomas Bauwens", email = "thomas.bauwens@kuleuven.be"}
+]
+description = "Implementation of BPE-knockout, a morphologically informed post-processing step for BPE tokenisers."
+readme = "README.md"
+license = {file = "LICENSE"}
+keywords = ["tokenizers", "NLP", "BPE", "byte-pair encoding"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]

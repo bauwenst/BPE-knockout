@@ -1,7 +1,7 @@
 from typing import List
 
-from src.project.config import Pℛ𝒪𝒥ℰ𝒞𝒯
-from src.auxiliary.timing import timeit
+from bpe_knockout.project.config import Pℛ𝒪𝒥ℰ𝒞𝒯
+from bpe_knockout.auxiliary.timing import timeit
 
 
 class BpeTree:

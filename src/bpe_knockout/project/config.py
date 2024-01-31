@@ -95,7 +95,7 @@ def imputeConfig_OscarCelexSennrich(config_in_progress: ProjectConfig):
 
     if config_in_progress.lemma_counts is not None and not config_in_progress.lemma_counts.exists():
         print(f"{language_object.display_name()} lemma weights not found. Counting...")
-        from src.datahandlers.hf_corpora import dataloaderToWeights, generateDataloader_Oscar, punctuationPretokeniserExceptHyphens
+        from ..datahandlers.hf_corpora import dataloaderToWeights, generateDataloader_Oscar, punctuationPretokeniserExceptHyphens
         dataloader, size = generateDataloader_Oscar(lang=language_object.to_tag(),
                                                     sentence_preprocessor=punctuationPretokeniserExceptHyphens(),
                                                     size_limit=30_000_000)
@@ -108,12 +108,12 @@ def imputeConfig_OscarCelexSennrich(config_in_progress: ProjectConfig):
 
     base_vocab, base_merges = config_in_progress.base_tokeniser.getPaths()
     if not base_merges.exists():  # writes merges and vocab
-        from src.datahandlers.bpetrainer import BPETrainer
+        from ..datahandlers.bpetrainer import BPETrainer
         print(f"{language_object.display_name()} tokeniser not found. Training...")
         trainer = BPETrainer(vocab_size=40_000, byte_based=True)
         trainer.train_hf(wordfile=config_in_progress.lemma_counts, out_folder=config_in_progress.base_tokeniser.path)  # Takes about 3h40m (English).
     elif not base_vocab.exists():  # vocab can be deduced from merges; assume it's byte-based
-        from src.datahandlers.bpetrainer import BPETrainer
+        from ..datahandlers.bpetrainer import BPETrainer
         vocab = BPETrainer.deduceVocabFromMerges(base_merges, byte_based=True)
         with open(base_vocab, "w", encoding="utf-8") as handle:
             json.dump(vocab, handle, ensure_ascii=False, indent=4)
