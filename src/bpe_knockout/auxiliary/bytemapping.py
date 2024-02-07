@@ -2,6 +2,8 @@
 Goal: Convert a HuggingFace byte-based vocabulary, which is stored in text form with every byte represented by one of 256
       alphabet characters, back to Unicode. This is hard because the alphabet they give is NOT sorted, so you need to
       discover the mapping between alphabet characters and byte values yourself.
+
+      All of this work is kinda moot given the bytes_to_unicode mapping in HuggingFace's GPT2Tokenizer source code.
 """
 from tokenizers import pre_tokenizers
 
@@ -26,7 +28,7 @@ def huggingFaceIndexToByte(i: int):
         return i+68
     elif i < 221:
         return i-188
-    elif i < 254:
+    elif i < 255:
         return i-94
     else:  # i == 255 is special
         return i-82
