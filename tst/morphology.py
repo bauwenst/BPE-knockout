@@ -1,4 +1,5 @@
 from bpe_knockout.datahandlers.morphology import *
+from bpe_knockout.project.config import morphologyGenerator
 
 
 def test_parsing():
@@ -81,8 +82,6 @@ def test_alignments():
 
 
 def test_all():
-    from src.project.config import morphologyGenerator
-
     table = PrintTable()
     for o in morphologyGenerator():
         # if " " in o.lexemeSplit():

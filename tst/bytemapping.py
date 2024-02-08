@@ -12,7 +12,7 @@ Goal: Investigate how the assumption of character-level tokenisation influences 
 from bpe_knockout.auxiliary.robbert_tokenizer import robbert_tokenizer
 from bpe_knockout.auxiliary.tokenizer_interface import tokenizeAsWord
 from bpe_knockout.auxiliary.bytemapping import *
-from bpe_knockout.knockout.knockout import BTE, BteInitConfig, RefMode, ByteBasedMode
+from bpe_knockout.knockout.core import BTE, BteInitConfig, RefMode, ByteBasedMode
 from bpe_knockout.auxiliary.timing import timeit
 from tst.visualisation.graphing import LineGraph, CacheMode
 
@@ -178,7 +178,7 @@ def testMapping():
 
 
 def convertMerges():
-    from src.project.paths import PATH_DATA_MODELBASE
+    from bpe_knockout.project.paths import PATH_DATA_MODELBASE
 
     changed = 0
     with open(PATH_DATA_MODELBASE / "robbert" / "merges.txt", "r", encoding="utf-8") as handle:

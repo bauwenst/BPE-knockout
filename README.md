@@ -8,6 +8,18 @@ All data is included in the repo, because it is obtainable for free elsewhere an
 - Morphological decompositions were derived from [WebCelex at the Max Plank Institute](http://celex.mpi.nl/).
 - Language modelling data is derived from [OSCAR on HuggingFace](https://huggingface.co/datasets/oscar).
 
+## Installing
+Because this repo ships with data (word lists and tokenisers) that take quite a while to compute, we currently only
+guarantee that an *editable install* works. That is: you tell Python to use the folder into which you cloned the repo,
+rather than copying the code to your global or virtual `site-packages` directory.
+```shell
+git clone https://github.com/GitMew/BPE-knockout.git
+cd BPE-knockout
+pip install -r requirements.txt
+pip install -e .
+```
+If you're using conda or venv, don't forget to activate those before running any calls to `pip install`.
+
 ## Running
 1. Unzip the `.rar` file under `data/compressed/`.
 2. Run `py main.py` or `python main.py` in a terminal.

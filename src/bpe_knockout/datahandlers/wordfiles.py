@@ -399,7 +399,7 @@ def wordfileToBpeCorpus(wordfile: Path, do_pretokenise=False) -> Iterable[str]:
         apple apple apple apple apple
         banana-pear banana-pear banana-pear
     """
-    from src.datahandlers.hf_corpora import punctuation_regex_str
+    from .hf_corpora import punctuation_regex_str
     PUNCTUATION_PATTERN = re.compile("(" + punctuation_regex_str + ")")  # Could've just been ([\-]+) but the other punctuation could also prove useful for wordfiles where you forgot to split off periods etc.
     LARGEST_STRING_LEN  = 1_000
 

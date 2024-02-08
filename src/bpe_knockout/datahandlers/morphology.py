@@ -483,7 +483,7 @@ class CelexLemmaMorphology(LemmaMorphology):
 
     @staticmethod
     def generator(file: Path, verbose=True) -> Iterable[LemmaMorphology]:
-        from src.datahandlers.wordfiles import iterateTxt
+        from .wordfiles import iterateTxt
         with open(file, "r", encoding="utf-8") as handle:
             for line in iterateTxt(handle, verbose=verbose):
                 lemma, morphological_tag = line.split("\t")
@@ -498,7 +498,7 @@ class CelexLemmaMorphology(LemmaMorphology):
         """
         Removes lines that do not conform to the {spaceless string}\t{spaceless string} format.
         """
-        from src.datahandlers.wordfiles import iterateTxt
+        from .wordfiles import iterateTxt
         with open(file.with_stem(file.stem + "_proper"), "w", encoding="utf-8") as out_handle:
             with open(file, "r", encoding="utf-8") as in_handle:
                 for line in iterateTxt(in_handle):

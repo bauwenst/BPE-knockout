@@ -118,7 +118,7 @@ def list_split(lst: list, sep):
 
 if __name__ == "__main__":
     from itertools import product
-    from src.auxiliary.tokenizer_interface import tokenizeAsWord
+    from bpe_knockout.auxiliary.tokenizer_interface import tokenizeAsWord
     sentence = "Life could be a drëam!"
     word = "supercälifragïlisticëxpialidocious"
 

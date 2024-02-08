@@ -23,15 +23,15 @@ from pathlib import Path
 from tqdm.auto import tqdm
 import re
 
-from src.datahandlers.holdout import Holdout
-from src.datahandlers.morphology import LexSplit, MorphSplit
-from src.project.config import Pℛ𝒪𝒥ℰ𝒞𝒯, lexiconWeights, morphologyGenerator
-from src.auxiliary.tokenizer_interface import BasicStringTokeniser, Evaluator
-from src.auxiliary.bytemapping import simplifiedByteMapper
+from ..datahandlers.holdout import Holdout
+from ..datahandlers.morphology import LexSplit, MorphSplit
+from ..project.config import Pℛ𝒪𝒥ℰ𝒞𝒯, lexiconWeights, morphologyGenerator
+from ..auxiliary.tokenizer_interface import BasicStringTokeniser, Evaluator
+from ..auxiliary.bytemapping import simplifiedByteMapper
 from tokenizers.decoders import ByteLevel as ByteLevelDecoder  # The simplified byte mapper above suffices for Dutch/German.
 from tokenizers.pre_tokenizers import ByteLevel as ByteLevelPretokeniser
 
-from src.auxiliary.printing import doPrint, wprint
+from ..auxiliary.printing import doPrint, wprint
 
 
 log = doPrint(False)

@@ -22,8 +22,8 @@ from pathlib import Path
 from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 import json
 
-from src.knockout.knockout import BTE, BteInitConfig, RefMode, ByteBasedMode
-from src.datahandlers.bpetrainer import SPECIAL_TYPES
+from .core import BTE, BteInitConfig, RefMode, ByteBasedMode
+from ..datahandlers.bpetrainer import SPECIAL_TYPES
 
 
 class BTEk_HuggingFace(PreTrainedTokenizer):
@@ -132,7 +132,7 @@ class BTEk_HuggingFace(PreTrainedTokenizer):
 
 
 def constructForHF_BPE() -> PreTrainedTokenizerFast:
-    from src.project.config import Pℛ𝒪𝒥ℰ𝒞𝒯
+    from ..project.config import Pℛ𝒪𝒥ℰ𝒞𝒯
     return Pℛ𝒪𝒥ℰ𝒞𝒯.config.base_tokeniser.toFastBPE()
 
 def constructForHF_BPEknockout() -> PreTrainedTokenizer:

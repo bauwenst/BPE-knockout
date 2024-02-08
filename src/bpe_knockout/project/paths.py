@@ -1,6 +1,7 @@
 from pathlib import Path
 
-PATH_SRC = Path(__file__).resolve().parent.parent
+PATH_PACKAGE = Path(__file__).resolve().parent.parent
+PATH_SRC  = PATH_PACKAGE.parent
 PATH_ROOT = PATH_SRC.parent
 PATH_DATA = PATH_ROOT / "data"
 PATH_DATA_RAW        = PATH_DATA / "raw"
