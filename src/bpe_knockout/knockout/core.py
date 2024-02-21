@@ -15,6 +15,7 @@ TODO:
 """
 import dataclasses
 from enum import Enum
+from functools import cache
 from typing import List, Dict, Callable, Tuple, Set
 import json
 import time
@@ -391,6 +392,7 @@ class BTE(BasicStringTokeniser):
             self.merge_graph.addArc(merge_string)
         self.syncWithGraph()
 
+    @cache
     def tokenize(self, word: str) -> List[str]:  # TODO: This doesn't support "attached SoW/EoW" and leaves SoW/EoW to the user. Not good.
         return self.segment_as_is(self.word_preprocessor(word)
                                   .replace(" ", SOW))    # My interface is messy in the sense that I expect the user to decide whether they want SoW or EoW by adding a prefixed or suffixed space to "word". This is technical debt from HuggingFace, who mix Unicode encoding with start-of-word prefixing.
