@@ -7,9 +7,7 @@ name = "bpe_knockout"
 version = "2024.02.01"
 dependencies = [
   "transformers",
-  "tokenizers",
-  "langcodes",
-  "language_data"
+  "tokenizers"
 ]
 requires-python = ">= 3.10"
 authors = [
