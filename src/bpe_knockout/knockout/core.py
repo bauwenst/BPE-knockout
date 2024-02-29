@@ -316,6 +316,9 @@ class BTE(BasicStringTokeniser):
         self.word_preprocessor, self.tokens_to_word = self.config.bytebased.toInputProcessors()
 
         # Training regime
+        if self.config.knockout == RefMode.NONE and self.config.reify == ReifyMode.NONE:  # You're only here for vanilla BPE or perhaps annealing.
+            self.config.iterations = 0
+
         self.knockout_segmentation = RefMode.toMethod(self.config.knockout)
         self.anneal_segmentation   = RefMode.toMethod(self.config.anneal)
         self.do_prune_trivials = not self.config.keep_long_merges
@@ -326,7 +329,7 @@ class BTE(BasicStringTokeniser):
                     + ("-anneal-"   + RefMode.toLetter(self.config.anneal))  * do_anneal \
                     + ("-knockout-" + RefMode.toLetter(self.config.knockout))*(do_prune and self.config.do_swap_stages)\
                     + ("-reify"                                             *(self.config.reify != ReifyMode.NONE))\
-                    + f"_x{self.config.iterations}"\
+                    + (f"_{self.config.iterations}it" if self.config.iterations > 0 else "")\
                     + (f"_{int(100*holdout.threshold)}-{int(100-100*holdout.threshold)}-holdout" if holdout is not None else "")\
                     + "_keeptrivial"*self.config.keep_long_merges
 
@@ -484,13 +487,18 @@ class BTE(BasicStringTokeniser):
 
             # Get BPE split and the ID of the merge that caused a space to disappear at each index.
             # FIXME: This line and the ones below are specific to using RobBERT's vocabulary as starting vocab. Any BPE
-            #        tokeniser that doesn't have an SoW (or doesn't have Ġ specifically) won't work currently.
+            #        tokeniser that doesn't have a SoW (and specifically the SoW defined at the top of this file) won't work currently.
+            # FIXME: Also, since you're doing pretokenisation by hand, you are failing to take byte-based vocabularies
+            #        into account! segmznt_as_is_diagnostic will now never diagnose a merge with ë to be wrong because
+            #        those merges are never performed. Bad...
+            #        I'm pretty sure you can solve all of these problems by running it through a pretokeniser and then its inverse (which tokenizeAsWord does),
+            #        and shifting the resulting indices by however many characters you need to make "".join(tokens) equal to the original string.
             tokens, merge_ids = self.segment_as_is_diagnostic(SOW + lemma)
 
             # One modification: because we neglect the RobBERT's start-of-word character Ġ when doing morphological
             # comparisons, we need to strip it from the tokenisation and hence also shift all the indices in the merge map.
-            bpe_segmentation = " ".join(tokens)[1:].strip()  # The .strip() is in case the segmentation looks like "Ġ abcd efgh"
-            merge_ids = {k-1: v for k,v in merge_ids.items() if k != 0}
+            bpe_segmentation = " ".join(tokens)[len(SOW):].strip()  # The .strip() is in case the segmentation looks like "Ġ abcd efgh"
+            merge_ids = {k-len(SOW): v for k,v in merge_ids.items() if k >= len(SOW)}  # Shift indices down by the length of the SoW and filter out any entries for it.
 
             # Get indices with wrongful merges. Unlike compareSplits, we don't use intersection for this.
             # This isn't the only type of error: you can also have too many splits -- a lack of merging -- which can be
@@ -503,7 +511,7 @@ class BTE(BasicStringTokeniser):
             log("\t", reference_segmentation, "->", bpe_segmentation)
             log("\t", merge_ids)
             for merge_id in merge_ids.values():
-                total[merge_id] += weight  # FIXME: This should not error since my fix.
+                total[merge_id] += weight
             for index in indices_that_shouldve_never_merged:
                 merge_id = merge_ids[index]
                 blame[merge_id] += weight
@@ -550,7 +558,7 @@ class BTE(BasicStringTokeniser):
             # Get morphological split
             reference_segmentation = self.anneal_segmentation(obj)
 
-            # Get BPE split
+            # Get BPE split FIXME: Same issue as above
             tokens = self.segment_as_is(SOW + lemma)
 
             # One modification: because we neglect RobBERT's start-of-word character Ġ when doing morphological
@@ -683,7 +691,7 @@ class BTE(BasicStringTokeniser):
         END_IF_NO_MORE_DELETIONS = False  # If False, it's possible to just be reifying merges recursively (you reify, do no knockout, then reify again). Note that it's possible to have no knockout in one iteration, but do knockout in the next after adding some novel merges.
         END_IF_NO_MORE_ADDITIONS = False  # If True, will cause early stopping when there are no more non-disqualified merges to be suggested, or when all that are suggested exist above their triplet.
         DO_KNOCKOUT_IF_NOT_ENDED_ON_IT = True  # Recommendable because the latest additions might be morphologically bad.
-        needs_final_knockout = True
+        needs_final_knockout = DO_KNOCKOUT_IF_NOT_ENDED_ON_IT and iterations > 0
 
         all_disqualified_merges: Set[str] = set()  # Cache merges that mustn't be retried.
         for iteration in range(1, iterations+1):
