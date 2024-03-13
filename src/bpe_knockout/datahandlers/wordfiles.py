@@ -7,8 +7,8 @@ import gc
 from tqdm.auto import tqdm
 
 from ..project.paths import *
-from ..auxiliary.timing import timeit
-from ..auxiliary.printing import wprint, intsep
+from tktkt.util.timing import *
+from tktkt.util.printing import *
 
 
 def iterableToWordsFile(line_iterable: Iterable[str], output_file: Path,

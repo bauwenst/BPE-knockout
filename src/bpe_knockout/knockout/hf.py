@@ -89,24 +89,16 @@ class BTEk_HuggingFace(PreTrainedTokenizer):
     def _tokenize(self, text, **kwargs) -> List[str]:
         """
         Turns one string (a full sentence, NOT a word) into many strings.
-
-        It should be noted that the whitespace pretokenisation I do below is **NOT** the same pretokenisation you should
-        do to train the BPE tokeniser this is based on. In particular: the BPE tokeniser should not be allowed to see
-        hyphens nor punctuation as reachable from neighbouring characters. When the time then comes to tokenise a sentence
-        with that tokeniser, there is no longer a need to add spaces (nor Gs) in front of punctuation marks, because it
-        will have zero merges containing those punctuation marks and hence will naturally respect that boundary.
         """
-        tokens = []
-
         # For some dark reason, HuggingFace's "slow tokenizer" interface doesn't offer access to pretokenisation:
         #   https://github.com/huggingface/transformers/issues/26254
-        # Hence, what arrives in this method is a full sentence.
-        # To split on whitespace, then convert to bytes, then add G, and the split on punctuation, you could use:
+        # Hence, what arrives in this method is a full sentence. This is good, because it allows the internal tokeniser
+        # to handle pretokenisation as well.
+        #
+        # Yes, to split on whitespace, then convert to bytes, then add G, and the split on punctuation, you could use:
         #     pre_tokenizers.ByteLevel(add_prefix_space=False)
         # However, since byte handling is the responsibility of the BTE object, we don't do this.
-        for word in text.split():
-            tokens.extend(self.algorithm.tokenize(word=" " + word))
-        return tokens
+        return self.algorithm.prepareAndTokenise(text)
 
     def convert_tokens_to_string(self, tokens: List[str]) -> str:
         return self.algorithm.convert_tokens_to_string(tokens)

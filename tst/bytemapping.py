@@ -9,45 +9,51 @@ Goal: Investigate how the assumption of character-level tokenisation influences 
       We know that 1 strange character maps to 1 byte, but we also know that this byte is not necessarily deducible from
       whatever byte representation that character has in traditional encodings. So, how do we find the corresponding byte?
 """
-from bpe_knockout.auxiliary.robbert_tokenizer import robbert_tokenizer
-from bpe_knockout.auxiliary.tokenizer_interface import tokenizeAsWord
+from tst.tokenisation.robbert_tokenizer import robbert_tokenizer as rt
+from tktkt.models.huggingface.wrapper import HuggingFaceTokeniser
+robbert_tokenizer = HuggingFaceTokeniser(rt, for_single_words=True)
+
+from tktkt.evaluation.morphological import tokeniseAndDecode
+
 from bpe_knockout.auxiliary.bytemapping import *
 from bpe_knockout.knockout.core import BTE, BteInitConfig, RefMode, ByteBasedMode
-from bpe_knockout.auxiliary.timing import timeit
+from tktkt.util.timing import timeit
 from tst.visualisation.graphing import LineGraph, CacheMode
 
 
 def robbert():
-    print(robbert_tokenizer.tokenize(" Dat is efficientie!"))
+    robbert_tokenizer_hf = robbert_tokenizer.backend
+
+    print(robbert_tokenizer_hf.tokenize(" Dat is efficientie!"))
     # -> ['ĠDat', 'Ġis', 'Ġeffic', 'i', 'entie', '!']
-    print(robbert_tokenizer.tokenize(" Dát is efficiëntie!"))
+    print(robbert_tokenizer_hf.tokenize(" Dát is efficiëntie!"))
     # -> ['ĠD', 'Ã¡t', 'Ġis', 'ĠefficiÃ«ntie', '!']
-    print(robbert_tokenizer.convert_tokens_to_string(['ĠD', 'Ã¡t', 'Ġis', 'ĠefficiÃ«ntie', '!']))
+    print(robbert_tokenizer_hf.convert_tokens_to_string(['ĠD', 'Ã¡t', 'Ġis', 'ĠefficiÃ«ntie', '!']))
     # -> " Dát is efficiëntie!"
 
     w = "oriëntatietechniek"
-    bpe_segmentation = " ".join(tokenizeAsWord(w, tokenizer=robbert_tokenizer))
+    bpe_segmentation = " ".join(tokeniseAndDecode(w, tokeniser=robbert_tokenizer))
     print(bpe_segmentation)
-    print(robbert_tokenizer.clean_up_tokenization(bpe_segmentation))
-    print(robbert_tokenizer.convert_tokens_to_string([bpe_segmentation]))
-    print(robbert_tokenizer.convert_tokens_to_string(bpe_segmentation.split()))  # These are all tokens
-    print(robbert_tokenizer.convert_tokens_to_string(["efficiÃ«ntie"]))
+    print(robbert_tokenizer_hf.clean_up_tokenization(bpe_segmentation))
+    print(robbert_tokenizer_hf.convert_tokens_to_string([bpe_segmentation]))
+    print(robbert_tokenizer_hf.convert_tokens_to_string(bpe_segmentation.split()))  # These are all tokens
+    print(robbert_tokenizer_hf.convert_tokens_to_string(["efficiÃ«ntie"]))
 
     # General method that 1. fixes Unicode weirdness and 2. fixes adherence to RobBERT: let the tokeniser convert to
     # text, and then strip left and right to catch the effect of G or </w>.
     # Note that convert_tokens_to_string converts a list to a string and does NOT add spaces in between, yet we want those.
-    bpe_segmentation = tokenizeAsWord(w, tokenizer=robbert_tokenizer)
-    print(" ".join([robbert_tokenizer.convert_tokens_to_string([token]) for token in bpe_segmentation]).strip())
+    bpe_segmentation = tokeniseAndDecode(w, tokeniser=robbert_tokenizer)
+    print(" ".join([robbert_tokenizer_hf.convert_tokens_to_string([token]) for token in bpe_segmentation]).strip())
 
-    print(robbert_tokenizer.convert_tokens_to_string(["aaaaaaaadfgdga-Ã«", "bb Ã«"]))  # As long as there is no space, the method works, even on strings that aren't tokens.
-    print(robbert_tokenizer.convert_tokens_to_string(["Ã", "«"]))  # Even works when the bytes are split across two tokens
-    print(robbert_tokenizer.convert_tokens_to_string(["Ã"]))  # Surprisingly, this even works when only half of a UTF-8 character is present. Note that UTF-8 does not allow representing bytes in strings, so something fishy is going on here.
+    print(robbert_tokenizer_hf.convert_tokens_to_string(["aaaaaaaadfgdga-Ã«", "bb Ã«"]))  # As long as there is no space, the method works, even on strings that aren't tokens.
+    print(robbert_tokenizer_hf.convert_tokens_to_string(["Ã", "«"]))  # Even works when the bytes are split across two tokens
+    print(robbert_tokenizer_hf.convert_tokens_to_string(["Ã"]))  # Surprisingly, this even works when only half of a UTF-8 character is present. Note that UTF-8 does not allow representing bytes in strings, so something fishy is going on here.
 
     # Note that this means that concatenating and converting are not commutative:
     examples = ["être", "enquête"]
     for example in examples:
-        tokens = robbert_tokenizer.tokenize(" " + example)
-        print(tokens, "->", [robbert_tokenizer.convert_tokens_to_string([token]) for token in tokens], "->", robbert_tokenizer.convert_tokens_to_string(tokens))
+        tokens = robbert_tokenizer_hf.tokenize(" " + example)
+        print(tokens, "->", [robbert_tokenizer_hf.convert_tokens_to_string([token]) for token in tokens], "->", robbert_tokenizer_hf.convert_tokens_to_string(tokens))
 
 
 def pythonBTEvsHuggingFaceBPErevisited():
@@ -65,19 +71,19 @@ def pythonBTEvsHuggingFaceBPErevisited():
     print("Probably normal:")
     examples = ["energieleverancier", "aanvalspositie", "gekkenwerk"]
     for example in examples:
-        print("\t", tokenizeAsWord(example, tokenizer=robbert_tokenizer))
-        print("\t", tokenizeAsWord(example, tokenizer=bte))
+        print("\t", tokeniseAndDecode(example, tokeniser=robbert_tokenizer))
+        print("\t", tokeniseAndDecode(example, tokeniser=bte))
 
     print("Probably abnormal:")
     examples = ["efficiëntie", "oriëntatie", "beëindigen"]
     for example in examples:
-        print("\t", tokenizeAsWord(example, tokenizer=robbert_tokenizer))
-        print("\t", tokenizeAsWord(example, tokenizer=bte))
+        print("\t", tokeniseAndDecode(example, tokeniser=robbert_tokenizer))
+        print("\t", tokeniseAndDecode(example, tokeniser=bte))
 
     print("Fixed:")
     bte = BTE(BteInitConfig(bytebased=ByteBasedMode.VOCAB_TO_CHARS))
     for example in examples:
-        print("\t", tokenizeAsWord(example, tokenizer=bte))
+        print("\t", tokeniseAndDecode(example, tokeniser=bte))
 
 
 def huggingFaceByteAlphabet():
@@ -101,7 +107,7 @@ def huggingFaceByteAlphabet():
 
     # There's no real way to figure out which bytes map where. You can try passing in the first 256 Unicode code points,
     # but obviously they can't all be mapped to a single byte because then UTF-8 couldn't encode 2- 3- 4-byte codes.
-    chr_tokens = [list("".join(robbert_tokenizer.tokenize(chr(i)))) for i in range(256)]
+    chr_tokens = [list("".join(robbert_tokenizer.backend.tokenize(chr(i)))) for i in range(256)]
     alphabet.sort()
 
     index_of_256chr_in_alphabet = [[alphabet.index(token) for token in tokens] for tokens in chr_tokens]
@@ -139,7 +145,7 @@ def huggingFaceByteMap():
         except:
             print(f"Skipping codepoint {i} because Python isn't allowed to encode it.")
             continue
-        hf_characters = list("".join(robbert_tokenizer.tokenize(character)))
+        hf_characters = list("".join(robbert_tokenizer.backend.tokenize(character)))
         assert len(utf8_bytes) == len(hf_characters)  # HuggingFace assigns one char per byte
         for char,byte in zip(hf_characters,utf8_bytes):
             if char in char_to_byte:

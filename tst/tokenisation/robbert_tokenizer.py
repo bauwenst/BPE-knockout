@@ -1,8 +1,8 @@
 import json
 import requests
 
-from ..project.paths import PATH_DATA_TEMP
-from ..auxiliary.tokenizer_interface import AutoTokenizer_from_pretrained
+from bpe_knockout.project.paths import PATH_DATA_TEMP
+from bpe_knockout.auxiliary.tokenizer_interface import AutoTokenizer_from_pretrained
 
 robbert_tokenizer = AutoTokenizer_from_pretrained("pdelobelle/robbert-v2-dutch-base")
 

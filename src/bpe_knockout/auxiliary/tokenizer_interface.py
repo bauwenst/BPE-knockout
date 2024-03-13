@@ -3,6 +3,7 @@ from pathlib import Path
 from abc import abstractmethod, ABC
 import json
 
+from tktkt.interfaces.tokeniser import Tokeniser
 from transformers import AutoTokenizer, RobertaTokenizerFast, PreTrainedTokenizerFast
 from ..datahandlers.holdout import Holdout
 
@@ -19,44 +20,6 @@ def AutoTokenizer_from_pretrained(path_or_name: str) -> PreTrainedTokenizerFast:
         return AutoTokenizer.from_pretrained(path_or_name)
 
 
-class BasicStringTokeniser:
-    """
-    Interface for the subset of HuggingFace methods I need for all code to run, plus a name method for identification.
-    """
-    @abstractmethod
-    def getName(self):
-        pass
-
-    @property  # Property because that's how HuggingFace does it. Makes no sense to have getter/setter for this, but ok.
-    @abstractmethod
-    def vocab_size(self):
-        pass
-
-    def tokenize(self, text: str) -> List[str]:
-        pass
-
-    def convert_tokens_to_string(self, tokens: List[str]) -> str:
-        pass
-
-
-def tokenizeAsWord(word: str, tokenizer: BasicStringTokeniser) -> List[str]:
-    """
-    Does two things that are commonly needed alongside tokenisation:
-     - Adds a space in front of the input. Many tokenisers need this before they can add their start-of-word symbol.
-     - Post-processes the tokens to be proper strings. Byte-level tokenisers in particular output byte-representing
-       characters (i.e. single characters that have no inherent meaning except that they represent bytes) by default,
-       for which a conversion method exists.
-
-    NOTE: The result will likely have a first token that has a space up front. This is because apart from converting
-    byte-level storage artefacts back to their intended characters, HuggingFace also replaces signalling characters
-    like the start-of-word G-dot.
-
-    TODO: Kinda wondering what happens when you have an EoW. Do you need to add a space after the word too, then?
-    """
-    return [tokenizer.convert_tokens_to_string([token])
-            for token in tokenizer.tokenize(" " + word)]
-
-
 class Evaluator(ABC):
     """
     Interface for evaluating a tokeniser.
@@ -64,7 +27,7 @@ class Evaluator(ABC):
     """
 
     @abstractmethod
-    def evaluate(self, tokeniser: BasicStringTokeniser, holdout: Holdout, experiment_names: List[str]):
+    def evaluate(self, tokeniser: Tokeniser, holdout: Holdout, experiment_names: List[str]):
         pass
 
 
@@ -116,10 +79,22 @@ class SennrichTokeniserPath(TokeniserPath):
 
     def loadMerges(self) -> List[str]:
         with open(self.getPaths()[1], "r", encoding="utf-8") as handle:
-            return [line.strip() for line in handle]
+            return [line.strip() for line in handle if not line.startswith("#version")]
 
     def toFastBPE(self) -> RobertaTokenizerFast:
         vocab, merges = self.getPaths()
+
+        ###
+        # Fix because HuggingFace is fake and gay
+        # https://github.com/huggingface/transformers/blob/main/src/transformers/models/roberta/tokenization_roberta.py#L228
+        with open(merges, "r", encoding="utf-8") as handle:
+            lines = handle.readlines()
+        if not lines[0].startswith("#version"):
+            lines.insert(0, "#version-knockout\n")
+            with open(merges, "w", encoding="utf-8") as handle:
+                handle.writelines(lines)
+        ###
+
         return RobertaTokenizerFast(vocab_file=vocab.as_posix(), merges_file=merges.as_posix())  # Will apply byte-based pretokeniser.
 
 

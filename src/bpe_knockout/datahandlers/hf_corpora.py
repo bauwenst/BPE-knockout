@@ -5,7 +5,10 @@ import tokenizers.normalizers as tn
 import tokenizers.pre_tokenizers as tp
 
 from ..datahandlers.wordfiles import *
-from ..auxiliary.printing import *
+
+
+def logger(msg: str):
+    print("[" + time.strftime('%H:%M:%S') + "]", msg)
 
 
 # https://huggingface.co/docs/tokenizers/components

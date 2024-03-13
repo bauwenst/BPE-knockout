@@ -12,7 +12,8 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 from ..datahandlers.hf_corpora import normalizer
-from ..auxiliary.printing import PrintTable, warn
+
+from tktkt.util.printing import PrintTable, warn
 
 DO_WARNINGS = False
 

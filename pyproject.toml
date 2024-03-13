@@ -4,10 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bpe_knockout"
-version = "2024.02.01"
+version = "2024.03.01"
 dependencies = [
   "transformers",
-  "tokenizers"
+  "tokenizers",
+  "tktkt",
+  "fiject"
 ]
 requires-python = ">= 3.10"
 authors = [
