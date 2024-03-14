@@ -11,7 +11,9 @@ from dataclasses import dataclass
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-from ..datahandlers.hf_corpora import normalizer
+# from ..datahandlers.hf_corpora import normalizer
+import tokenizers.normalizers as tn
+normalizer = tn.Sequence([tn.NFD(), tn.StripAccents(), tn.NFKC()])
 
 from tktkt.util.printing import PrintTable, warn
 
@@ -489,7 +491,7 @@ class CelexLemmaMorphology(LemmaMorphology):
             for line in iterateTxt(handle, verbose=verbose):
                 lemma, morphological_tag = line.split("\t")
                 try:
-                    if "[F]" not in morphological_tag:  # TODO: From what I can guess (there is no manual for CELEX tags!), the [F] tag is used to indicate participles (past and present), which are treated as a single morpheme even though they clearly are not. For some, you can deduce the decomposition by re-using the verb's decomposition, so you could write some kind of a dataset sanitiser for that.
+                    if "[F]" not in morphological_tag and "'" not in lemma:  # TODO: From what I can guess (there is no manual for CELEX tags!), the [F] tag is used to indicate participles (past and present), which are treated as a single morpheme even though they clearly are not. For some, you can deduce the decomposition by re-using the verb's decomposition, so you could write some kind of a dataset sanitiser for that.
                         yield CelexLemmaMorphology(lemma=lemma, celex_struclab=morphological_tag)
                 except:
                     print(f"Failed to parse morphology: '{lemma}' tagged as '{morphological_tag}'")

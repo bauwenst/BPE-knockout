@@ -11,32 +11,14 @@ def logger(msg: str):
     print("[" + time.strftime('%H:%M:%S') + "]", msg)
 
 
-# https://huggingface.co/docs/tokenizers/components
-# https://huggingface.co/docs/tokenizers/pipeline
-# normalizer   = tn.Sequence([tn.NFD(), tn.StripAccents()])  TODO: For Dutch, you want to remove all ´ and ` but keep all ¨ and ^. There is no normaliser for that.
-normalizer   = tn.NFKC()  # There are 4 NFs. The ones with a K turn weird letters to their ASCII form. The ones with a D turn accents into "modifying characters" (which you need for StripAccent), e.g. in the two-character example "ä", while C composes them into one character again.
-pretokeniser = tp.Whitespace()  # Combines WhitespaceSplit and Punctuation
-
-
-def preprocess(line: str):
-    """
-    Normalises away accents, removes double spaces, and puts spaces around punctuation (although many punctuatation
-    marks in a row are counted as one punctuation mark).
-
-    NOTE: This splits hyphenated words too.
-    """
-    pretokens = pretokeniser.pre_tokenize_str(normalizer.normalize_str(line))
-    return " ".join([w for w,_ in pretokens])
-
-
-def generateDataloader_Oscar(lang: str="nl", sentence_preprocessor: Callable[[str],str]=preprocess,
+def generateDataloader_Oscar(langtag: str, sentence_preprocessor: Callable[[str],str],
                              size_limit: int=None, shuffle: bool=False) -> Tuple[DataLoader, int]:
     """
     Note that the DataLoader is an iteraBLE, not an iteraTOR. It can be iterated over multiple times.
     """
-    if lang != "en":
+    if langtag != "en":
         logger("Loading dataset... (takes about 5 minutes for NL and 10 minutes for DE)")
-        data: Dataset = load_dataset(path="oscar", name="unshuffled_deduplicated_" + lang, split="train")
+        data: Dataset = load_dataset(path="oscar", name="unshuffled_deduplicated_" + langtag, split="train")
         logger("Finished loading.")
 
         size = len(data)
@@ -60,7 +42,7 @@ def generateDataloader_Oscar(lang: str="nl", sentence_preprocessor: Callable[[st
             data = data.select(indices)
 
     else:  # OSCAR-en is literally used by HuggingFace as example of dataset that is too gigantic to download (1.2 TiB...) https://huggingface.co/docs/datasets/stream
-        logger(f"Streaming OSCAR {lang}.")
+        logger(f"Streaming OSCAR {langtag}.")
         data: IterableDataset = load_dataset(path='oscar', name="unshuffled_deduplicated_en",
                                              split='train', streaming=True)
         size = data.info.splits["train"].num_examples  # bruh who invented this interface
@@ -103,7 +85,7 @@ def punctuationPretokeniserExceptHyphens():
     punctuation_regex_str_no_hyphenish = punctuation_regex_str.replace("\\-", "").replace("–", "").replace("_", "")
     pretokeniser = tp.Split(pattern=Regex(punctuation_regex_str_no_hyphenish),
                             behavior="isolated")
-    normalizer = tn.NFKC()  # Turn weird letters into normal letters, and leave accents on top of their letters.
+    normalizer = tn.NFKC()  # Turn weird letters into normal letters, and leave accents on top of their letters. TODO: For Dutch, you want to remove all ´ and ` but keep all ¨ and ^. There is no normaliser for that.
 
     def wordSeparator(s: str) -> str:
         return " ".join([w.strip() for w, _ in pretokeniser.pre_tokenize_str(normalizer.normalize_str(s))])

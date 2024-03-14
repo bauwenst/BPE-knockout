@@ -96,7 +96,7 @@ def imputeConfig_OscarCelexSennrich(config_in_progress: ProjectConfig):
     if config_in_progress.lemma_counts is not None and not config_in_progress.lemma_counts.exists():
         print(f"{language_object.display_name()} lemma weights not found. Counting...")
         from ..datahandlers.hf_corpora import dataloaderToWeights, generateDataloader_Oscar, punctuationPretokeniserExceptHyphens
-        dataloader, size = generateDataloader_Oscar(lang=language_object.to_tag(),
+        dataloader, size = generateDataloader_Oscar(langtag=language_object.to_tag(),
                                                     sentence_preprocessor=punctuationPretokeniserExceptHyphens(),
                                                     size_limit=30_000_000)
         weights = dataloaderToWeights(dataloader, config_in_progress.lemma_counts.stem, size)  # Takes about 28h30m (English), 4h30m (Dutch), ...
@@ -125,6 +125,7 @@ def imputeConfig_OscarCelexSennrich(config_in_progress: ProjectConfig):
 @dataclass
 class Project:
     config: ProjectConfig=None
+    log_to_console: bool=False
 
 Pℛ𝒪𝒥ℰ𝒞𝒯 = Project(setupDutch())
 # All files access this object for paths. Because it is an object, its fields can be changed by one
