@@ -1,18 +1,19 @@
 import itertools
 import math
 import scipy
+from tktkt.interfaces.tokeniser import Tokeniser
+
+from tktkt.util.printing import *
+from tktkt.util.timing import *
+from tktkt.evaluation.morphological import intrinsicEvaluation, ConfusionMatrix, compareSplits_cursors, morphologyVersusTokenisation, TokeniserEvaluation, tokeniseAndDecode
+from tktkt.models.huggingface.wrapper import HuggingFaceTokeniser
 
 from tst.visualisation.graphing import *
-from tst.tokenisation.measuring import *
+from tst.tokenisation.robbert_tokenizer import robbert_tokenizer, getMergeList_RobBERT
 
 from bpe_knockout.knockout.core import *
-from bpe_knockout.auxiliary.printing import lprint
-from bpe_knockout.auxiliary.robbert_tokenizer import robbert_tokenizer, getMergeList_RobBERT
-from bpe_knockout.auxiliary.tokenizer_interface import tokenizeAsWord
-
-from bpe_knockout.project.config import Pℛ𝒪𝒥ℰ𝒞𝒯, morphologyGenerator, lexiconWeights, setupEnglish, setupDutch, setupGerman, ProjectConfig, TemporaryContext
+from bpe_knockout.project.config import Pℛ𝒪𝒥ℰ𝒞𝒯, morphologyGenerator, lexiconWeights, setupEnglish, setupDutch, setupGerman, TemporaryContext
 from bpe_knockout.project.paths import PATH_DATA_TEMP
-
 from bpe_knockout.datahandlers.wordfiles import ACCENTS
 
 
@@ -37,8 +38,8 @@ def assert_tokenisers_equal(tokeniser1=robbert_tokenizer, tokeniser2=untrained_b
         total += 1
         lemma = obj.lemma()
 
-        tokens1 = tokenizeAsWord(lemma, tokenizer=tokeniser1)
-        tokens2 = tokenizeAsWord(lemma, tokenizer=tokeniser2)
+        tokens1 = tokeniseAndDecode(lemma, tokeniser=tokeniser1)
+        tokens2 = tokeniseAndDecode(lemma, tokeniser=tokeniser2)
         # if any(["Ã" in t or "Â" in t or "'" in t
         #         for t in robbert_tokenizer.tokenize(lemma)]):  # Weird Latin-1 or pretokeniser stuff I don't want to deal with. As long as 99.9% of all words are segmented the same, it's fine by me.
         #     # print("Unicode might cause assertion failure:", lemma)
@@ -104,7 +105,7 @@ def time_iterators():
 
     # Time to generate objects + tokenise fast: 21s - 13s = 8s
     for morpho in morphologyGenerator():
-        " ".join(tokenizeAsWord(morpho.lemma(), tokenizer=robbert_tokenizer)).strip()
+        " ".join(tokeniseAndDecode(morpho.lemma(), tokeniser=robbert_tokenizer)).strip()
 
     # Time to generate objects + get morph split: 24s - 13s = 11s
     for morpho in morphologyGenerator():
@@ -112,12 +113,12 @@ def time_iterators():
 
     # Time to generate objects + tokenise slow: 1m35s - 13s = 1m22s  (more than 10x difference with fast tokenizer)
     for morpho in morphologyGenerator():
-        " ".join(tokenizeAsWord(morpho.lemma(), tokenizer=bte_tokenizer)).strip()
+        " ".join(tokeniseAndDecode(morpho.lemma(), tokeniser=bte_tokenizer)).strip()
 
     # Time to generate objects + get morph split + tokenise fast: 34s
     for morpho in morphologyGenerator():
         morpho.morphSplit()
-        " ".join(tokenizeAsWord(morpho.lemma(), tokenizer=robbert_tokenizer)).strip()
+        " ".join(tokeniseAndDecode(morpho.lemma(), tokeniser=robbert_tokenizer)).strip()
 
 
 def test_onlyTrivials():
@@ -132,10 +133,12 @@ def test_onlyTrivials():
             bte.merge_graph.knockout(trivial.childType())
 
         # Evaluate
-        results = test_tokenizers_batch([bte], reweighting_function=lambda x: x)
+        results = intrinsicEvaluation([bte], do_whole_word=True,
+                                      reweighting_function=lambda x: x)
         addEvaluationToTable(table, results,
                              row_prefix=["Dutch", "linear test"], row_names=["nolong"])
-        results = test_tokenizers_batch([bte], reweighting_function=lambda x: 1 + math.log10(x))
+        results = intrinsicEvaluation([bte], do_whole_word=True,
+                                      reweighting_function=lambda x: 1 + math.log10(x))
         addEvaluationToTable(table, results,
                              row_prefix=["Dutch", "log test"], row_names=["nolong"])
 
@@ -218,10 +221,9 @@ def test_iterative():
         for holdout, prefix in HOLDOUTS:
             # Make the intermediate testing framework by capturing the table AND the holdout prefix.
             class ForIntermediateTests(Evaluator):
-                def evaluate(self, tokeniser: BasicStringTokeniser, holdout: Holdout, experiment_names: List[str]):
-                    results = test_tokenizers_batch([tokeniser],
-                                                    reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter,
-                                                    holdout=holdout)
+                def evaluate(self, tokeniser: Tokeniser, holdout: Holdout, experiment_names: List[str]):
+                    results = intrinsicEvaluation([tokeniser], do_whole_word=True,
+                                                  reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=holdout)
                     addEvaluationToTable(table, results,
                                          row_prefix=[prefix] + experiment_names[:-1],
                                          row_names=[experiment_names[-1]])
@@ -278,24 +280,25 @@ def addEvaluationToTable(table: Table, results: List[TokeniserEvaluation], macro
         # Add to table
         table.set(tokeniser.vocabsize, row, [COLUMN_NAME_VOCAB])
 
-        pr, re, f1 = tokeniser.cm_morph.compute() if not macro_average_all else SegmentationConfusionMatrix.computeMatrixMacroAverage([r.cm_morph for r in results])
+        pr, re, f1 = tokeniser.cm_morph.computePrReF1() if not macro_average_all else ConfusionMatrix.computeMatrixMacroAverage([r.cm_morph for r in results])
         table.set(pr, row, [COLUMN_NAME_M, COLUMN_NAME_UNWEIGHTED, COLUMN_NAME_Pr])
         table.set(re, row, [COLUMN_NAME_M, COLUMN_NAME_UNWEIGHTED, COLUMN_NAME_Re])
         table.set(f1, row, [COLUMN_NAME_M, COLUMN_NAME_UNWEIGHTED, COLUMN_NAME_F1])
 
         if tokeniser.cm_morph_w:
-            pr, re, f1 = tokeniser.cm_morph_w.compute()  if not macro_average_all else SegmentationConfusionMatrix.computeMatrixMacroAverage([r.cm_morph_w for r in results])
+            pr, re, f1 = tokeniser.cm_morph_w.computePrReF1()  if not macro_average_all else ConfusionMatrix.computeMatrixMacroAverage([r.cm_morph_w for r in results])
             table.set(pr, row, [COLUMN_NAME_M, COLUMN_NAME_WEIGHTED, COLUMN_NAME_Pr])
             table.set(re, row, [COLUMN_NAME_M, COLUMN_NAME_WEIGHTED, COLUMN_NAME_Re])
             table.set(f1, row, [COLUMN_NAME_M, COLUMN_NAME_WEIGHTED, COLUMN_NAME_F1])
 
-        pr, re, f1 = tokeniser.cm_lex.compute()  if not macro_average_all else SegmentationConfusionMatrix.computeMatrixMacroAverage([r.cm_lex for r in results])
-        table.set(pr, row, [COLUMN_NAME_L, COLUMN_NAME_UNWEIGHTED, COLUMN_NAME_Pr])
-        table.set(re, row, [COLUMN_NAME_L, COLUMN_NAME_UNWEIGHTED, COLUMN_NAME_Re])
-        table.set(f1, row, [COLUMN_NAME_L, COLUMN_NAME_UNWEIGHTED, COLUMN_NAME_F1])
+        if tokeniser.cm_lex:
+            pr, re, f1 = tokeniser.cm_lex.computePrReF1()  if not macro_average_all else ConfusionMatrix.computeMatrixMacroAverage([r.cm_lex for r in results])
+            table.set(pr, row, [COLUMN_NAME_L, COLUMN_NAME_UNWEIGHTED, COLUMN_NAME_Pr])
+            table.set(re, row, [COLUMN_NAME_L, COLUMN_NAME_UNWEIGHTED, COLUMN_NAME_Re])
+            table.set(f1, row, [COLUMN_NAME_L, COLUMN_NAME_UNWEIGHTED, COLUMN_NAME_F1])
 
         if tokeniser.cm_lex_w:
-            pr, re, f1 = tokeniser.cm_lex_w.compute()  if not macro_average_all else SegmentationConfusionMatrix.computeMatrixMacroAverage([r.cm_lex_w for r in results])
+            pr, re, f1 = tokeniser.cm_lex_w.computePrReF1()  if not macro_average_all else ConfusionMatrix.computeMatrixMacroAverage([r.cm_lex_w for r in results])
             table.set(pr, row, [COLUMN_NAME_L, COLUMN_NAME_WEIGHTED, COLUMN_NAME_Pr])
             table.set(re, row, [COLUMN_NAME_L, COLUMN_NAME_WEIGHTED, COLUMN_NAME_Re])
             table.set(f1, row, [COLUMN_NAME_L, COLUMN_NAME_WEIGHTED, COLUMN_NAME_F1])
@@ -338,19 +341,21 @@ def main_tokenDiffs():
         histo = Histogram(f"knockout_tokendiffs_{RefMode.toLetter(mode)}", caching=CacheMode.IF_MISSING)
         if histo.needs_computation:
             # TODO: You should kinda treat the confusion matrix as a figure.
-            cm = SegmentationConfusionMatrix()
+            cm = ConfusionMatrix()
             bte = BTE(BteInitConfig(knockout=mode))
             for obj in morphologyGenerator():
                 lemma = obj.lemma()
 
-                tokens_bpe = tokenizeAsWord(lemma, tokenizer=bpe)
-                tokens_bte = tokenizeAsWord(lemma, tokenizer=bte)
+                tokens_bpe = tokeniseAndDecode(lemma, tokeniser=bpe)
+                tokens_bte = tokeniseAndDecode(lemma, tokeniser=bte)
 
                 histo.add(len(tokens_bte) - len(tokens_bpe))
-                cm.add(reference=" ".join(tokens_bpe), candidate=" ".join(tokens_bte))
+                tp, predicted, relevant, total = compareSplits_cursors(candidate=" ".join(tokens_bte),
+                                                                       reference=" ".join(tokens_bpe))
+                cm.add(tp, predicted, relevant, total, 1)
 
             print("BPE as reference, BPE-knockout as candidate:")
-            cm.computeAndDisplay(indent=1)
+            cm.displayRePrF1(indent=1)
 
         histo.commit_histplot(binwidth=1, x_tickspacing=1, x_label="Increase in token amount", y_label="Fraction of lemmata",
                               relative_counts=True, x_lims=(-2, +5), y_tickspacing=10, center_ticks=True,
@@ -455,7 +460,8 @@ def main_intrinsicModes():
         print("===== CONSTRUCTING", len(fullsets), "BTE TOKENISERS =====")
         print("Expected wait time:", 2*total_stages, "minutes.")
         tkzrs = [BTE(BteInitConfig(knockout=m1, anneal=m2, do_swap_stages=m3)) for m1, m2, m3 in fullsets]
-        results = test_tokenizers_batch(tkzrs, reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
+        results = intrinsicEvaluation(tkzrs, do_whole_word=True,
+                                      reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
         addEvaluationToTable(table, results)
 
     commitEvaluationTable(table)
@@ -481,7 +487,7 @@ def main_intrinsicMultilingual():
         - 4 knockout tokenisers per language (and 2 non-knockout outside of that).
     Since every test should take 2 minutes, the estimated runtime is (4*1.5 + 6*2)*3 = 54 minutes.
     """
-    table = Table("bte-intrinsic-bigtable", caching=CacheMode.IF_MISSING)
+    table = Table("bte-intrinsic-bigtable", caching=CacheMode.NONE)
     DROPOUT_TESTS = 10
     DROPOUT_RATE  = 0.1
     HOLDOUT_SPLIT = 0.5
@@ -498,16 +504,18 @@ def main_intrinsicMultilingual():
                 name_of_language = language.language_name.capitalize()
 
                 # --- BPE ---
-                bpe          = language.base_tokeniser.toFastBPE()
-                bpe_dropout  = language.base_tokeniser.toFastBPE()
-                bpe_dropout.backend_tokenizer.model.dropout = DROPOUT_RATE
+                bpe          = HuggingFaceTokeniser(language.base_tokeniser.toFastBPE(), for_single_words=True)
+                bpe_dropout  = HuggingFaceTokeniser(language.base_tokeniser.toFastBPE(), for_single_words=True)
+                bpe_dropout.backend.backend_tokenizer.model.dropout = DROPOUT_RATE
 
-                results = test_tokenizers_batch([bpe], reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
+                results = intrinsicEvaluation([bpe], do_whole_word=True,
+                                              reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
                 addEvaluationToTable(table, results,
                                      row_prefix=[name_of_language, "BPE"],
                                      row_names=[ROW_NAME_BASE])
 
-                results = test_tokenizers_batch([bpe_dropout]*DROPOUT_TESTS, reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
+                results = intrinsicEvaluation([bpe_dropout]*DROPOUT_TESTS, do_whole_word=True,
+                                              reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
                 addEvaluationToTable(table, results, macro_average_all=True,
                                      row_prefix=[name_of_language, "BPE"],
                                      row_names=["dropout"])
@@ -522,14 +530,14 @@ def main_intrinsicMultilingual():
                 # bte_knockout_weighted = BTE(BteInitConfig(knockout=mode, weighted_training=True))
 
                 # Using full test set
-                results = test_tokenizers_batch([bte_knockout],  #, bte_knockout_keeplong, bte_knockout_weighted],
+                results = intrinsicEvaluation([bte_knockout], do_whole_word=True,  #, bte_knockout_keeplong, bte_knockout_weighted],
                                                 reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=None)
                 addEvaluationToTable(table, results,
                                      row_prefix=[name_of_language, "BPE-knockout"],
                                      row_names=[ROW_NAME_BASE, "keep long", "weighted"])
 
                 # Using partial test set
-                results = test_tokenizers_batch([bte_knockout_holdout],
+                results = intrinsicEvaluation([bte_knockout_holdout], do_whole_word=True,
                                                 reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=holdout)
                 addEvaluationToTable(table, results,
                                      row_prefix=[name_of_language, "BPE-knockout"],
@@ -542,8 +550,8 @@ def main_intrinsicMultilingual():
 def main_intrinsicMonolingual_KeepLong():
     table = Table("bte-intrinsic-keeplong", caching=CacheMode.IF_MISSING)
     if table.needs_computation:
-        results = test_tokenizers_batch(
-            [BTE(BteInitConfig(knockout=mode, keep_long_merges=True)) for mode in modes_to_test],
+        results = intrinsicEvaluation(
+            [BTE(BteInitConfig(knockout=mode, keep_long_merges=True)) for mode in modes_to_test], do_whole_word=True,
             reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter
         )
         addEvaluationToTable(table, results)
@@ -559,8 +567,8 @@ def main_intrinsicMonolingual_Holdout():
         mode = modes_to_test[0]
         for f in reversed(HOLDOUTS):
             holdout = Holdout(f)
-            results = test_tokenizers_batch(
-                [BTE(BteInitConfig(knockout=mode, keep_long_merges=False), holdout=holdout)],
+            results = intrinsicEvaluation(
+                [BTE(BteInitConfig(knockout=mode, keep_long_merges=False), holdout=holdout)], do_whole_word=True,
                 reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=holdout
             )
             addEvaluationToTable(table, results,
@@ -586,12 +594,12 @@ def main_intrinsicMonolingual_WeightedTraining():
             Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter = lambda x: 1 + math.log10(x)
             tokenisers.append(BTE(BteInitConfig(knockout=mode, weighted_training=True, keep_long_merges=keeplong)))
 
-            results_idweighted = test_tokenizers_batch(
-                tokenisers,
+            results_idweighted = intrinsicEvaluation(
+                tokenisers, do_whole_word=True,
                 reweighting_function=lambda x: x
             )
-            results_logweighted = test_tokenizers_batch(
-                tokenisers,
+            results_logweighted = intrinsicEvaluation(
+                tokenisers, do_whole_word=True,
                 reweighting_function=lambda x: 1 + math.log10(x)
             )
 
@@ -645,8 +653,8 @@ def main_deleteRandomMerges():
             bte.syncWithGraph()
 
             # Evaluate
-            cm, cm_w = morphologyVersusTokenisation(MorphSplit(), bte, log_name=bte.name, quiet=True)
-            pr, re, f1 = cm.compute()
+            cm, cm_w = morphologyVersusTokenisation(morphologyGenerator(), MorphSplit(), bte, log_name=bte.name, quiet=True)
+            pr, re, f1 = cm.computePrReF1()
             return pr, re, f1
 
         # Ordinarily, this experiment would take many hours. However, all the samples we need are entirely
@@ -732,8 +740,8 @@ def main_deleteLastMerges():
                 bte.syncWithGraph()
 
             # Evaluate
-            cm, _ = morphologyVersusTokenisation(MorphSplit(), bte, log_name=bte.name + f"_minus_{p}%", quiet=False, weights=None)
-            pr, re, f1 = cm.compute()
+            cm, _ = morphologyVersusTokenisation(morphologyGenerator(), MorphSplit(), bte, log_name=bte.name + f"_minus_{p}%", quiet=False, weights=None)
+            pr, re, f1 = cm.computePrReF1()
 
             results.append((pr,re,f1))
 
@@ -821,8 +829,8 @@ def main_deleteLastLeaves():
             bte.syncWithGraph()
 
             # Evaluate
-            cm, cm_w = morphologyVersusTokenisation(MorphSplit(), bte, log_name=bte.name + f"_minus_{p}%", quiet=False)
-            pr, re, f1 = cm.compute()
+            cm, cm_w = morphologyVersusTokenisation(morphologyGenerator(), MorphSplit(), bte, log_name=bte.name + f"_minus_{p}%", quiet=False)
+            pr, re, f1 = cm.computePrReF1()
 
             results.append((pr,re,f1))
 
@@ -845,25 +853,27 @@ def main_wholeWordCeiling():
     for language in getAllConfigs():
         with TemporaryContext(language):
             weights = lexiconWeights(Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
-            cm   = SegmentationConfusionMatrix()
-            cm_w = SegmentationConfusionMatrix()
+            cm   = ConfusionMatrix()
+            cm_w = ConfusionMatrix()
 
             for obj in morphologyGenerator():
                 best_possible_segmentation = obj.morphSplit()
                 only_whole_words           = obj.lexemeSplit()
 
-                cm.add(candidate=best_possible_segmentation, reference=only_whole_words)
+                tp, predicted, relevant, total = compareSplits_cursors(candidate=best_possible_segmentation,
+                                                                       reference=only_whole_words)
                 amplification = weights.get(obj.lemma(), 1)
-                cm_w.add(candidate=best_possible_segmentation, reference=only_whole_words, weight=amplification)
+                cm.add(  tp, predicted, relevant, total, 1)
+                cm_w.add(tp, predicted, relevant, total, amplification)
 
             print(language.language_name, "whole-word boundaries:")
             print("\tUnweighted:")
-            cm.computeAndDisplay(indent=2)
+            cm.displayRePrF1(indent=2)
             print("\tWeighted:")
-            cm_w.computeAndDisplay(indent=2)
+            cm_w.displayRePrF1(indent=2)
 
             addEvaluationToTable(table, [TokeniserEvaluation(name=language.language_name, vocabsize=0,
-                                                             cm_morph=SegmentationConfusionMatrix(), cm_morph_w=SegmentationConfusionMatrix(),
+                                                             cm_morph=ConfusionMatrix(), cm_morph_w=ConfusionMatrix(),
                                                              cm_lex=cm, cm_lex_w=cm_w)], row_prefix=[language.language_name, ""], row_names=["ideal"])
 
     commitEvaluationTable(table)
@@ -896,8 +906,8 @@ def main_blameThreshold():
                 bte.syncWithGraph()
 
                 # Evaluate
-                cm, _ = morphologyVersusTokenisation(MorphSplit(), bte)
-                pr, re, f1 = cm.compute()
+                cm, _ = morphologyVersusTokenisation(morphologyGenerator(), MorphSplit(), bte)
+                pr, re, f1 = cm.computePrReF1()
                 g2.add("Pr",    minimal_blame, pr)
                 g2.add("Re",    minimal_blame, re)
                 g2.add("$F_1$", minimal_blame, f1)

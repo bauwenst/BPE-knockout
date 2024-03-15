@@ -1,7 +1,0 @@
-data/
-.idea/
-models/
-src/__pycache__/
-
-venv/
-.env/

@@ -7,8 +7,9 @@ import gc
 from tqdm.auto import tqdm
 
 from ..project.paths import *
-from ..auxiliary.timing import timeit
-from ..auxiliary.printing import wprint, intsep
+from .unicode import *
+from tktkt.util.timing import *
+from tktkt.util.printing import *
 
 
 def iterableToWordsFile(line_iterable: Iterable[str], output_file: Path,
@@ -227,7 +228,14 @@ def trimWordFile(words_path: Path, minimum: int) -> Path:
 @timeit
 def cleanWordFile(words_path: Path) -> Path:
     """
-    For the Dutch OSCAR corpus, there seem to be erroneously long entries, as well as non-Dutch entries.
+    Here's how the cleaning system works:
+        - Filter out words that are too long or weirdly numerical.
+        - Clean away several characters (e.g. control characters) inside the remaining words.
+        - Normalise some character like hyphen-esque characters.
+        - Filter out words whose characters don't match a limited set of characters.
+            - Using a given set of regexes, this filtering step is attempted to be explained. (Even if no explanation is found, you STILL filter it out.)
+
+    About length filtering: for the Dutch OSCAR corpus, there seem to be erroneously long entries, as well as non-Dutch entries.
     However, there are also long entries that are legit and longer than some non-legit entries:
         - geschillenbeslechtingsprocessen: 31 chars
         - socialehuisvestingsmaatschappijen: 33 chars
@@ -244,7 +252,6 @@ def cleanWordFile(words_path: Path) -> Path:
     In short: we need some cleaning before processing.
 
     Some watertight rules:
-        - Delete any word with a character in the below regexes (very foreign alphabets).
         - Delete any word that's way too long.
         - Delete any word that contains an underscore.
         - Delete any word that has disjunct numbers in it (highly likely to be an internet username; will exclude "H2O2" and "H2CO3" and so on, but not CO2 or H2O)
@@ -254,8 +261,7 @@ def cleanWordFile(words_path: Path) -> Path:
     the corpus, but since there exist honest camelcased words (iPod, kWh, mAh, pH, dB ...) I will let those slide.
     I'm hoping that the sheer size of OSCAR means that true words are orders of magnitude more impactful than exceptions.
 
-    Would be a neat experiment to indicate which parts of the word distribution are fraudulent. I think that most of the
-    spam is not at frequency 1, but rather 10-100. At frequency 1 you find authentic words:
+    Most of the spam is not at frequency 1, but rather 10-100. At frequency 1 you find authentic words:
         appeltiramisu 1
         pluimveevertegenwoordigers 1
         arbeidstherapeuthische 1
@@ -274,61 +280,60 @@ def cleanWordFile(words_path: Path) -> Path:
         dameszwemteam 1
     """
     MAX_LENGTH = 60
-
     CONTAINS_DISJUNCT_DIGITS = re.compile(r"[A-z]+[0-9]+[A-z]+[0-9]+[A-z0-9]*")
     # CAPITAL_CHARACTERS = re.compile(r"[A-Z]")
 
     new_path = generatePathForCleanedFile(words_path)
     removed = 0
+    error_explanations = Counter()
     with open(new_path, "w", encoding="utf-8") as out_handle:
         with open(words_path, "r", encoding="utf-8") as in_handle:
             for raw_word, raw_count in iterateWordsFile(in_handle):
+                # Long input
                 if len(raw_word) > MAX_LENGTH:
                     removed += 1
                     continue
-                if "_" in raw_word or CONTAINS_DISJUNCT_DIGITS.search(raw_word):  # Internet usernames
+
+                # Internet usernames
+                if "_" in raw_word or CONTAINS_DISJUNCT_DIGITS.search(raw_word):
                     removed += 1
                     continue
                 # if raw_word[0].islower() and CAPITAL_CHARACTERS.search(raw_word[1:]):
                 #     continue
-                if detectForeignAlphabets(raw_word):
-                    removed += 1
-                    continue
 
-                out_handle.write(f"{raw_word} {raw_count}\n")
+                # Sanitise word
+                raw_word = dashes_to_replace.sub("-", raw_word)
+                raw_word = CONTROL_CHARACTERS.sub("", FILTERED_WHITESPACE.sub("", C_AND_R.sub("", raw_word)))
+
+                # Check for alphabet violation
+                for c in raw_word:
+                    if not all_allowed_characters.match(c):
+                        # Violation found; this word will be filtered out. Try to find explanation.
+                        explanation = None
+                        for key, pattern in UNICODE_EXPLANATIONS.items():
+                            if pattern.match(c):
+                                explanation = key
+                                break
+
+                        error_explanations[explanation or "unexplained"] += 1
+                        removed += 1
+                        break
+                else:  # Never reached 'break' so you never violated.
+                    out_handle.write(f"{raw_word} {raw_count}\n")
+
 
     print("Removed", removed, "words from the count file.")
+    print("Distribution:", error_explanations)
+    print("Unexplained:", error_explanations["unexplained"])
     return new_path
 
 
-CHINESE_CHARACTERS = re.compile(r"[\u4e00-\u9fff]")  # https://stackoverflow.com/a/34587623/9352077
-INDIAN_CHARACTERS  = re.compile(r"[\u0900-\u097F]|[\u0980-\u09FF]|[\u0A80-\u0AFF]|[\u0D00-\u0D7F]")  # https://en.wikipedia.org/wiki/Brahmic_scripts#Unicode_of_Brahmic_scripts
-SRI_LANKAN_CHARACTERS = re.compile(r"[\u0D80-\u0DFF]")
-LAO_CHARACTERS     = re.compile(r"[\u0E80-\u0EFF]")
-THAI_CHARACTERS    = re.compile(r"[\u0E00-\u0E7F]")  # https://en.wikipedia.org/wiki/Thai_script
-JAPANESE_CHARACTERS = re.compile(r"[\u4E00-\u9FBF]|[\u3040-\u309F]|[\u30A0-\u30FF]")  # https://en.wikipedia.org/wiki/Japanese_writing_system
-KOREAN_CHARACTERS  = re.compile(r"[\u1100-\u11FF]|[\u3130-\u318F]|[\uA960-\uA97F]|[\uD7B0-\uD7FF]")  # https://en.wikipedia.org/wiki/Hangul
-HEBREW_CHARACTERS  = re.compile(r"[\u0590-\u05FF]")  # https://en.wikipedia.org/wiki/Hebrew_alphabet
-ARABIC_CHARACTERS  = re.compile(r"[\u0600-\u06FF]")  # https://en.wikipedia.org/wiki/Arabic_script
-GREEK_CHARACTERS   = re.compile(r"[\u0370-\u03FF]")  # https://en.wikipedia.org/wiki/Greek_script_in_Unicode
-UNICODE_PRIVATE_USE = re.compile(r"[\uE000-\uF8FF]")  # https://www.compart.com/en/unicode/block/U+E000
-EMOJI              = re.compile(r"[\u25a0-\u27bf]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff]")  # https://stackoverflow.com/a/67705964/9352077
-SPECIAL_CHARACTERS = re.compile(r"\u202C|\uFF01")  # Two weird characters that appear in OSCAR.
-# C_AND_R            = re.compile(r"\u00a9|\u00ae")
-
-FOREIGN_ALPHABETS = {
-    "Chinees": CHINESE_CHARACTERS, "Indisch": INDIAN_CHARACTERS, "Sri-Lankaans": SRI_LANKAN_CHARACTERS, "Lao": LAO_CHARACTERS, "Thai": THAI_CHARACTERS,
-    "Japans": JAPANESE_CHARACTERS, "Koreaans": KOREAN_CHARACTERS, "Hebreeuws": HEBREW_CHARACTERS, "Arabisch": ARABIC_CHARACTERS, "Grieks": GREEK_CHARACTERS,
-    "Unicode private": UNICODE_PRIVATE_USE, "emoji": EMOJI, "andere": SPECIAL_CHARACTERS
-}
-
-
-def detectForeignAlphabets(string: str):
-    for p in FOREIGN_ALPHABETS.values():
-        match = p.search(string)
-        if match:
-            return match
-    return None
+# def detectForeignAlphabets(string: str):
+#     for p in UNICODE_EXPLANATIONS.values():
+#         match = p.search(string)
+#         if match:
+#             return match
+#     return None
 
 
 ACCENTS = re.compile("[áàäâãéèëêíìïîóòöôõúùüû]")
