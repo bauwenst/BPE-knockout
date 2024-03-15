@@ -8,7 +8,11 @@ TODO:
     - If you combine annealing and knockout, it could be an idea to have the first be based on a
       heuristic, and have the second iterate as many times as the first. I.e.: if knockout removes 100 merges, anneal
       then adds 100 merges, ending up with the same vocab size.
-    - Holdout ratio and seed should be part of the config, as should the fact of whether or not knockout has already been run.
+    - The config should contain:
+        - Holdout ratio
+        - Random seed
+        - Whether knockout has already been run
+        - SoW/EoW
 """
 import dataclasses
 from enum import Enum
@@ -18,6 +22,7 @@ import time
 from collections import Counter
 from pathlib import Path
 
+from tktkt.evaluation.morphological import tokeniseAndDecode
 from tktkt.preparation.spacemarking import SpaceMarkerLocation
 from tqdm.auto import tqdm
 import re
@@ -31,7 +36,6 @@ from tktkt.util.printing import *
 from tktkt.interfaces.tokeniser import TokeniserWithVocab
 from tktkt.preparation.instances import BoundariesFromSpacesPretokeniser, RobertaSpaceMarker, AddWordBoundary, TextMapper, IdentityMapper, PseudoByteMapping, Preprocessor, SpaceMarker
 
-SOW = "Ġ"  # FIXME: This start-of-word has to be removed in favour of self.boundary_marker, but it'll take some surgery to get this to work.
 MergeAsTuple = Tuple[int, str, str]
 
 @dataclasses.dataclass
@@ -490,26 +494,6 @@ class BTE(TokeniserWithVocab):
         """
         log = doPrint(Pℛ𝒪𝒥ℰ𝒞𝒯.log_to_console)
 
-        def preprocessSegmentedString(segmentation: str) -> str:
-            segmentation = segmentation.replace(" ", SPLIT_MARKER)
-            segmentation = "".join(self.preprocessor.do(segmentation))
-            segmentation = segmentation.replace(SPLIT_MARKER, " ")
-            return segmentation
-            # make_bytes = PseudoByteMapping()
-            # add_boundary = AddWordBoundary(self.boundary_marker)
-            # segments = segmentation.split()
-            # for i in range(len(segments)):
-            #     # Convert to bytes
-            #     if self.config.bytebased == ByteBasedMode.INPUT_TO_BYTES:
-            #         segments[i] = make_bytes.convert(segments[i])
-            #
-            #     # Technically this violates separation of concerns because AddWordBoundary(self.boundary_marker) does almost exactly this.
-            #     if i == 0 and self.boundary_marker.location == SpaceMarkerLocation.START:
-            #         segments[i] = self.boundary_marker.substitute + segments[i]
-            #     if i == len(segments)-1 and self.boundary_marker.location == SpaceMarkerLocation.END:
-            #         segments[i] = segments[i] + self.boundary_marker.substitute
-            # return " ".join(segments)
-
         weights = lexiconWeights() if self.config.weighted_training else dict()
 
         merge_lookup = {m.priority: m for m in self.merge_graph.merges}
@@ -523,32 +507,32 @@ class BTE(TokeniserWithVocab):
 
             # Get morphological split
             reference_segmentation = self.knockout_segmentation(obj)
-            reference_segmentation = preprocessSegmentedString(reference_segmentation)
+            reference_segmentation = self._preprocessAlreadySegmentedString(reference_segmentation)
 
             # Get BPE split and the ID of the merge that caused a space to disappear at each index.
-            # FIXME: Pretokenisation is completely off here.
-            #       - Minor problem: this line and the ones below are specific to using RobBERT's vocabulary. Any BPE
-            #         tokeniser that doesn't have a SoW (and specifically the SoW defined at the top of this file) won't work.
-            #       - Major problem: you are segmenting a lemma without converting it to byte-based representation (if
-            #         applicable to your vocab). That means that byte-based BPE will NOT recognise letters like ë and
-            #         hence never merge with it, so you can never blame those merges.
-            #  To fix this problem, there are two things to do:
-            #       - Segment strings as if they're in a corpus: technically you want to do exactly what tokeniseAndDecode does,
+            #  - You need to pass the lemma to applyMerges_diagnostic. You cannot just prepend a SoW for this. Here's why:
+            #       - Minor problem: any BPE tokeniser that doesn't have a SoW (and specifically the SoW you use) won't work.
+            #       - Major problem: you'd be segmenting a lemma without converting it to byte-based representation (if
+            #         applicable to your vocab). That means that byte-based BPE will not recognise letters like ë (it is
+            #         used to seeing Ã«) and hence never merge with it, so you can never blame those merges.
+            #  - You need to tackle two problems:
+            #       - Segment strings as if they're in a corpus, which means you need to run the full pretokeniser on
+            #         the input. Technically you want to do exactly what tokeniseAndDecode does,
             #         which is to say: run preprocessor, tokenise every pretoken, concatenate into one token list, run
             #         the inverse preprocessor on all tokens, join with spaces, and strip. This is what happens during
             #         evaluation, where you only need segmentation boundaries.
             #       - However, you also need to get the index-to-merge diagnosis, whose indices refer to the string as
-            #         seen by the tokeniser, which is to say:
-            #           1. originating from a modified version of the string that has both the SoW and the byte characters, and
-            #           2. if the string has multiple pretokens, each pretoken obviously resets the index to 0.
+            #         seen by the tokeniser rather than the raw lemma string, which is to say:
+            #               1. originating from a modified version of the string that has both the SoW and the byte characters, and
+            #               2. if the string has multiple pretokens, each pretoken obviously resets the index to 0.
             #         The only way around (1) is to pretokenise the reference segmentation to bring its split points
             #         into the same domain. This will require a hand-crafted pretokeniser, because you can't run a string
             #         with spaces through the actual preprocessor nor split on those spaces and run each substring through.
             #         To solve (2), you could concatenate the pretokens, or (because the tokenisers relies on them NOT
             #         being concatenated) shift all indices up by the length of the previous pretokens.
-            #  There are two inaccuracies that sneak into the calculation when you compare preprocessed segmentations:
+            #  - There are two inaccuracies that sneak into the calculation when you compare preprocessed segmentations:
             #       - You will have even more negatives than there already are, because the positions between special
-            #         bytes (like Ã and <<) will never be a split point.
+            #         bytes (like Ã and «) will never be a split point. Luckily we only care about positives here.
             #       - The reference will never have a space after SoW or before EoW because we glue it on manually, whilst
             #         BPE might predict it. For a Latin alphabet, this is very unlikely though, and even if it happens, it
             #         doesn't affect the results because it isn't a case of BPE merging too much (but rather, too little).
@@ -567,7 +551,7 @@ class BTE(TokeniserWithVocab):
             # tokens, merge_ids = self.applyMerges_diagnostic(SOW + lemma)
             # bpe_segmentation = " ".join(tokens)[len(SOW):].strip()  # The .strip() is in case the segmentation looks like "Ġ abcd efgh"
             # merge_ids = {k-len(SOW): v for k,v in merge_ids.items() if k >= len(SOW)}  # Shift indices down by the length of the SoW and filter out any entries for it.
-            assert reference_segmentation.replace(" ", "") == bpe_segmentation.replace(" ", "")
+            # assert reference_segmentation.replace(" ", "") == bpe_segmentation.replace(" ", "")
 
             # Get indices with wrongful merges. Unlike compareSplits, we don't use intersection for this.
             # This isn't the only type of error: you can also have too many splits -- a lack of merging -- which can be
@@ -628,30 +612,33 @@ class BTE(TokeniserWithVocab):
 
             # Get morphological split
             reference_segmentation = self.anneal_segmentation(obj)
+            reference_segmentation = self._preprocessAlreadySegmentedString(reference_segmentation)
 
-            # Get BPE split FIXME: Same issue as above
-            tokens = self.tokenise(SOW + lemma)
-
-            # One modification: because we neglect RobBERT's start-of-word character Ġ when doing morphological
-            # comparisons, we need to strip it from the tokenisation.
-            bpe_segmentation = " ".join(tokens)[len(SOW):].strip()
+            # Get BPE split
+            tokens = self.prepareAndTokenise(lemma)
+            bpe_segmentation = " ".join(tokens)
+            log(bpe_segmentation, "->", reference_segmentation)
 
             # Get indices with wrongful splits, i.e. indices BPE splits at but the reference doesn't say you split at
             # and hence you need to merge. Unlike compareSplits, we don't use intersection for this.
-            bpe_split_indices = {match.start() for match in SPLIT_MARKER_RE.finditer(" ".join(bpe_segmentation).replace("   ", SPLIT_MARKER))}
+            bpe_split_indices = {match.start() for match in SPLIT_MARKER_RE.finditer(" ".join(bpe_segmentation      ).replace("   ", SPLIT_MARKER))}
             ref_split_indices = {match.start() for match in SPLIT_MARKER_RE.finditer(" ".join(reference_segmentation).replace("   ", SPLIT_MARKER))}
-            letter_indices_to_merge = sorted([index//2 + 1 for index in bpe_split_indices - ref_split_indices])
+            letter_indices_that_need_to_merge = sorted([index//2 + 1 for index in bpe_split_indices - ref_split_indices])
 
-            # The indices are in terms of letters. Now get all the indices of letters with a space in front of them
-            # (including G!) and link them to token indices. Now you can use the above letter indices to find the
-            # right tokens to merge.
+            log(letter_indices_that_need_to_merge)
+
+            # These are all the letters with a space in front of them that shouldn't have a space. Now we want to convert
+            # those spaces to the token pairs that merge to delete them.
+            # Let's number all tokens, starting at 0, and map each of the letter-after-space indices to such a token identifier.
             lengths = [len(token) for token in tokens]
-            letter_indices_that_can_merge = [sum(lengths[:i+1])-1 for i in range(len(lengths)-1)]
-            which_token_precedes_that_index = {index: which for which,index in enumerate(letter_indices_that_can_merge)}
+            letter_indices_that_could_be_merged = [sum(lengths[:i+1]) for i in range(len(lengths)-1)]
+            which_token_precedes_that_index = {index: which for which,index in enumerate(letter_indices_that_could_be_merged)}
 
-            # Get (inclusive) token index spans to merge.
+            log(which_token_precedes_that_index)
+
+            # Get (inclusive) token index spans for token identifiers that actually need to merge.
             token_spans_to_merge = []
-            for index in letter_indices_to_merge:
+            for index in letter_indices_that_need_to_merge:
                 left_token_idx = which_token_precedes_that_index[index]
                 token_spans_to_merge.append((left_token_idx,left_token_idx+1))
 
@@ -671,7 +658,6 @@ class BTE(TokeniserWithVocab):
                 # spans         = list(zip(boundaries[:-1], boundaries[1:]))
 
             # Counting, finally.
-            log(bpe_segmentation, "->", reference_segmentation)
             for span_start,span_end in token_spans_to_merge:
                 merge_string = " ".join(tokens[span_start:span_end+1])
                 amenability_count[merge_string] += weight
@@ -922,6 +908,14 @@ class BTE(TokeniserWithVocab):
 
         self.syncWithGraph()
         return applied_merges
+
+    def _preprocessAlreadySegmentedString(self, segmentation: str) -> str:
+        segmentation = segmentation.replace(" ", SPLIT_MARKER)
+        segmentation = "".join(self.preprocessor.do(segmentation))
+        segmentation = segmentation.replace(SPLIT_MARKER, " ")
+        return segmentation
+
+    #################################################################################################################
 
     def getDisabledTypes(self) -> List[str]:
         """
