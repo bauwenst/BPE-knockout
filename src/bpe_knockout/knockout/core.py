@@ -492,7 +492,7 @@ class BTE(TokeniserWithVocab):
 
         Can be repeated before and after knockout; there will always be merges to blame.
         """
-        log = doPrint(Pℛ𝒪𝒥ℰ𝒞𝒯.log_to_console)
+        log = doPrint(Pℛ𝒪𝒥ℰ𝒞𝒯.debug_prints)
 
         weights = lexiconWeights() if self.config.weighted_training else dict()
 
@@ -597,7 +597,7 @@ class BTE(TokeniserWithVocab):
             ade+mb and mb+uis
         yet by merging those together, you don't get the correct split.
         """
-        log = doPrint(Pℛ𝒪𝒥ℰ𝒞𝒯.log_to_console)
+        log = doPrint(Pℛ𝒪𝒥ℰ𝒞𝒯.debug_prints)
 
         weights = lexiconWeights() if self.config.weighted_training else dict()
 
@@ -808,7 +808,7 @@ class BTE(TokeniserWithVocab):
         In the code below, when I use "triplet", I mean "thing with submerges". Often it has more than 3 subwords,
         even after just one iteration of knockout, meaning it also suggests more than one submerge.
         """
-        log = doPrint(Pℛ𝒪𝒥ℰ𝒞𝒯.log_to_console)
+        log = doPrint(Pℛ𝒪𝒥ℰ𝒞𝒯.debug_prints)
 
         if all_disqualified_merges is None:
             all_disqualified_merges = set()

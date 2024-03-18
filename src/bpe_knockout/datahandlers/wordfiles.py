@@ -54,7 +54,7 @@ def iterableToWordsFile(line_iterable: Iterable[str], output_file: Path,
     return output_file
 
 
-def iterateTxt(open_file_handle: TextIO, verbose=True):
+def iterateTxt(open_file_handle: TextIO, verbose=False):
     """
     Here's how this function works:
         - Python recognises that a 'yield' is used and not a 'return'. Hence, when you call the function, all that is
@@ -78,7 +78,7 @@ def iterateTxt(open_file_handle: TextIO, verbose=True):
             yield line.rstrip()
 
 
-def iterateWordsFile(open_file_handle: TextIO, sep=" ") -> Iterable[Tuple[str, str]]:
+def iterateWordsFile(open_file_handle: TextIO, sep=" ", verbose=False) -> Iterable[Tuple[str, str]]:
     """
     Iterating over the words file is slightly trickier than you think due to 2 technicalities that are easy to forget:
         - You must strip the newline at the end;
@@ -88,7 +88,7 @@ def iterateWordsFile(open_file_handle: TextIO, sep=" ") -> Iterable[Tuple[str, s
 
     Hence, we abstract it. The result is completely in TEXT form, even if the second part is a number.
     """
-    for stripped_line in iterateTxt(open_file_handle):
+    for stripped_line in iterateTxt(open_file_handle, verbose=verbose):
         parts = stripped_line.split(sep=sep)
         if len(parts) > 1:
             yield sep.join(parts[0:-1]), parts[-1]

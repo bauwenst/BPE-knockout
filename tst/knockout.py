@@ -307,7 +307,8 @@ def addEvaluationToTable(table: Table, results: List[TokeniserEvaluation], macro
             break
 
 
-style_evaluations     = ColumnStyle(alignment="c", aggregate_at_rowlevel=0, do_bold_maximum=True, cell_prefix=r"\tgrad{", digits=3, cell_suffix="}")
+style_evaluations     = ColumnStyle(alignment="c", aggregate_at_rowlevel=0, do_bold_maximum=True,
+                                    cell_prefix=r"\tgrad[0][50][100]{", cell_function=lambda x: 100*x, digits=1, cell_suffix="}")
 style_vocabulary_size = {(COLUMN_NAME_VOCAB,): ColumnStyle(alignment="c", cell_prefix=r"\num{", digits=0, cell_suffix="}")}
 def commitEvaluationTable(table: Table):
     table.commit(rowname_alignment="l", borders_between_columns_of_level=[0,1], borders_between_rows_of_level=[0,1],
@@ -371,7 +372,7 @@ def main_knockoutStats():
     """
     import langcodes
 
-    for language in getAllConfigs():  # Kinda sucks that you need to build the entire config to just get the name of the language which you need to check if you need to build anything.
+    for language in getAllConfigs():  # Kinda sucks that you need to build the entire config to just call .needs_computation...
         with TemporaryContext(language):
             language_object = langcodes.find(language.language_name)
             for mode in modes_to_test:
@@ -419,21 +420,46 @@ def main_baseVocabStats():
 
 @timeit
 def main_effectiveDropoutRate():
-    bte = BTE(BteInitConfig(knockout=RefMode.MORPHEMIC), autorun_modes=False)
+    """
+    Compute what the "effective dropout rate" of knockout is, i.e. the percentage of *applications* of merges that is lost.
+    You could do this in two ways:
+        - Retrospective: you know $N(m)$ for all merges, so just compute $$\sum_{m\in M\mid R(m)\geq0.5} N(m)/\sum_{m\in M} N(m)$$
+          which is "the fraction of merges that were applied that could no longer be applied".
+        - Prospective: re-tokenise everything with knockout, but at every step of every word's tokenisation, keep track
+          of how many times you still see any merge $m \in \text{dropped}$ possible. Divide that by the total amount of
+          merges possible, and you have a dropout rate. (This will likely be a lower rate because you won't reach the
+          places in a word's merge tree that require already having performed a dropped merge.)
+          There are two variants:
+            - Macro-averaged: do the division once per tokenisation state per word, then take the average of all those divisions;
+            - Micro-averaged: keep two gigantic counters that increment per tokenisation state per word.
+    """
+    table = Table("bte-effective-dropout", caching=CacheMode.IF_MISSING)
+    if table.needs_computation:
+        for language in getAllConfigs():
+            with TemporaryContext(language):
+                bte = BTE(BteInitConfig(knockout=RefMode.MORPHEMIC), autorun_modes=False)
 
-    total_merges               = 0
-    total_dropped_merges       = 0
-    total_applications         = 0
-    total_dropped_applications = 0
-    for R, N, m in bte.getBadOldMerges(relative_blame_threshold=0.0):
-        total_applications += N
-        total_merges += 1
-        if R >= 0.5:
-            total_dropped_applications += N
-            total_dropped_merges += 1
+                total_merges               = 0
+                total_dropped_merges       = 0
+                total_applications         = 0
+                total_dropped_applications = 0
+                for R, N, m in bte.getBadOldMerges(relative_blame_threshold=0.0):
+                    total_applications += N
+                    total_merges += 1
+                    if R >= BTE.KNOCKOUT_REL_THRESHOLD:
+                        total_dropped_applications += N
+                        total_dropped_merges += 1
 
-    print(f"Merge dropout rate: {total_dropped_applications}/{total_applications} = {total_dropped_applications/total_applications}")
-    print(f"Vocab dropout rate: {total_dropped_merges}/{total_merges} = {total_dropped_merges/total_merges}")
+                p_eff_app = total_dropped_applications / total_applications
+                p_eff_typ = total_dropped_merges / total_merges
+                print(language.language_name)
+                print(f"Merge dropout rate: {total_dropped_applications}/{total_applications} = {p_eff_app}")
+                print(f"Vocab dropout rate: {total_dropped_merges}/{total_merges} = {p_eff_typ}")
+
+                table.set(p_eff_app, [language.language_name.capitalize(), "BPE-knockout"], [r"$p_\text{eff,ret}$"])
+                table.set(p_eff_typ, [language.language_name.capitalize(), "BPE-knockout"], [r"$|\M^\dag|/|\M|$"])
+
+    table.commit(default_column_style=ColumnStyle(cell_function=lambda x: 100*x, digits=3, cell_suffix=r"\%"))
 
 
 @timeit
@@ -441,7 +467,7 @@ def main_intrinsicModes():
     """
     Test all combinations of annealing and knockout on intrinsic metrics (morphological Pr-Re-F1).
     """
-    table = Table("bte-intrinsic-modes", caching=CacheMode.IF_MISSING)
+    table = Table(f"bte-intrinsic-modes_{Pℛ𝒪𝒥ℰ𝒞𝒯.config.langTag()}", caching=CacheMode.IF_MISSING)
     if table.needs_computation:
         # Construct possible tokenisers
         modesets = list(itertools.product((RefMode.NONE,RefMode.MORPHEMIC,RefMode.LEXEMIC),
@@ -487,9 +513,9 @@ def main_intrinsicMultilingual():
         - 4 knockout tokenisers per language (and 2 non-knockout outside of that).
     Since every test should take 2 minutes, the estimated runtime is (4*1.5 + 6*2)*3 = 54 minutes.
     """
-    table = Table("bte-intrinsic-bigtable", caching=CacheMode.NONE)
+    table = Table("bte-intrinsic-bigtable", caching=CacheMode.IF_MISSING)
     DROPOUT_TESTS = 10
-    DROPOUT_RATE  = 0.1
+    DROPOUT_RATE  = 0.05
     HOLDOUT_SPLIT = 0.5
     if table.needs_computation:
         # Set seed for reproducibility (dropout is random)
@@ -508,13 +534,13 @@ def main_intrinsicMultilingual():
                 bpe_dropout  = HuggingFaceTokeniser(language.base_tokeniser.toFastBPE(), for_single_words=True)
                 bpe_dropout.backend.backend_tokenizer.model.dropout = DROPOUT_RATE
 
-                results = intrinsicEvaluation([bpe], do_whole_word=True,
+                results = intrinsicEvaluation([bpe], do_whole_word=True, verbose=True,
                                               reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
                 addEvaluationToTable(table, results,
                                      row_prefix=[name_of_language, "BPE"],
                                      row_names=[ROW_NAME_BASE])
 
-                results = intrinsicEvaluation([bpe_dropout]*DROPOUT_TESTS, do_whole_word=True,
+                results = intrinsicEvaluation([bpe_dropout]*DROPOUT_TESTS, do_whole_word=True, verbose=True,
                                               reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
                 addEvaluationToTable(table, results, macro_average_all=True,
                                      row_prefix=[name_of_language, "BPE"],
@@ -530,14 +556,14 @@ def main_intrinsicMultilingual():
                 # bte_knockout_weighted = BTE(BteInitConfig(knockout=mode, weighted_training=True))
 
                 # Using full test set
-                results = intrinsicEvaluation([bte_knockout], do_whole_word=True,  #, bte_knockout_keeplong, bte_knockout_weighted],
+                results = intrinsicEvaluation([bte_knockout], do_whole_word=True, verbose=True,  #, bte_knockout_keeplong, bte_knockout_weighted],
                                                 reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=None)
                 addEvaluationToTable(table, results,
                                      row_prefix=[name_of_language, "BPE-knockout"],
                                      row_names=[ROW_NAME_BASE, "keep long", "weighted"])
 
                 # Using partial test set
-                results = intrinsicEvaluation([bte_knockout_holdout], do_whole_word=True,
+                results = intrinsicEvaluation([bte_knockout_holdout], do_whole_word=True, verbose=True,
                                                 reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=holdout)
                 addEvaluationToTable(table, results,
                                      row_prefix=[name_of_language, "BPE-knockout"],
@@ -548,7 +574,7 @@ def main_intrinsicMultilingual():
 
 @timeit
 def main_intrinsicMonolingual_KeepLong():
-    table = Table("bte-intrinsic-keeplong", caching=CacheMode.IF_MISSING)
+    table = Table(f"bte-intrinsic-keeplong_{Pℛ𝒪𝒥ℰ𝒞𝒯.config.langTag()}", caching=CacheMode.IF_MISSING)
     if table.needs_computation:
         results = intrinsicEvaluation(
             [BTE(BteInitConfig(knockout=mode, keep_long_merges=True)) for mode in modes_to_test], do_whole_word=True,
@@ -561,7 +587,7 @@ def main_intrinsicMonolingual_KeepLong():
 
 @timeit
 def main_intrinsicMonolingual_Holdout():
-    table = Table("bte-intrinsic-holdout", caching=CacheMode.IF_MISSING)
+    table = Table(f"bte-intrinsic-holdout_{Pℛ𝒪𝒥ℰ𝒞𝒯.config.langTag()}", caching=CacheMode.IF_MISSING)
     if table.needs_computation:
         HOLDOUTS = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
         mode = modes_to_test[0]
@@ -579,7 +605,7 @@ def main_intrinsicMonolingual_Holdout():
 
 @timeit
 def main_intrinsicMonolingual_WeightedTraining():
-    table = Table("bte-intrinsic-weightedtraining", caching=CacheMode.IF_MISSING)
+    table = Table(f"bte-intrinsic-weightedtraining_{Pℛ𝒪𝒥ℰ𝒞𝒯.config.langTag()}", caching=CacheMode.IF_MISSING)
     if table.needs_computation:
         old_config = Pℛ𝒪𝒥ℰ𝒞𝒯.config
         ###
@@ -918,10 +944,35 @@ def main_blameThreshold():
               logx=False, y_lims=(0.3, 0.91), y_tickspacing=0.05, x_tickspacing=10)
 
 
+@timeit
+def main_intrinsicMonolingual_Dropout():
+    language = Pℛ𝒪𝒥ℰ𝒞𝒯.config
+    table = Table(f"bte-intrinsic-dropout_{language.langTag()}", caching=CacheMode.IF_MISSING)
+
+    import transformers
+    transformers.set_seed(0)
+
+    TRIALS = 10
+    DROPOUT_PROBABILITIES = [0.000, 0.005, 0.010, 0.015, 0.020, 0.025, 0.030, 0.035, 0.040, 0.045, 0.050, 0.060, 0.070, 0.080, 0.090, 0.100]
+    if table.needs_computation:
+        print("Will take about", round(2*TRIALS*len(DROPOUT_PROBABILITIES)*45/60,2), "minutes.")
+        for p in DROPOUT_PROBABILITIES:
+            print("p =", p)
+            bpe_dropout = HuggingFaceTokeniser(language.base_tokeniser.toFastBPE(), for_single_words=True)
+            bpe_dropout.backend.backend_tokenizer.model.dropout = p
+
+            results = intrinsicEvaluation([bpe_dropout]*TRIALS, do_whole_word=True, verbose=False, reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
+            addEvaluationToTable(table, results, macro_average_all=True,
+                                 row_prefix=[language.language_name.capitalize(), "BPE-dropout"],
+                                 row_names=[str(p)])
+
+    commitEvaluationTable(table)
+
+
 def sep():
     print("="*75)
 
 
 if __name__ == "__main__":
     # test_onlyTrivials()
-    main_datasetStats()
+    main_intrinsicMonolingual_Dropout()

@@ -1,6 +1,7 @@
 from typing import List
 
 from bpe_knockout.project.config import Pℛ𝒪𝒥ℰ𝒞𝒯
+from bpe_knockout.knockout.core import BTE
 from tktkt.util.timing import timeit
 
 
@@ -22,6 +23,9 @@ class BpeTree:
 
 class BpeVisualiser:
 
+    def __init__(self, tokeniser: BTE):
+        self.tokeniser = tokeniser
+
     @timeit
     def applyBPE(self, s: str):
         """
@@ -30,10 +34,10 @@ class BpeVisualiser:
         The current segmentation is saved as a list of strings.
         Merges are derived by zipping that list with itself shifted over; hence merges are represented as tuples.
         """
-        buffer = list("Ġ" + s)
+        buffer = list(s)
         mergetrees = [BpeTree(c) for c in buffer]
 
-        merges_to_ranks = {tuple(m.split(" ")): i for i, m in enumerate(Pℛ𝒪𝒥ℰ𝒞𝒯.config.base_tokeniser.loadMerges())}
+        merges_to_ranks = {tuple(m.parts): m.priority for m in self.tokeniser.merge_graph.merges}
         merges = set(merges_to_ranks.keys())
 
         hypothetical_merges = set(zip(buffer[:-1], buffer[1:]))
@@ -45,9 +49,9 @@ class BpeVisualiser:
             length_to_iterate = len(buffer) - 1
             i = 0
             while i < length_to_iterate:
-                if buffer[i] == priority_merge[0] and buffer[i + 1] == priority_merge[1]:
+                if buffer[i] == priority_merge[0] and buffer[i+1] == priority_merge[1]:
                     buffer[i:i+2] = [new_token]  # Python allows this :o
-                    mergetrees[i:i + 2] = [BpeTree(new_token, [mergetrees[i], mergetrees[i + 1]])]
+                    mergetrees[i:i+2] = [BpeTree(new_token, [mergetrees[i], mergetrees[i+1]])]
                     length_to_iterate -= 1
                 i += 1
 
@@ -57,7 +61,12 @@ class BpeVisualiser:
         return buffer, mergetrees
 
     def visualiseBPE(self, s: str):
-        tokens, trees = self.applyBPE(s)
+        tokens = []
+        trees  = []
+        for pretoken in self.tokeniser.preprocessor.do(s):
+            new_tokens, new_trees = self.applyBPE(pretoken)
+            tokens.extend(new_tokens)
+            trees.extend(new_trees)
 
         latex = r"\resizebox{\linewidth}{!}{" + "\n"
         latex += ("\n" + r"\hskip\forestskip" + "\n").join([
@@ -67,10 +76,3 @@ class BpeVisualiser:
             for tree in trees])
         latex += "}"
         return " ".join(tokens), latex
-
-
-if __name__ == "__main__":
-    viz = BpeVisualiser()
-    t, l = viz.visualiseBPE("masterthesistitelbladzijdeachtergrondfiguur")
-    print(l)
-    print(t)

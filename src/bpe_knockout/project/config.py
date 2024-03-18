@@ -125,7 +125,8 @@ def imputeConfig_OscarCelexSennrich(config_in_progress: ProjectConfig):
 @dataclass
 class Project:
     config: ProjectConfig=None
-    log_to_console: bool=False
+    debug_prints: bool=False
+    verbosity: bool=False
 
 Pℛ𝒪𝒥ℰ𝒞𝒯 = Project(setupDutch())
 # All files access this object for paths. Because it is an object, its fields can be changed by one
