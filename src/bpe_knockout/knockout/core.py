@@ -16,6 +16,7 @@ TODO:
 """
 import dataclasses
 from enum import Enum
+from functools import cache, lru_cache
 from typing import List, Dict, Callable, Tuple, Set, Iterable
 import json
 import time
@@ -406,6 +407,7 @@ class BTE(TokeniserWithVocab):
             self.merge_graph.addArc(merge_string)
         self.syncWithGraph()
 
+    @lru_cache(maxsize=1024*1024)
     def tokenise(self, pretoken: str) -> List[str]:
         """
         BPE requires two special kinds of pretokenisation that aren't really pretokenisation, before tokenising.
