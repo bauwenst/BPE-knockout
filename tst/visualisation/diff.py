@@ -68,7 +68,8 @@ if __name__ == "__main__":
     # l2 = l1.copy() + ["f", "g"]
     # npr.shuffle(l2)
     # matchListElements(l1, l2)
-
-    l1 = SennrichTokeniserPath(PATH_DATA_MODELBASE / "robbert").loadMerges()
-    l2 = SennrichTokeniserPath(PATH_DATA_MODELBASE / "bpe-oscar-nl-clean").loadMerges()
+    from bpe_knockout.project.paths import PATH_DATA_TEMP, PATH_MODELBASE
+    from bpe_knockout.auxiliary.tokenizer_interface import HuggingFaceTokeniserPath, SennrichTokeniserPath
+    l1 = HuggingFaceTokeniserPath(PATH_DATA_TEMP / "robbert_2020.json").loadMerges()
+    l2 = SennrichTokeniserPath(PATH_MODELBASE / "bpe-oscar-nl-clean").loadMerges()
     matchListElements(l1, l2, max_length=500)

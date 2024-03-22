@@ -14,6 +14,7 @@ from typing import Callable, Type, Optional, Iterable, Dict
 import json
 import math
 import langcodes
+from abc import abstractmethod, ABC
 
 # None of the below files import the config.
 from ..project.paths import *
@@ -23,7 +24,7 @@ from ..datahandlers.wordfiles import loadAndWeightLexicon
 
 
 @dataclass
-class ProjectConfig:
+class ProjectConfig(ABC):
     # Name of the tested language, e.g. "English". Should exist, so that its standardised language code can be looked up.
     language_name: str
     # Text file that contains morphological decompositions (e.g. for CELEX, each line is a word, a space, and the "StrucLab" label).
@@ -40,6 +41,10 @@ class ProjectConfig:
     def langTag(self) -> str:
         return langcodes.find(self.language_name).to_tag()
 
+    # @abstractmethod
+    # def imputeLemmaCounts(self):  # TODO: Should be called ONLY when you need to, which should not be the case for regular users of BPE-knockout.
+    #     pass
+
 
 LINEAR_WEIGHTER  = lambda f: f
 ZIPFIAN_WEIGHTER = lambda f: 1 + math.log10(f)
@@ -49,8 +54,8 @@ def setupDutch() -> ProjectConfig:
     config = ProjectConfig(
         language_name="Dutch",
         lemma_counts=PATH_DATA_COMPRESSED / "words_oscar-nl.txt",
-        morphologies=PATH_DATA_COMPRESSED / "celex_morphology_nl.txt",
-        base_tokeniser=SennrichTokeniserPath(PATH_DATA_MODELBASE / "bpe-oscar-nl-clean"),
+        morphologies=PATH_MORPHOLOGY / "celex_morphology_nl.txt",
+        base_tokeniser=SennrichTokeniserPath(PATH_MODELBASE / "bpe-40k_oscar-nl-clean"),
         reweighter=LINEAR_WEIGHTER,
         parser=CelexLemmaMorphology
     )
@@ -62,8 +67,8 @@ def setupGerman() -> ProjectConfig:
     config = ProjectConfig(
         language_name="German",
         lemma_counts=PATH_DATA_COMPRESSED / "words_oscar-de.txt",
-        morphologies=PATH_DATA_COMPRESSED / "celex_morphology_de.txt",
-        base_tokeniser=SennrichTokeniserPath(PATH_DATA_MODELBASE / "bpe-oscar-de-clean"),
+        morphologies=PATH_MORPHOLOGY / "celex_morphology_de.txt",
+        base_tokeniser=SennrichTokeniserPath(PATH_MODELBASE / "bpe-40k_oscar-de-clean"),
         reweighter=LINEAR_WEIGHTER,
         parser=CelexLemmaMorphology
     )
@@ -75,8 +80,8 @@ def setupEnglish() -> ProjectConfig:
     config = ProjectConfig(
         language_name="English",
         lemma_counts=PATH_DATA_COMPRESSED / "words_oscar-en.txt",
-        morphologies=PATH_DATA_COMPRESSED / "celex_morphology_en.txt",
-        base_tokeniser=SennrichTokeniserPath(PATH_DATA_MODELBASE / "bpe-oscar-en-clean"),
+        morphologies=PATH_MORPHOLOGY / "celex_morphology_en.txt",
+        base_tokeniser=SennrichTokeniserPath(PATH_MODELBASE / "bpe-40k_oscar-en-clean"),
         reweighter=LINEAR_WEIGHTER,
         parser=CelexLemmaMorphology
     )
@@ -127,6 +132,7 @@ class Project:
     config: ProjectConfig=None
     debug_prints: bool=False
     verbosity: bool=False
+    do_old_iterator: bool=False  # Whether to use the original morphological iterator used for the OpenReview submission.
 
 Pℛ𝒪𝒥ℰ𝒞𝒯 = Project(setupDutch())
 # All files access this object for paths. Because it is an object, its fields can be changed by one
@@ -165,6 +171,7 @@ def morphologyGenerator(**kwargs) -> Iterable[LemmaMorphology]:
     Alias for LemmaMorphology.generator that automatically uses the project's file path for morphologies.
     Without this, you would need to repeat the below statement everywhere you iterate over morphologies.
     """
+    kwargs["legacy"] = Pℛ𝒪𝒥ℰ𝒞𝒯.do_old_iterator
     return Pℛ𝒪𝒥ℰ𝒞𝒯.config.parser.generator(Pℛ𝒪𝒥ℰ𝒞𝒯.config.morphologies, **kwargs)  # https://discuss.python.org/t/difference-between-return-generator-vs-yield-from-generator/2997
 
 

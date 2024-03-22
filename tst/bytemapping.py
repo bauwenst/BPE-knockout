@@ -184,20 +184,20 @@ def testMapping():
 
 
 def convertMerges():
-    from bpe_knockout.project.paths import PATH_DATA_MODELBASE
+    from bpe_knockout.project.paths import PATH_DATA_TEMP
+    from bpe_knockout.auxiliary.tokenizer_interface import HuggingFaceTokeniserPath
+    robbert = HuggingFaceTokeniserPath(PATH_DATA_TEMP / "robbert_2020.json")
 
     changed = 0
-    with open(PATH_DATA_MODELBASE / "robbert" / "merges.txt", "r", encoding="utf-8") as handle:
-        stripped_lines = [line.strip() for line in handle]
-        for line in stripped_lines:
-            # The reason you need to split the line, is because anything you give to the decoder can only contain
-            # characters in the HuggingFace alphabet. A space is not.
-            # You also can't replace the space by Ġ, which is converted into a space by the decoder, because any other
-            # Ġ characters are as well and then you won't know where the merge split was.
-            decoded = " ".join([decodeHuggingFaceBytes(t).replace(" ", "Ġ") for t in line.split()])
-            if line != decoded:
-                print(line, "->", decoded)
-                changed += 1
+    for line in robbert.loadMerges():
+        # The reason you need to split the line, is because anything you give to the decoder can only contain
+        # characters in the HuggingFace alphabet. A space is not.
+        # You also can't replace the space by Ġ, which is converted into a space by the decoder, because any other
+        # Ġ characters are as well and then you won't know where the merge split was.
+        decoded = " ".join([decodeHuggingFaceBytes(t).replace(" ", "Ġ") for t in line.split()])
+        if line != decoded:
+            print(line, "->", decoded)
+            changed += 1
 
     print("Rescued", changed, "merges.")
 

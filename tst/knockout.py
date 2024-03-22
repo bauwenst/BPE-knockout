@@ -318,7 +318,7 @@ def commitEvaluationTable(table: Table):
 ##############################################################################
 
 @timeit
-def main_datasetStats(include_monomorphemic=True):
+def main_morphsPerWord_Multilingual(include_monomorphemic=True):
     histo = MultiHistogram("languages-morph-per-word", caching=CacheMode.IF_MISSING)
     if histo.needs_computation:
         for language in getAllConfigs():
@@ -335,14 +335,14 @@ def main_datasetStats(include_monomorphemic=True):
 
 
 @timeit
-def main_tokenDiffs():
-    bpe = robbert_tokenizer
-
+def main_tokenDiffs_Monolingual():
     for mode in modes_to_test:
-        histo = Histogram(f"knockout_tokendiffs_{RefMode.toLetter(mode)}", caching=CacheMode.IF_MISSING)
+        histo = Histogram(f"knockout_tokendiffs_{RefMode.toLetter(mode)}_{Pℛ𝒪𝒥ℰ𝒞𝒯.config.langTag()}", caching=CacheMode.IF_MISSING)
         if histo.needs_computation:
             # TODO: You should kinda treat the confusion matrix as a figure.
+            #       Will allow caching and re-displaying when loading from cache.
             cm = ConfusionMatrix()
+            bpe = BTE(BteInitConfig())
             bte = BTE(BteInitConfig(knockout=mode))
             for obj in morphologyGenerator():
                 lemma = obj.lemma()
@@ -365,7 +365,7 @@ def main_tokenDiffs():
 
 
 @timeit
-def main_knockoutStats():
+def main_knockedMerges_Multilingual():
     """
     Histogram of the IDs of the knocked-out merges
     + Histogram of the length of each left and right type.
@@ -401,25 +401,25 @@ def main_knockoutStats():
                                         aspect_ratio=(4,2.75), border_colour=None,
                                         y_tickspacing=100, do_kde=False, center_ticks=True, alpha=0.5, x_lims=(0,15))
 
+# @timeit
+# def main_baseVocabStats():
+#     """
+#     Histogram of the original RobBERT tokeniser's merge type lengths.
+#     """
+#     lengths = MultiHistogram(f"robbert-merge-lengths", caching=CacheMode.IF_MISSING)
+#     if lengths.needs_computation:
+#         for merge in untrained_bte.merge_graph.merges:
+#             left, right = merge.parts
+#             lengths.add("left type", len(left))
+#             lengths.add("right type", len(right))
+#
+#     lengths.commit_histplot(binwidth=1, x_tickspacing=1, x_label="Type length", y_label="RobBERT merges",
+#                             aspect_ratio=(4, 2.75), border_colour=None,
+#                             y_tickspacing=1000, do_kde=False, center_ticks=True, alpha=0.5, x_lims=(0, 15))
+
+
 @timeit
-def main_baseVocabStats():
-    """
-    Histogram of the original RobBERT tokeniser's merge type lengths.
-    """
-    lengths = MultiHistogram(f"robbert-merge-lengths", caching=CacheMode.IF_MISSING)
-    if lengths.needs_computation:
-        for merge in untrained_bte.merge_graph.merges:
-            left, right = merge.parts
-            lengths.add("left type", len(left))
-            lengths.add("right type", len(right))
-
-    lengths.commit_histplot(binwidth=1, x_tickspacing=1, x_label="Type length", y_label="RobBERT merges",
-                            aspect_ratio=(4, 2.75), border_colour=None,
-                            y_tickspacing=1000, do_kde=False, center_ticks=True, alpha=0.5, x_lims=(0, 15))
-
-
-@timeit
-def main_effectiveDropoutRate():
+def main_effectiveDropoutRate_Multilingual():
     """
     Compute what the "effective dropout rate" of knockout is, i.e. the percentage of *applications* of merges that is lost.
     You could do this in two ways:
@@ -462,35 +462,35 @@ def main_effectiveDropoutRate():
     table.commit(default_column_style=ColumnStyle(cell_function=lambda x: 100*x, digits=3, cell_suffix=r"\%"))
 
 
-@timeit
-def main_intrinsicModes():
-    """
-    Test all combinations of annealing and knockout on intrinsic metrics (morphological Pr-Re-F1).
-    """
-    table = Table(f"bte-intrinsic-modes_{Pℛ𝒪𝒥ℰ𝒞𝒯.config.langTag()}", caching=CacheMode.IF_MISSING)
-    if table.needs_computation:
-        # Construct possible tokenisers
-        modesets = list(itertools.product((RefMode.NONE,RefMode.MORPHEMIC,RefMode.LEXEMIC),
-                                          (RefMode.NONE,RefMode.MORPHEMIC,RefMode.LEXEMIC)))
-        fullsets = []
-        total_stages = 0
-        for anneal, knockout in modesets:
-            if knockout == RefMode.NONE or anneal == RefMode.NONE:  # You only do one stage; no point in swapping stages.
-                fullsets.append((knockout, anneal, False))
-                total_stages += 2 - (knockout == RefMode.NONE) - (anneal == RefMode.NONE)
-            else:
-                fullsets.append((knockout, anneal, False))
-                fullsets.append((knockout, anneal, True))
-                total_stages += 4
-
-        print("===== CONSTRUCTING", len(fullsets), "BTE TOKENISERS =====")
-        print("Expected wait time:", 2*total_stages, "minutes.")
-        tkzrs = [BTE(BteInitConfig(knockout=m1, anneal=m2, do_swap_stages=m3)) for m1, m2, m3 in fullsets]
-        results = intrinsicEvaluation(tkzrs, do_whole_word=True,
-                                      reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
-        addEvaluationToTable(table, results)
-
-    commitEvaluationTable(table)
+# @timeit
+# def main_intrinsicModes_Monolingual():
+#     """
+#     Test all combinations of annealing and knockout on intrinsic metrics (morphological Pr-Re-F1).
+#     """
+#     table = Table(f"bte-intrinsic-modes_{Pℛ𝒪𝒥ℰ𝒞𝒯.config.langTag()}", caching=CacheMode.IF_MISSING)
+#     if table.needs_computation:
+#         # Construct possible tokenisers
+#         modesets = list(itertools.product((RefMode.NONE,RefMode.MORPHEMIC,RefMode.LEXEMIC),
+#                                           (RefMode.NONE,RefMode.MORPHEMIC,RefMode.LEXEMIC)))
+#         fullsets = []
+#         total_stages = 0
+#         for anneal, knockout in modesets:
+#             if knockout == RefMode.NONE or anneal == RefMode.NONE:  # You only do one stage; no point in swapping stages.
+#                 fullsets.append((knockout, anneal, False))
+#                 total_stages += 2 - (knockout == RefMode.NONE) - (anneal == RefMode.NONE)
+#             else:
+#                 fullsets.append((knockout, anneal, False))
+#                 fullsets.append((knockout, anneal, True))
+#                 total_stages += 4
+#
+#         print("===== CONSTRUCTING", len(fullsets), "BTE TOKENISERS =====")
+#         print("Expected wait time:", 2*total_stages, "minutes.")
+#         tkzrs = [BTE(BteInitConfig(knockout=m1, anneal=m2, do_swap_stages=m3)) for m1, m2, m3 in fullsets]
+#         results = intrinsicEvaluation(tkzrs, do_whole_word=True,
+#                                       reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
+#         addEvaluationToTable(table, results)
+#
+#     commitEvaluationTable(table)
 
 
 @timeit
@@ -572,21 +572,24 @@ def main_intrinsicMultilingual():
     commitEvaluationTable(table)
 
 
+# @timeit
+# def main_intrinsicMonolingual_KeepLong():
+#     table = Table(f"bte-intrinsic-keeplong_{Pℛ𝒪𝒥ℰ𝒞𝒯.config.langTag()}", caching=CacheMode.IF_MISSING)
+#     if table.needs_computation:
+#         results = intrinsicEvaluation(
+#             [BTE(BteInitConfig(knockout=mode, keep_long_merges=True)) for mode in modes_to_test], do_whole_word=True,
+#             reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter
+#         )
+#         addEvaluationToTable(table, results)
+#
+#     commitEvaluationTable(table)
+
+
 @timeit
-def main_intrinsicMonolingual_KeepLong():
-    table = Table(f"bte-intrinsic-keeplong_{Pℛ𝒪𝒥ℰ𝒞𝒯.config.langTag()}", caching=CacheMode.IF_MISSING)
-    if table.needs_computation:
-        results = intrinsicEvaluation(
-            [BTE(BteInitConfig(knockout=mode, keep_long_merges=True)) for mode in modes_to_test], do_whole_word=True,
-            reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter
-        )
-        addEvaluationToTable(table, results)
+def main_intrinsicHoldout_Monolingual():
+    was_legacy = Pℛ𝒪𝒥ℰ𝒞𝒯.do_old_iterator
+    Pℛ𝒪𝒥ℰ𝒞𝒯.do_old_iterator = True
 
-    commitEvaluationTable(table)
-
-
-@timeit
-def main_intrinsicMonolingual_Holdout():
     table = Table(f"bte-intrinsic-holdout_{Pℛ𝒪𝒥ℰ𝒞𝒯.config.langTag()}", caching=CacheMode.IF_MISSING)
     if table.needs_computation:
         HOLDOUTS = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
@@ -601,10 +604,11 @@ def main_intrinsicMonolingual_Holdout():
                                  row_prefix=["BPE-knockout"], row_names=[f"{int(f*100)}-{100-int(f*100)}"])
 
     commitEvaluationTable(table)
+    Pℛ𝒪𝒥ℰ𝒞𝒯.do_old_iterator = was_legacy
 
 
 @timeit
-def main_intrinsicMonolingual_WeightedTraining():
+def main_intrinsicWeightedTraining_Monolingual():
     table = Table(f"bte-intrinsic-weightedtraining_{Pℛ𝒪𝒥ℰ𝒞𝒯.config.langTag()}", caching=CacheMode.IF_MISSING)
     if table.needs_computation:
         old_config = Pℛ𝒪𝒥ℰ𝒞𝒯.config
@@ -650,7 +654,7 @@ DELETION_PERCENTAGES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 20, 30, 40, 50
 # DELETION_PERCENTAGES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 20, 30, 40, 50, 60, 70, 80, 90, 99]
 
 @timeit
-def main_deleteRandomMerges():
+def main_deleteRandomMerges_Monolingual():
     """
     Baseline comparison that computes expected Pr-Re-F1 when 1%, 2%, 5%, 10%, ... of merges are removed
     AT RANDOM instead of using blame, as a sort of ablation study of blame ratio.
@@ -662,7 +666,7 @@ def main_deleteRandomMerges():
 
     SAMPLES = 10
 
-    graph = LineGraph(name="delete-random-types", caching=CacheMode.IF_MISSING)
+    graph = LineGraph(name=f"delete-random-types_{Pℛ𝒪𝒥ℰ𝒞𝒯.config.langTag()}", caching=CacheMode.IF_MISSING)
     if graph.needs_computation:
         def pruneIndices(merge_indices: Tuple[int]):
             # , job_id=[1]):
@@ -733,20 +737,20 @@ def main_deleteRandomMerges():
 
                 idx += 1
 
-            graph.add("Pr",    p, sum_pr/n)
-            graph.add("Re",    p, sum_re/n)
-            graph.add("$F_1$", p, sum_f1/n)
+            graph.add("Pr",    p, 100*sum_pr/n)
+            graph.add("Re",    p, 100*sum_re/n)
+            graph.add("$F_1$", p, 100*sum_f1/n)
 
-    graph.commit(x_label="Merges deleted [\\%]", y_label="Correspondence of split positions (average of $10$ trials)",
-                 logx=False, x_tickspacing=10, y_lims=(0.0, 1.01), y_tickspacing=0.1)
+    graph.commit(x_label="Merges deleted [\\%]", y_label="Correspondence of split positions [\\%] (average of $10$ trials)",
+                 logx=False, x_tickspacing=10, y_lims=(0, 101), y_tickspacing=10)
 
 @timeit
-def main_deleteLastMerges():
+def main_deleteLastMerges_Monolingual():
     """
     Same test except you just trim the merge list.
     You can re-use the same tokeniser for this.
     """
-    graph = LineGraph(name="delete-last-types", caching=CacheMode.IF_MISSING)
+    graph = LineGraph(name=f"delete-last-types_{Pℛ𝒪𝒥ℰ𝒞𝒯.config.langTag()}", caching=CacheMode.IF_MISSING)
     if graph.needs_computation:
         bte = BTE(BteInitConfig(), quiet=True, autorun_modes=False)
         initial_merges = len(bte.merge_graph.merges)
@@ -772,15 +776,18 @@ def main_deleteLastMerges():
             results.append((pr,re,f1))
 
         for p, (pr,re,f1) in zip(DELETION_PERCENTAGES, results):
-            graph.add("Pr",    p, pr)
-            graph.add("Re",    p, re)
-            graph.add("$F_1$", p, f1)
-
-    graph.commit(x_label="Merges deleted [\\%]", y_label="Correspondence of split positions",
-                 logx=False, x_tickspacing=10, y_lims=(0.0, 1.01), y_tickspacing=0.1)
+            graph.add("Pr",    p, 100*pr)
+            graph.add("Re",    p, 100*re)
+            graph.add("$F_1$", p, 100*f1)
+    else:  # I originally generated data going all the way to 99% rather than 50%, so we have to filter that out.
+        graph.data["Pr"]    = (graph.data["Pr"][0][:len(DELETION_PERCENTAGES)],    graph.data["Pr"][1][:len(DELETION_PERCENTAGES)])
+        graph.data["Re"]    = (graph.data["Re"][0][:len(DELETION_PERCENTAGES)],    graph.data["Re"][1][:len(DELETION_PERCENTAGES)])
+        graph.data["$F_1$"] = (graph.data["$F_1$"][0][:len(DELETION_PERCENTAGES)], graph.data["$F_1$"][1][:len(DELETION_PERCENTAGES)])
+    graph.commit(x_label="Merges deleted [\\%]", y_label="Correspondence of split positions [\\%]",
+                 logx=False, x_tickspacing=10, y_lims=(0, 101), y_tickspacing=10)
 
 @timeit
-def main_deleteLastLeaves():
+def main_deleteLastLeaves_Monolingual():
     """
     Same test except you knock out from the back of the merge list BUT ONLY if they are leaves. You keep deleting until
     you reach p% of the merge list.
@@ -861,52 +868,61 @@ def main_deleteLastLeaves():
             results.append((pr,re,f1))
 
         for p, (pr,re,f1) in zip(DELETION_PERCENTAGES, results):
-            g2.add("Pr",    p, pr)
-            g2.add("Re",    p, re)
-            g2.add("$F_1$", p, f1)
+            g2.add("Pr",    p, 100*pr)
+            g2.add("Re",    p, 100*re)
+            g2.add("$F_1$", p, 100*f1)
 
-    g2.commit(x_label="Merges deleted [\\%]", y_label="Correspondence of split positions",
-                 logx=False, x_tickspacing=10, y_lims=(0.0, 1.01), y_tickspacing=0.1)
+    g2.commit(x_label="Merges deleted [\\%]", y_label="Correspondence of split positions [\\%]",
+                 logx=False, x_tickspacing=10, y_lims=(0, 101), y_tickspacing=10)
 
 
 @timeit
-def main_wholeWordCeiling():
+def main_wholeWordCeiling_Multilingual():
     """
     Goal: Test what the maximum precision could be on whole-word boundaries if you segmented every word perfectly on
           all of its morpheme boundaries.
     """
-    table = Table("lexemic-ceilings")
-    for language in getAllConfigs():
-        with TemporaryContext(language):
-            weights = lexiconWeights(Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
-            cm   = ConfusionMatrix()
-            cm_w = ConfusionMatrix()
+    table = Table("lexemic-ceilings", caching=CacheMode.IF_MISSING)
+    if table.needs_computation:
+        for language in getAllConfigs():
+            unique_morphs = set()
+            with TemporaryContext(language):
+                weights = lexiconWeights(Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
+                cm   = ConfusionMatrix()
+                cm_w = ConfusionMatrix()
 
-            for obj in morphologyGenerator():
-                best_possible_segmentation = obj.morphSplit()
-                only_whole_words           = obj.lexemeSplit()
+                for obj in morphologyGenerator():
+                    best_possible_segmentation = obj.morphSplit()
+                    only_whole_words           = obj.lexemeSplit()
 
-                tp, predicted, relevant, total = compareSplits_cursors(candidate=best_possible_segmentation,
-                                                                       reference=only_whole_words)
-                amplification = weights.get(obj.lemma(), 1)
-                cm.add(  tp, predicted, relevant, total, 1)
-                cm_w.add(tp, predicted, relevant, total, amplification)
+                    tp, predicted, relevant, total = compareSplits_cursors(candidate=best_possible_segmentation,
+                                                                           reference=only_whole_words)
+                    amplification = weights.get(obj.lemma(), 1)
+                    cm.add(  tp, predicted, relevant, total, 1)
+                    cm_w.add(tp, predicted, relevant, total, amplification)
 
-            print(language.language_name, "whole-word boundaries:")
-            print("\tUnweighted:")
-            cm.displayRePrF1(indent=2)
-            print("\tWeighted:")
-            cm_w.displayRePrF1(indent=2)
+                    unique_morphs.update(best_possible_segmentation.split())
 
-            addEvaluationToTable(table, [TokeniserEvaluation(name=language.language_name, vocabsize=0,
-                                                             cm_morph=ConfusionMatrix(), cm_morph_w=ConfusionMatrix(),
-                                                             cm_lex=cm, cm_lex_w=cm_w)], row_prefix=[language.language_name, ""], row_names=["ideal"])
+                print(language.language_name, "whole-word boundaries:")
+                print("\tUnweighted:")
+                cm.displayRePrF1(indent=2)
+                print("\tWeighted:")
+                cm_w.displayRePrF1(indent=2)
+
+                addEvaluationToTable(table, [TokeniserEvaluation(name=language.language_name, vocabsize=len(unique_morphs),
+                                                                 cm_morph=ConfusionMatrix(), cm_morph_w=ConfusionMatrix(),
+                                                                 cm_lex=cm, cm_lex_w=cm_w)], row_prefix=[language.language_name, ""], row_names=["ideal"])
 
     commitEvaluationTable(table)
 
 
 @timeit
-def main_blameThreshold():
+def main_blameThreshold_Monolingual():
+    """
+    Generates two graphs:
+        - Amount of merges deleted when blame threshold is increased.
+        - Tuning graph of Pr, Re, F1.
+    """
     RATIOS = [1, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 99]
 
     g1 = LineGraph("blame-threshold-amounts", caching=CacheMode.IF_MISSING)  # TODO: I want a second Y axis that shows percentage of total merges.
@@ -934,18 +950,18 @@ def main_blameThreshold():
                 # Evaluate
                 cm, _ = morphologyVersusTokenisation(morphologyGenerator(), MorphSplit(), bte)
                 pr, re, f1 = cm.computePrReF1()
-                g2.add("Pr",    minimal_blame, pr)
-                g2.add("Re",    minimal_blame, re)
-                g2.add("$F_1$", minimal_blame, f1)
+                g2.add("Pr",    minimal_blame, 100*pr)
+                g2.add("Re",    minimal_blame, 100*re)
+                g2.add("$F_1$", minimal_blame, 100*f1)
 
     g1.commit(x_label="Blame ratio threshold [\\%]", y_label="Merges knocked out",
-              logx=False, y_lims=(3500, 5500), y_tickspacing=100, x_tickspacing=10, legend_position=None)
-    g2.commit(x_label="Blame ratio threshold [\\%]", y_label="Correspondence of split positions",
-              logx=False, y_lims=(0.3, 0.91), y_tickspacing=0.05, x_tickspacing=10)
+              logx=False, y_lims=(3900, 5501), y_tickspacing=100, x_tickspacing=10, legend_position=None)
+    g2.commit(x_label="Blame ratio threshold [\\%]", y_label="Correspondence of split positions [\\%]",
+              logx=False, y_lims=(30, 91), y_tickspacing=5, x_tickspacing=10)
 
 
 @timeit
-def main_intrinsicMonolingual_Dropout():
+def main_intrinsicDropout_Monolingual():
     language = Pℛ𝒪𝒥ℰ𝒞𝒯.config
     table = Table(f"bte-intrinsic-dropout_{language.langTag()}", caching=CacheMode.IF_MISSING)
 
@@ -971,8 +987,3 @@ def main_intrinsicMonolingual_Dropout():
 
 def sep():
     print("="*75)
-
-
-if __name__ == "__main__":
-    # test_onlyTrivials()
-    main_intrinsicMonolingual_Dropout()
