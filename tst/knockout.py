@@ -12,7 +12,7 @@ from tst.visualisation.graphing import *
 from tst.tokenisation.robbert_tokenizer import robbert_tokenizer, getMergeList_RobBERT
 
 from bpe_knockout.knockout.core import *
-from bpe_knockout.project.config import Pℛ𝒪𝒥ℰ𝒞𝒯, morphologyGenerator, lexiconWeights, setupEnglish, setupDutch, setupGerman, TemporaryContext
+from bpe_knockout.project.config import *
 from bpe_knockout.project.paths import PATH_DATA_TEMP
 from bpe_knockout.datahandlers.wordfiles import ACCENTS
 
@@ -309,6 +309,8 @@ def addEvaluationToTable(table: Table, results: List[TokeniserEvaluation], macro
 
 style_evaluations     = ColumnStyle(alignment="c", aggregate_at_rowlevel=0, do_bold_maximum=True,
                                     cell_prefix=r"\tgrad[0][50][100]{", cell_function=lambda x: 100*x, digits=1, cell_suffix="}")
+# style_evaluations     = ColumnStyle(alignment="c", aggregate_at_rowlevel=0, do_bold_maximum=True, do_deltas=True,
+#                                     cell_function=lambda x: 100*x, digits=1)
 style_vocabulary_size = {(COLUMN_NAME_VOCAB,): ColumnStyle(alignment="c", cell_prefix=r"\num{", digits=0, cell_suffix="}")}
 def commitEvaluationTable(table: Table):
     table.commit(rowname_alignment="l", borders_between_columns_of_level=[0,1], borders_between_rows_of_level=[0,1],
@@ -322,7 +324,7 @@ def main_morphsPerWord_Multilingual(include_monomorphemic=True):
     histo = MultiHistogram("languages-morph-per-word", caching=CacheMode.IF_MISSING)
     if histo.needs_computation:
         for language in getAllConfigs():
-            with TemporaryContext(language):
+            with KnockoutDataConfiguration(language):
                 for obj in morphologyGenerator():
                     n = len(obj.morphSplit().split())
                     if include_monomorphemic or n != 1:
@@ -373,7 +375,7 @@ def main_knockedMerges_Multilingual():
     import langcodes
 
     for language in getAllConfigs():  # Kinda sucks that you need to build the entire config to just call .needs_computation...
-        with TemporaryContext(language):
+        with KnockoutDataConfiguration(language):
             language_object = langcodes.find(language.language_name)
             for mode in modes_to_test:
                 ids     =      Histogram(f"knockout-ids_{RefMode.toLetter(mode)}-mode_{language_object.to_tag()}",     caching=CacheMode.IF_MISSING)
@@ -436,7 +438,7 @@ def main_effectiveDropoutRate_Multilingual():
     table = Table("bte-effective-dropout", caching=CacheMode.IF_MISSING)
     if table.needs_computation:
         for language in getAllConfigs():
-            with TemporaryContext(language):
+            with KnockoutDataConfiguration(language):
                 bte = BTE(BteInitConfig(knockout=RefMode.MORPHEMIC), autorun_modes=False)
 
                 total_merges               = 0
@@ -526,7 +528,7 @@ def main_intrinsicMultilingual():
         holdout = Holdout(HOLDOUT_SPLIT)
 
         for language in getAllConfigs():  # Will FIRST impute all data and THEN iterate.
-            with TemporaryContext(language):
+            with KnockoutDataConfiguration(language):
                 name_of_language = language.language_name.capitalize()
 
                 # --- BPE ---
@@ -886,7 +888,7 @@ def main_wholeWordCeiling_Multilingual():
     if table.needs_computation:
         for language in getAllConfigs():
             unique_morphs = set()
-            with TemporaryContext(language):
+            with KnockoutDataConfiguration(language):
                 weights = lexiconWeights(Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
                 cm   = ConfusionMatrix()
                 cm_w = ConfusionMatrix()

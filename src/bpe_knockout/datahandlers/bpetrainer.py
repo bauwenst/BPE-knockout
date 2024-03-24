@@ -8,10 +8,6 @@ from ..auxiliary.tokenizer_interface import SennrichTokeniserPath, HuggingFaceTo
 from ..datahandlers.wordfiles import wordfileToBpeCorpus
 from .._lib.sbpe.learn_bpe import learn_bpe, SowEowSpecification
 
-PATH_MODELS = PATH_DATA_OUT / "models"
-PATH_MODELS.mkdir(exist_ok=True)
-
-
 from transformers import SpecialTokensMixin
 PAD = "<pad>"
 BOS = "<s>"
@@ -124,9 +120,3 @@ class BPETrainer:
             json.dump(hf.loadVocabulary(), out_handle, ensure_ascii=False, indent=4)
         with open(merges, "w", encoding="utf-8") as out_handle:
             out_handle.writelines([merge + "\n" for merge in hf.loadMerges()])
-
-
-if __name__ == "__main__":
-    trainer = BPETrainer(vocab_size=40_000, byte_based=True)
-    trainer.train_hf(PATH_DATA_COMPRESSED / "words_oscar-en.txt",
-                     PATH_MODELS / "bpe-oscar-en-clean")

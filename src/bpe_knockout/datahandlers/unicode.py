@@ -1,6 +1,10 @@
 import re
 
-from bpe_knockout.datahandlers.hf_corpora import punctuation_regex_str
+from string import punctuation
+punctuation = punctuation + "€£…‘’“”„«»–"  # Add some European punctuations.
+punctuation = punctuation.replace("\\", "") + "\\"  # Put backslash in the back. Makes the pattern clearer.
+punctuation = "-" + punctuation.replace("-", "")    # Put hyphen in the front. Prevents regex from thinking it's a span.
+punctuation_regex_str = "[" + punctuation.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]").replace("-", "\\-") + "]+"
 
 ###
 all_allowed_characters = re.compile(r"([A-Za-z0-9]|[ÁáÉéÍíÓóÚúÄäËëÏïÖöÜüÀàÈèÌìÒòÙùÂâÊêÎîÔôÛû]|°[CFK]|[" + punctuation_regex_str[1:-2] + r"°®©•·¿±×÷⁄≠≤≥‰∞])")

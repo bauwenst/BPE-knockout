@@ -4,7 +4,8 @@ from tokenizers import Regex
 import tokenizers.normalizers as tn
 import tokenizers.pre_tokenizers as tp
 
-from ..datahandlers.wordfiles import *
+from .wordfiles import *
+from .unicode import punctuation_regex_str
 
 
 def logger(msg: str):
@@ -62,24 +63,18 @@ def generateDataloader_Oscar(langtag: str, sentence_preprocessor: Callable[[str]
     return DataLoader(data, shuffle=False, collate_fn=dictionaryProcessor), size
 
 
-def dataloaderToWeights(dataloader: DataLoader, output_stem: str, progress_bar_total: int=None):
-    path = PATH_DATA_COMPRESSED / (output_stem + ".txt")
-    if not path.exists():
-        path = iterableToWordsFile(dataloader, path,
-                                   cache_every=1_000_000, progress_bar_total=progress_bar_total)
+def dataloaderToCounts(dataloader: DataLoader, output_stem: str, progress_bar_total: int=None):
+    out_path = PATH_DATA_COMPRESSED / (output_stem + ".txt")
+    if not out_path.exists():
+        out_path = iterableToWordsFile(dataloader, out_path,
+                                       cache_every=1_000_000, progress_bar_total=progress_bar_total)
     else:
-        print(f"Found existing words file at {path.as_posix()}. If you want to regenerate it, delete it first.")
+        print(f"Found existing words file at {out_path.as_posix()}. If you want to regenerate it, delete it first.")
 
-    path = cleanWordFile(path)
-    path = trimWordFile(path, minimum=10)
-    return path
+    out_path = cleanWordFile(out_path)
+    out_path = trimWordFile(out_path, minimum=10)
+    return out_path
 
-
-from string import punctuation
-punctuation = punctuation + "€£…‘’“”„«»–"  # Add some European punctuations.
-punctuation = punctuation.replace("\\", "") + "\\"  # Put backslash in the back. Makes the pattern clearer.
-punctuation = "-" + punctuation.replace("-", "")    # Put hyphen in the front. Prevents regex from thinking it's a span.
-punctuation_regex_str = "[" + punctuation.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]").replace("-", "\\-") + "]+"
 
 def punctuationPretokeniserExceptHyphens():
     punctuation_regex_str_no_hyphenish = punctuation_regex_str.replace("\\-", "").replace("–", "").replace("_", "")
