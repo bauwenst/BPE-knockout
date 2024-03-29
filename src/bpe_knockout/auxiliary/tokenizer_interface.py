@@ -2,10 +2,15 @@ from typing import List, Dict, Tuple
 from pathlib import Path
 from abc import abstractmethod, ABC
 import json
+import requests
 
 from tktkt.interfaces.tokeniser import Tokeniser
 from transformers import AutoTokenizer, RobertaTokenizerFast, PreTrainedTokenizerFast
+
 from ..datahandlers.holdout import Holdout
+from ..project.paths import *
+
+DEFAULT_TOKENISER_STEM = "tokenizer"
 
 
 def AutoTokenizer_from_pretrained(path_or_name: str) -> PreTrainedTokenizerFast:
@@ -14,9 +19,9 @@ def AutoTokenizer_from_pretrained(path_or_name: str) -> PreTrainedTokenizerFast:
     Fine, I'll do it myself.
     """
     path = Path(path_or_name)
-    if path.is_absolute():
+    if path.is_absolute():  # Get it from disk.
         return PreTrainedTokenizerFast(tokenizer_file=path.as_posix())
-    else:
+    else:  # Get it from the hub (or from the HF_CACHE, presumably).
         return AutoTokenizer.from_pretrained(path_or_name)
 
 
@@ -31,7 +36,7 @@ class Evaluator(ABC):
         pass
 
 
-class TokeniserPath(ABC):
+class BpeTokeniserPath(ABC):
     """
     Interface for representing a BPE tokeniser on disk.
     """
@@ -39,8 +44,16 @@ class TokeniserPath(ABC):
     def __init__(self, path: Path):
         self.path = path
 
+    def __repr__(self):
+        return self.__class__.__name__ + "(" + self.path.as_posix() + ")"
+
     @abstractmethod
     def exists(self) -> bool:
+        pass
+
+    @staticmethod
+    @abstractmethod
+    def fromName(name: str) -> "BpeTokeniserPath":
         pass
 
     @abstractmethod
@@ -56,7 +69,7 @@ class TokeniserPath(ABC):
         pass
 
 
-class SennrichTokeniserPath(TokeniserPath):
+class SennrichTokeniserPath(BpeTokeniserPath):
     """
     Tokeniser stored as a vocab.json file and a merges.txt file in the same folder.
        - vocab.json: JSON with a single top-level dictionary, mapping each subword type string to an integer id.
@@ -97,8 +110,12 @@ class SennrichTokeniserPath(TokeniserPath):
 
         return RobertaTokenizerFast(vocab_file=vocab.as_posix(), merges_file=merges.as_posix())  # Will apply byte-based pretokeniser.
 
+    @staticmethod
+    def fromName(name: str) -> BpeTokeniserPath:
+        return SennrichTokeniserPath(PATH_MODELBASE / name)
 
-class HuggingFaceTokeniserPath(TokeniserPath):
+
+class HuggingFaceTokeniserPath(BpeTokeniserPath):
     """
     Tokeniser as stored by HuggingFace's 'tokenizers' library as a single JSON file.
     """
@@ -121,3 +138,69 @@ class HuggingFaceTokeniserPath(TokeniserPath):
 
     def toFastBPE(self) -> RobertaTokenizerFast:
         return AutoTokenizer_from_pretrained(self.path.as_posix())
+
+    @staticmethod
+    def fromName(name: str) -> BpeTokeniserPath:
+        """
+        Automatically constructs the file path, and ALSO imputes the tokeniser file by getting it from the
+        HuggingFace tokeniser with the given name.
+        (The reason you can't do this in getAsDict() is because the name isn't known there, only the path.)
+        """
+        cache = HuggingFaceTokeniserPath(PATH_MODELBASE / name.replace("/", "--") / f"{DEFAULT_TOKENISER_STEM}.json")
+        if not cache.exists():
+            try:
+                fetchAndCacheDict(f"https://huggingface.co/{name}/raw/main/tokenizer.json",
+                                  cache_folder=cache.path.parent, stem=DEFAULT_TOKENISER_STEM)
+            except:  # Likely means that this is a GPT2 tokeniser where there was no tokenizer.json and instead there is only a vocab and merge file.
+                cache = SennrichTokeniserPath(cache.path.parent)
+                if not cache.exists():
+                    try:
+                        url = f"https://huggingface.co/{name}/raw/main/vocab.json"
+                        response = requests.get(url)
+                        vocab = response.json()
+
+                        url = f"https://huggingface.co/{name}/raw/main/merges.txt"
+                        response = requests.get(url)
+                        merges = response.text.split("\n")
+                        merges = merges[merges[0].startswith("#version"):]
+                    except:
+                        raise RuntimeError(f"I really can't find an online tokeniser file for HuggingFace model '{name}'.")
+
+                    vocab_path, merges_path = cache.getPaths()
+                    with open(vocab_path, "w", encoding="utf-8") as handle:
+                        json.dump(vocab, handle, ensure_ascii=False, indent=4)
+                    with open(merges_path, "w", encoding="utf-8") as handle:
+                        handle.write("\n".join(merges))
+
+        return cache
+
+    @staticmethod
+    def fromTokeniser(tk_model: RobertaTokenizerFast) -> "BpeTokeniserPath":
+        """
+        Only works for HuggingFace models that were NOT loaded from a path, but just using a name
+        (the former have an empty name, that's why).
+        """
+        name = tk_model.name_or_path
+        if not name:
+            raise ValueError("Model has no name!")
+
+        return HuggingFaceTokeniserPath.fromName(name)
+
+
+def fetchAndCacheDict(url: str, stem: str, cache_folder: Path=PATH_DATA_TEMP) -> dict:
+    """
+    Download something with json syntax from the internet,
+    store it locally, and return it as a dictionary.
+    If it already exists locally, it is not downloaded again, to protect against outages.
+    """
+    path = cache_folder / (stem + ".json")
+    if path.exists():
+        with open(path, "r", encoding="utf-8") as handle:
+            j = json.load(handle)
+    else:
+        response = requests.get(url)
+        j = response.json()  # Convert response to JSON dict.
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(j, handle, ensure_ascii=False, indent=4)
+
+    return j

@@ -19,7 +19,7 @@ from abc import abstractmethod, ABC
 
 # None of the below files import the config.
 from ..project.paths import *
-from ..auxiliary.tokenizer_interface import TokeniserPath, SennrichTokeniserPath
+from ..auxiliary.tokenizer_interface import BpeTokeniserPath, SennrichTokeniserPath
 from ..datahandlers.morphology import LemmaMorphology, CelexLemmaMorphology
 from ..datahandlers.wordfiles import loadAndWeightLexicon
 from ..datahandlers.bpetrainer import BPETrainer
@@ -43,18 +43,21 @@ class MorphologyPath(DataPath):
     parser: Type[LemmaMorphology]
 
 
+LINEAR_WEIGHTER  = lambda f: f
+ZIPFIAN_WEIGHTER = lambda f: 1 + math.log10(f)
+
 @dataclass
 class ProjectConfig(ABC):
     # Name of the tested language, e.g. "English". Should exist, so that its standardised language code can be looked up.
     language_name: str
     # Text file that contains morphological decompositions (e.g. for CELEX, each line is a word, a space, and the "StrucLab" label).
-    morphologies: MorphologyPath
+    morphologies: Optional[MorphologyPath]
     # Text file that contains the frequencies of words in a large corpus. Each line is a word, a space, and an integer.
     lemma_counts: Optional[DataPath]
     # File(s) for constructing the base tokeniser (see above).
-    base_tokeniser: TokeniserPath
+    base_tokeniser: BpeTokeniserPath
     # Function to run over the frequencies to turn them into the weights that are used later on.
-    reweighter: Callable[[float], float]  # an alternative is lambda x: 1 + math.log10(x).
+    reweighter: Callable[[float], float] = LINEAR_WEIGHTER  # an alternative is lambda x: 1 + math.log10(x).
 
     def langTag(self) -> str:
         return langcodes.find(self.language_name).to_tag()
@@ -64,6 +67,9 @@ class ProjectConfig(ABC):
             self.lemma_counts.impute(langcodes.find(self.language_name))
 
     def imputeMorphologies(self):
+        if self.morphologies is None:
+            raise RuntimeError("Cannot impute morphologies because no path was given.")
+
         if not self.morphologies.exists():
             self.morphologies.impute(langcodes.find(self.language_name))
 
@@ -94,10 +100,6 @@ class ProjectConfig(ABC):
                 trainer = BPETrainer(vocab_size=VOCAB_SIZE, byte_based=BYTE_BASED)
                 trainer.train_hf(wordfile=self.lemma_counts.path,  # Imputed above.
                                  out_folder=self.base_tokeniser.path)  # Takes about 3h40m (English).
-
-
-LINEAR_WEIGHTER  = lambda f: f
-ZIPFIAN_WEIGHTER = lambda f: 1 + math.log10(f)
 
 
 class OscarWordFile(DataPath):
@@ -161,6 +163,7 @@ def setupEnglish() -> ProjectConfig:
 @dataclass
 class Project:
     config: ProjectConfig=None
+
     debug_prints: bool=False
     verbosity: bool=False
     do_old_iterator: bool=False  # Whether to use the original morphological iterator used for the OpenReview submission.
@@ -218,7 +221,7 @@ def lexiconWeights(override_reweighter: Callable[[float],float]=None) -> Dict[st
     Pℛ𝒪𝒥ℰ𝒞𝒯.config.imputeLemmaCounts()
 
     return loadAndWeightLexicon(
-        all_lemmata_wordfile=Pℛ𝒪𝒥ℰ𝒞𝒯.config.lemma_counts.path,  # Imputed above.
+        all_lemmata_wordfile=Pℛ𝒪𝒥ℰ𝒞𝒯.config.lemma_counts.path,  # Imputed above.  TODO: Possibly doesn't work when lemma_counts is None though.
         subset_lexicon=(obj.lemma() for obj in morphologyGenerator()),  # The generator will impute morphologies itself.
         subset_name=Pℛ𝒪𝒥ℰ𝒞𝒯.config.morphologies.path.stem,
         reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter if override_reweighter is None else override_reweighter
