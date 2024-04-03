@@ -309,8 +309,10 @@ def addEvaluationToTable(table: Table, results: List[TokeniserEvaluation], macro
 
 style_evaluations     = ColumnStyle(alignment="c", aggregate_at_rowlevel=0, do_bold_maximum=True,
                                     cell_prefix=r"\tgrad[0][50][100]{", cell_function=lambda x: 100*x, digits=1, cell_suffix="}")
-# style_evaluations     = ColumnStyle(alignment="c", aggregate_at_rowlevel=0, do_bold_maximum=True, do_deltas=True,
-#                                     cell_function=lambda x: 100*x, digits=1)
+# style_evaluations     = ColumnStyle(alignment="c", aggregate_at_rowlevel=0, do_bold_maximum=True, do_deltas=DeltaMode.ABSOLUTE_DIFFERENCE,
+#                                     cell_prefix=r"\tgrad[-75][0][75]{", cell_function=lambda x: 100*x, digits=1, cell_suffix="}")
+# style_evaluations     = ColumnStyle(alignment="c", aggregate_at_rowlevel=0, do_bold_maximum=True, do_deltas=DeltaMode.ABSOLUTE_FRACTION,
+#                                     cell_prefix=r"$\times$\tgrad[0][1][8]{", cell_function=lambda x: 100*x, digits=2, cell_suffix="}")
 style_vocabulary_size = {(COLUMN_NAME_VOCAB,): ColumnStyle(alignment="c", cell_prefix=r"\num{", digits=0, cell_suffix="}")}
 def commitEvaluationTable(table: Table):
     table.commit(rowname_alignment="l", borders_between_columns_of_level=[0,1], borders_between_rows_of_level=[0,1],

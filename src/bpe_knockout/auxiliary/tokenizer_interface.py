@@ -146,7 +146,7 @@ class HuggingFaceTokeniserPath(BpeTokeniserPath):
         HuggingFace tokeniser with the given name.
         (The reason you can't do this in getAsDict() is because the name isn't known there, only the path.)
         """
-        cache = HuggingFaceTokeniserPath(PATH_MODELBASE / name.replace("/", "--") / f"{DEFAULT_TOKENISER_STEM}.json")
+        cache = HuggingFaceTokeniserPath(PATH_DATA_TEMP / name.replace("/", "--") / f"{DEFAULT_TOKENISER_STEM}.json")
         if not cache.exists():
             try:
                 fetchAndCacheDict(f"https://huggingface.co/{name}/raw/main/tokenizer.json",

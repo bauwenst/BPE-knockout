@@ -2,6 +2,7 @@
 data/
 draft/
 doc/
+_data/
 
 # IDE
 .idea/
