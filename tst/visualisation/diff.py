@@ -2,7 +2,7 @@ import itertools
 from typing import List
 import re
 
-from bpe_knockout.project.paths import *
+from tst.preamble import *
 from bpe_knockout.auxiliary.tokenizer_interface import SennrichTokeniserPath
 
 

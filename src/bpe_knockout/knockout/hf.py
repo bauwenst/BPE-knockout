@@ -18,14 +18,17 @@ The parent class of transformers.PreTrainedTokenizer has 10 unimplemented method
 """
 from typing import List, Tuple, Dict, Any, Optional
 from pathlib import Path
+import deprecation
 
 from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 import json
 
+from tktkt.interfaces.huggingface import TktktToHuggingFace
 from .core import BTE, BteInitConfig, RefMode, ByteBasedMode
 from ..datahandlers.bpetrainer import SPECIAL_TYPES
 
 
+@deprecation.deprecated(deprecated_in="2024.04.01", details="TkTkT can wrap any vocabulary-having TkTkT tokeniser now.")
 class BTEk_HuggingFace(PreTrainedTokenizer):
     """
     HuggingFace wrapper for a (Pythonic) BPE-knockout tokeniser.
@@ -128,8 +131,9 @@ def constructForHF_BPE() -> PreTrainedTokenizerFast:
     return Pℛ𝒪𝒥ℰ𝒞𝒯.config.base_tokeniser.toFastBPE()
 
 def constructForHF_BPEknockout() -> PreTrainedTokenizer:
-    return BTEk_HuggingFace(
-        BTE(BteInitConfig(knockout=RefMode.MORPHEMIC, bytebased=ByteBasedMode.INPUT_TO_BYTES, keep_long_merges=False))
+    return TktktToHuggingFace(
+        BTE(BteInitConfig(knockout=RefMode.MORPHEMIC, bytebased=ByteBasedMode.INPUT_TO_BYTES, keep_long_merges=False)),
+        specials=SPECIAL_TYPES
     )
 
 

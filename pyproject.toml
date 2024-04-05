@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bpe_knockout"
-version = "2024.03.01"
+version = "2024.04.01"
 dependencies = [
   "transformers",
   "tokenizers",
