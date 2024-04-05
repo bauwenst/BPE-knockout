@@ -27,11 +27,3 @@ PATH_DATA_TEMP       = PATH_EXTERNAL_DATA / "temp"
 PATH_EXTERNAL_DATA  .mkdir(exist_ok=True, parents=False)
 PATH_DATA_COMPRESSED.mkdir(exist_ok=True, parents=False)
 PATH_DATA_TEMP      .mkdir(exist_ok=True, parents=False)
-
-# Output is either written to BPE-knockout/data/out if it's an editable install and you are in the project, else just a default file tree under CWD.
-if IS_INSIDE_PROJECT:
-    PATH_DATA_OUT = PATH_EXTERNAL_DATA / "out"
-else:
-    PATH_DATA_OUT = PATH_CWD / "data" / "out" / "bpe_knockout"
-
-PATH_DATA_OUT.mkdir(exist_ok=True, parents=False)
