@@ -5,12 +5,6 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "bpe_knockout"
 version = "2024.03.01"
-dependencies = [
-  "transformers",
-  "tokenizers",
-  "tktkt",
-  "fiject"
-]
 requires-python = ">= 3.10"
 authors = [
   {name = "Thomas Bauwens", email = "thomas.bauwens@kuleuven.be"}
@@ -25,4 +19,25 @@ keywords = ["tokenizers", "NLP", "BPE", "byte-pair encoding"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
+]
+dependencies = [
+    "transformers >= 4.17.0",
+    "tokenizers >= 0.13.2",
+    "datasets >= 2.10.1",
+    "torch",  # We only need torch for using DataLoader in type annotations. It's required by transformers anyway.
+
+    "requests>=2.28.2",
+    "langcodes>=3.3.0",
+    "language_data>=1.1",
+    "numpy>=1.23.5",
+    "tqdm>=4.65.0",
+
+    "scipy>=1.12.0"
+]
+
+# These are not optional, but if you have these packages as editable install, you don't want to let pip install them again!
+[project.optional-dependencies]
+github = [
+    "tktkt[github] @ git+https://github.com/bauwenst/TkTkT",
+    "fiject        @ git+https://github.com/bauwenst/fiject"
 ]

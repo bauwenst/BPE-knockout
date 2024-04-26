@@ -34,4 +34,4 @@ if IS_INSIDE_PROJECT:
 else:
     PATH_DATA_OUT = PATH_CWD / "data" / "out" / "bpe_knockout"
 
-PATH_DATA_OUT.mkdir(exist_ok=True, parents=False)
+PATH_DATA_OUT.mkdir(exist_ok=True, parents=True)

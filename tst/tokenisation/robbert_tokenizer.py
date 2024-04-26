@@ -1,29 +1,6 @@
-import json
-import requests
-
-from bpe_knockout.project.paths import PATH_DATA_TEMP
-from bpe_knockout.auxiliary.tokenizer_interface import AutoTokenizer_from_pretrained
+from bpe_knockout.auxiliary.tokenizer_interface import AutoTokenizer_from_pretrained, fetchAndCacheDict
 
 robbert_tokenizer = AutoTokenizer_from_pretrained("pdelobelle/robbert-v2-dutch-base")
-
-
-def fetchAndCacheDict(url: str, stem: str):
-    """
-    Download something with json syntax from the internet,
-    store it locally, and return it as a dictionary.
-    If it already exists locally, it is not downloaded again.
-    """
-    path = PATH_DATA_TEMP / (stem + ".json")
-    if path.exists():
-        with open(path, "r", encoding="utf-8") as handle:
-            j = json.load(handle)
-    else:
-        response = requests.get(url)
-        j = response.json()  # Convert response to JSON dict.
-        with open(path, "w", encoding="utf-8") as handle:
-            json.dump(j, handle, ensure_ascii=False, indent=4)
-
-    return j
 
 
 def getMergeList_RobBERT(do_2022=False):
