@@ -1,20 +1,23 @@
 import itertools
 import math
 import scipy
-from tktkt.interfaces.tokeniser import Tokeniser
 
+from tktkt.interfaces.tokeniser import Tokeniser
 from tktkt.util.printing import *
 from tktkt.util.timing import *
 from tktkt.evaluation.morphological import intrinsicEvaluation, ConfusionMatrix, compareSplits_cursors, morphologyVersusTokenisation, TokeniserEvaluation, tokeniseAndDecode
 from tktkt.models.huggingface.wrapper import HuggingFaceTokeniser
 
-from tst.visualisation.graphing import *
-from tst.tokenisation.robbert_tokenizer import robbert_tokenizer, getMergeList_RobBERT
+from fiject import *  # Fiject project found at https://github.com/bauwenst/fiject
+from fiject.visuals.tables import ColumnStyle, Table, DeltaMode
 
 from bpe_knockout.knockout.core import *
 from bpe_knockout.project.config import *
 from bpe_knockout.project.paths import PATH_DATA_TEMP
 from bpe_knockout.datahandlers.wordfiles import ACCENTS
+
+from tst.preamble import *
+from tst.tokenisation.robbert_tokenizer import robbert_tokenizer, getMergeList_RobBERT
 
 
 print("Loading tests...")

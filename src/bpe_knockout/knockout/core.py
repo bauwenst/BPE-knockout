@@ -23,7 +23,6 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from tktkt.evaluation.morphological import tokeniseAndDecode
 from tktkt.preparation.spacemarking import SpaceMarkerLocation
 from tqdm.auto import tqdm
 import re
@@ -34,7 +33,7 @@ from ..project.config import Pℛ𝒪𝒥ℰ𝒞𝒯, lexiconWeights, morphology
 from ..auxiliary.tokenizer_interface import Evaluator
 
 from tktkt.util.printing import *
-from tktkt.interfaces.tokeniser import TokeniserWithVocab
+from tktkt.interfaces.tokeniser import TokeniserWithVocabDict
 from tktkt.preparation.instances import BoundariesFromSpacesPretokeniser, RobertaSpaceMarker, AddWordBoundary, TextMapper, IdentityMapper, PseudoByteMapping, Preprocessor, SpaceMarker
 
 MergeAsTuple = Tuple[int, str, str]
@@ -121,7 +120,7 @@ class MergeGraph:
         for raw_type, type_id in vocab.items():
             self.addVertex(raw_type, suggested_id=type_id)
 
-        for raw_merge in (raw_merges if quiet else tqdm(raw_merges, desc="CONSTRUCTING GRAPH")):
+        for raw_merge in tqdm(raw_merges, desc="CONSTRUCTING GRAPH", disable=quiet):
             self.addArc(raw_merge)
 
     def addVertex(self, type_to_add: str, suggested_id: int=-1):
@@ -211,9 +210,9 @@ class MergeGraph:
     def getPaddedMerges(self) -> List[MergeAsTuple]:
         return [merge.asTuple() for merge in self.merges]
 
-    def getSurroundingGraph(self, t: str):
+    def printSurroundingGraph(self, t: str):
         """
-        Return the vertices (types) that emanate from the given type, and its siblings (i.e. types emanating from its
+        Print the vertices (types) that emanate from the given type, and its siblings (i.e. types emanating from its
         parents), along with the relevant edges (merges).
         """
         involved_merges = self.merges_with[t]
@@ -301,7 +300,7 @@ SPLIT_MARKER = "|"
 SPLIT_MARKER_RE = re.compile(re.escape(SPLIT_MARKER))
 
 
-class BTE(TokeniserWithVocab):
+class BTE(TokeniserWithVocabDict):
     """
     Byte-tuple encoding (BTE): implementation of BPE that can deal with merges of more than 2 parts.
     """
@@ -320,6 +319,7 @@ class BTE(TokeniserWithVocab):
         """
         self.config = init_config
         self.boundary_marker = boundary_marker
+        self.print = doPrint(not quiet, hesitate=True)
 
         # Training regime
         if self.config.knockout == RefMode.NONE and self.config.reify == ReifyMode.NONE:  # You're only here for vanilla BPE or perhaps annealing.
@@ -344,8 +344,7 @@ class BTE(TokeniserWithVocab):
         self.holdout = holdout
 
         # Graph
-        if not quiet:
-            print("Instantiating", self.name, "...")
+        self.print("Instantiating", self.name, "...")
 
         if starting_vocab is None or starting_mergelist is None:
             starting_vocab     = Pℛ𝒪𝒥ℰ𝒞𝒯.config.base_tokeniser.loadVocabulary()
@@ -386,24 +385,24 @@ class BTE(TokeniserWithVocab):
             self.merges_starting_with[head].append(tup)  # If this raises a KeyError, something is definitely wrong (merge strings don't match type strings).
 
     def prune(self):
-        wprint("Knockout...")
+        self.print("Knockout...")
         merges_to_remove = [m for _,_,m in self.getBadOldMerges(relative_blame_threshold=BTE.KNOCKOUT_REL_THRESHOLD, except_if_all_parts_longer_than=BTE.LONGPART_THRESHOLD if not self.do_prune_trivials else 100)]
         self._removeMerges(merges_to_remove)
         return merges_to_remove  # For diagnostic purposes
 
     def _removeMerges(self, merges_to_remove: List[Merge]):
-        for merge in tqdm(merges_to_remove, desc="PRUNING GRAPH"):
+        for merge in tqdm(merges_to_remove, desc="PRUNING GRAPH", disable=not self.print.verbose):
             self.merge_graph.knockout(merge.childType())
         self.syncWithGraph()
 
     def anneal(self):
-        wprint("Annealing...")
+        self.print("Annealing...")
         merges_to_add = [m for _,_,m in self.getGoodNewMerges(absolute_threshold=BTE.ANNEAL_ABS_THRESHOLD)]
         self._addMerges(merges_to_add)
         return merges_to_add  # For diagnostic purposes
 
     def _addMerges(self, merges_to_add: List[str]):
-        for merge_string in tqdm(merges_to_add, desc="ANNEALING GRAPH"):
+        for merge_string in tqdm(merges_to_add, desc="ANNEALING GRAPH", disable=not self.print.verbose):
             self.merge_graph.addArc(merge_string)
         self.syncWithGraph()
 
@@ -502,7 +501,7 @@ class BTE(TokeniserWithVocab):
         blame        = {m.priority: 0 for m in self.merge_graph.merges}
         total        = {m.priority: 0 for m in self.merge_graph.merges}
 
-        for obj in self.holdout(morphologyGenerator(), train=True):
+        for obj in self.holdout(morphologyGenerator(verbose=self.print.verbose), train=True):
             lemma = obj.lemma()
             weight = weights.get(lemma, 1)
             log(lemma)
@@ -607,7 +606,7 @@ class BTE(TokeniserWithVocab):
         amenability_count = Counter()
         total_count       = Counter()
 
-        for obj in self.holdout(morphologyGenerator(), train=True):
+        for obj in self.holdout(morphologyGenerator(verbose=self.print.verbose), train=True):
             lemma = obj.lemma()
             weight = weights.get(lemma, 1)
             log(lemma)
@@ -670,7 +669,7 @@ class BTE(TokeniserWithVocab):
                 total_count[merge_string] += weight
                 log("\tTotal:", start_token, end_token)
 
-        print("Found", len(total_count), "token combos of which", len(amenability_count), "mended at least one gap.")
+        log("Found", len(total_count), "token combos of which", len(amenability_count), "mended at least one gap.")
 
         # Filter and ratio
         amenability_ratios = dict()
@@ -754,7 +753,7 @@ class BTE(TokeniserWithVocab):
 
         all_disqualified_merges: Set[str] = set()  # Cache merges that mustn't be retried.
         for iteration in range(1, iterations+1):
-            print(f"\n=== ITERATION {iteration} ===")
+            self.print(f"\n=== ITERATION {iteration} ===")
 
             # --- KNOCKOUT PHASE ---
             bad_merges = [m for _, _, m in self.getBadOldMerges()]
@@ -762,7 +761,7 @@ class BTE(TokeniserWithVocab):
             needs_final_knockout = False
 
             if END_IF_NO_MORE_DELETIONS and not bad_merges:
-                print("Early stop: no merges knocked out.")
+                self.print("Early stop: no merges knocked out.")
                 break
 
             if evaluator:
@@ -777,18 +776,18 @@ class BTE(TokeniserWithVocab):
             needs_final_knockout = len(applied_merges) > 0
 
             if END_IF_NO_MORE_ADDITIONS and not applied_merges:
-                print("Early stop: no new sub-merges available that weren't knocked out before, nor that exist below their triplet(s).")
+                self.print("Early stop: no new sub-merges available that weren't knocked out before, nor that exist below their triplet(s).")
                 break
 
             if not bad_merges and not applied_merges:
-                print("Early stop: tokeniser fully converged (no more deletions, no more additions).")
+                self.print("Early stop: tokeniser fully converged (no more deletions, no more additions).")
                 break
 
             if evaluator:
                 evaluator.evaluate(self, self.holdout, [f"{iteration} it", "+reify"])
 
         if needs_final_knockout and DO_KNOCKOUT_IF_NOT_ENDED_ON_IT:
-            print("\n=== FINAL PRUNE ===")
+            self.print("\n=== FINAL PRUNE ===")
             self.prune()
             if evaluator:
                 evaluator.evaluate(self, self.holdout, [f"{iteration+1} it", "+knockout"])
@@ -833,7 +832,7 @@ class BTE(TokeniserWithVocab):
         #           - If not, don't do anything (the triplet stays a triplet like vanilla BPE-knockout, and will steal a fraction of all pairs that would go to the merge).
         existing_merge_strings = {" ".join(m.parts) for m in self.merge_graph.merges}
         applied_merges = set()
-        for merge_string, triplets_this_appears_in in tqdm(suggested_merge_strings.items(), desc="REIFICATION"):
+        for merge_string, triplets_this_appears_in in tqdm(suggested_merge_strings.items(), desc="REIFICATION", disable=not self.print.verbose):
             parts = merge_string.split()
             subtype = "".join(parts)
 
@@ -897,7 +896,7 @@ class BTE(TokeniserWithVocab):
                 if triplet not in self.merge_graph.merges_with[subtype]:
                     self.merge_graph.merges_with[subtype].append(triplet)
                 else:
-                    print(triplet, "already known to part", subtype, "which should be impossible")
+                    log(triplet, "already known to part", subtype, "which should be impossible")
                     assert False
 
                 # 3. Unlink the parts of this new merge from the triplet (but only if such a part appears nowhere else in the triplet).
@@ -942,7 +941,7 @@ class BTE(TokeniserWithVocab):
         for typ in self.merge_graph.vocab:
             tokens = self.tokenise(typ)
             if len(tokens) > 1:
-                print(f"Found disabled type: '{typ}' -> {tokens}")
+                self.print(f"Found disabled type: '{typ}' -> {tokens}")
                 unformable_types.append(typ)
         return unformable_types
 
@@ -957,7 +956,7 @@ class BTE(TokeniserWithVocab):
         multimerge_types = []
         for typ, merges in self.merge_graph.merges_of.items():
             if len(merges) > 1:
-                print(f"Found type with multiple merges: '{typ}' formed by {' and '.join(['<' + '+'.join(merge.parts) + '>' for merge in merges])}")
+                self.print(f"Found type with multiple merges: '{typ}' formed by {' and '.join(['<' + '+'.join(merge.parts) + '>' for merge in merges])}")
                 multimerge_types.append(typ)
         return multimerge_types
 

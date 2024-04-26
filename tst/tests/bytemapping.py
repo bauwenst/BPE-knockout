@@ -9,6 +9,8 @@ Goal: Investigate how the assumption of character-level tokenisation influences 
       We know that 1 strange character maps to 1 byte, but we also know that this byte is not necessarily deducible from
       whatever byte representation that character has in traditional encodings. So, how do we find the corresponding byte?
 """
+from tst.preamble import *
+
 from tst.tokenisation.robbert_tokenizer import robbert_tokenizer as rt
 from tktkt.models.huggingface.wrapper import HuggingFaceTokeniser
 robbert_tokenizer = HuggingFaceTokeniser(rt, for_single_words=True)
@@ -18,7 +20,7 @@ from tktkt.evaluation.morphological import tokeniseAndDecode
 from bpe_knockout.auxiliary.bytemapping import *
 from bpe_knockout.knockout.core import BTE, BteInitConfig, RefMode, ByteBasedMode
 from tktkt.util.timing import timeit
-from tst.visualisation.graphing import LineGraph, CacheMode
+from fiject import LineGraph, CacheMode
 
 
 def robbert():
