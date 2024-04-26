@@ -1,7 +1,9 @@
 # BPE-knockout
 Repo hosting all the code used for the BPE-knockout paper.
 Below are the instructions for reproducing and extending the intrinsic evaluations.
-Extrinsic evaluations are done with [RobBERT's](https://github.com/iPieter/RobBERT) framework.
+
+Extrinsic evaluations are done with [RobBERT's](https://github.com/iPieter/RobBERT) framework. The pre-trained model
+checkpoints are available on the [HuggingFace Hub](https://huggingface.co/collections/Bauwens/bpe-knockout-660be8a33336a7e1289be624).
 
 ## Data
 All data is included in the repo, because it is obtainable for free elsewhere and free of license too.
@@ -9,20 +11,31 @@ All data is included in the repo, because it is obtainable for free elsewhere an
 - Language modelling data is derived from [OSCAR on HuggingFace](https://huggingface.co/datasets/oscar).
 
 ## Installing
-Because this repo ships with data (word lists and tokenisers) that take quite a while to compute, we currently only
-guarantee that an *editable install* works. That is: you tell Python to use the folder into which you cloned the repo,
-rather than copying the code to your global or virtual `site-packages` directory.
+### Minimal package
+If you are only interested in using the BPE-knockout package (including our English, German and Dutch BPE tokenisers and
+the respective morphological data loaders, but **not** including corpus word counts) and not in running the experiments
+from the paper, you likely just want to run:
 ```shell
-git clone https://github.com/GitMew/BPE-knockout.git
-cd BPE-knockout
-pip install -r requirements.txt
-pip install -e .
+pip install "bpe_knockout[github] @ git+https://github.com/bauwenst/BPE-knockout.git"
 ```
-If you're using conda or venv, don't forget to activate those before running any calls to `pip install`.
+
+### Full experiments, editable code
+If you want to run experiments from the paper and/or have access to the word count files, this means you want to download
+everything in this repository and tell Python to use the folder into which you cloned for the package code, rather than
+copying the code to your global or virtual `site-packages` directory. In that case, run:
+```shell
+git clone https://github.com/bauwenst/BPE-knockout.git
+cd BPE-knockout
+pip install -e .[github]
+```
+*Warning*:
+- If you're using conda or venv, don't forget to activate your environment before running any calls to `pip install`.
+- If you have an editable installation of `TkTkT` or `fiject` and would like to keep it, do *not* include the `[github]` suffix.
 
 ## Running
+Given that you have an editable install, follow these steps to reproduce the paper results:
 1. Unzip the `.rar` file under `data/compressed/`.
-2. Run `py main.py` or `python main.py` in a terminal.
+2. Run `py tst/main.py` or `python tst/main.py` in a terminal.
 
 ## Using your own data
 It is possible to use other datasets (even other languages) than the ones used for the paper. 

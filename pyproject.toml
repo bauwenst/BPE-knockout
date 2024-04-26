@@ -35,7 +35,7 @@ dependencies = [
     "scipy>=1.12.0"
 ]
 
-# These are not optional, but if you have these packages as editable install, you don't want to let pip install them again!
+# These are not optional, but if you have these packages as editable installs, you don't want to let pip install them again!
 [project.optional-dependencies]
 github = [
     "tktkt[github] @ git+https://github.com/bauwenst/TkTkT",
