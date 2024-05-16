@@ -9,7 +9,7 @@ if __name__ == "__main__":
     # Attempt to load lexicon weights (good test to see if setup worked)
     lexiconWeights()
 
-    from tst.knockout import *
+    from tst.experiments.knockout import *
     main_intrinsicMultilingual()  # 45min
 
     ### Appendices ###
@@ -27,3 +27,7 @@ if __name__ == "__main__":
     # main_deleteRandomMerges_Monolingual()  # Probably about 6 hours
     main_deleteLastMerges_Monolingual()  # 30min
     # main_deleteLastLeaves_Monolingual()  # Can be stopped after the first graph (2min), because the graphs are about the same as the previous call.
+
+    from tst.experiments.languagemodels import *
+    main_pretrainingGraph()
+    main_finetuningTable()

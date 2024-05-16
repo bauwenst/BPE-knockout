@@ -1,10 +1,9 @@
-import itertools
 import math
 import scipy
 
 from tktkt.interfaces.tokeniser import Tokeniser
-from tktkt.util.printing import *
-from tktkt.util.timing import *
+from tktkt.util.printing import PrintTable, wprint, lprint
+from tktkt.util.timing import timeit
 from tktkt.evaluation.morphological import intrinsicEvaluation, ConfusionMatrix, compareSplits_cursors, morphologyVersusTokenisation, TokeniserEvaluation, tokeniseAndDecode
 from tktkt.models.huggingface.wrapper import HuggingFaceTokeniser
 
@@ -81,7 +80,7 @@ def print_annealing():
 def visualise():
     graph = MergeGraph(robbert_tokenizer.get_vocab(), getMergeList_RobBERT())
     # graph.getSurroundingGraph("Ġhuishoud")
-    graph.getSurroundingGraph("ids")
+    graph.printSurroundingGraph("ids")
 
 
 def test_save_and_load():
@@ -476,6 +475,7 @@ def main_effectiveDropoutRate_Multilingual():
 #     """
 #     table = Table(f"bte-intrinsic-modes_{Pℛ𝒪𝒥ℰ𝒞𝒯.config.langTag()}", caching=CacheMode.IF_MISSING)
 #     if table.needs_computation:
+#         import itertools
 #         # Construct possible tokenisers
 #         modesets = list(itertools.product((RefMode.NONE,RefMode.MORPHEMIC,RefMode.LEXEMIC),
 #                                           (RefMode.NONE,RefMode.MORPHEMIC,RefMode.LEXEMIC)))

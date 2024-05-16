@@ -9,7 +9,6 @@ Goal: Investigate how the assumption of character-level tokenisation influences 
       We know that 1 strange character maps to 1 byte, but we also know that this byte is not necessarily deducible from
       whatever byte representation that character has in traditional encodings. So, how do we find the corresponding byte?
 """
-from tst.preamble import *
 
 from tst.tokenisation.robbert_tokenizer import robbert_tokenizer as rt
 from tktkt.models.huggingface.wrapper import HuggingFaceTokeniser
@@ -64,7 +63,7 @@ def pythonBTEvsHuggingFaceBPErevisited():
     Hypothesis: they actually differ for words with e.g. an ë because whereas HuggingFace sees the ë all the way through
                 even if its config file shows "Ã«", BTE thinks it needs the literal characters Ã« to merge that word.
     """
-    from tst.knockout import assert_tokenisers_equal
+    from tst.experiments.knockout import assert_tokenisers_equal
     assert_tokenisers_equal()
 
     # Dutch BTE without any knockout (should be identical to RobBERT in theory)
@@ -215,7 +214,7 @@ def doubleCollapse():
 
 
 def compareWithAndWithoutByteRemapping():
-    from tst.knockout import assert_tokenisers_equal
+    from tst.experiments.knockout import assert_tokenisers_equal
 
     # bte1 = BTE(BteInitConfig(starting_from_bytechars=False))
     # bte2 = BTE(BteInitConfig(starting_from_bytechars=True))

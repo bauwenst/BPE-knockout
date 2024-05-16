@@ -12,29 +12,31 @@ TODO:
         - Holdout ratio
         - Random seed
         - Whether knockout has already been run
-        - SoW/EoW
+        - Space marker
 """
 import dataclasses
 from enum import Enum
-from functools import cache, lru_cache
 from typing import List, Dict, Callable, Tuple, Set, Iterable
-import json
-import time
 from collections import Counter
 from pathlib import Path
 
-from tktkt.preparation.spacemarking import SpaceMarkerLocation
-from tqdm.auto import tqdm
 import re
+import json
+import time
+from functools import cache, lru_cache
+from tqdm.auto import tqdm
+
+from tktkt.util.printing import *
+from tktkt.interfaces.tokeniser import TokeniserWithVocabDict
+from tktkt.preparation.spacemarking import SpaceMarker
+from tktkt.preparation.instances import Preprocessor, PretokeniserSequence, BoundariesFromSpacesPretokeniser, RobertaSpaceMarker, \
+    TextMapper, IdentityMapper, AddWordBoundary, PseudoByteMapping, Replace, MapperAsPretokeniser
 
 from ..datahandlers.holdout import Holdout
 from ..datahandlers.morphology import LexSplit, MorphSplit
 from ..project.config import Pℛ𝒪𝒥ℰ𝒞𝒯, lexiconWeights, morphologyGenerator
 from ..auxiliary.tokenizer_interface import Evaluator
 
-from tktkt.util.printing import *
-from tktkt.interfaces.tokeniser import TokeniserWithVocabDict
-from tktkt.preparation.instances import BoundariesFromSpacesPretokeniser, RobertaSpaceMarker, AddWordBoundary, TextMapper, IdentityMapper, PseudoByteMapping, Preprocessor, SpaceMarker
 
 MergeAsTuple = Tuple[int, str, str]
 
@@ -311,11 +313,17 @@ class BTE(TokeniserWithVocabDict):
 
     def __init__(self, init_config: BteInitConfig,
                  starting_vocab: Dict[str,int]=None, starting_mergelist: List[str]=None,
-                 autorun_modes=True, holdout: Holdout=None, quiet=False,
-                 normalisation: TextMapper=None, boundary_marker: SpaceMarker=RobertaSpaceMarker):
+
+                 boundary_marker: SpaceMarker=RobertaSpaceMarker,
+                 preprocessor: Preprocessor=None, normalisation: TextMapper=None,
+
+                 autorun_modes=True, holdout: Holdout=None, quiet=False):
         """
         :param autorun_modes: whether to actually run the given modes, or only set their segmentation function.
                               swap_stages has no effect when this is true.
+        :param boundary_marker: Needed regardless of whether a preprocessor is defined or not.
+        :param normalisation: If no preprocessor is given, a pretokeniser will be imputed automatically given the boundary
+                              marker. The normalisation cannot be imputed in that case, and needs to be given explicitly.
         """
         self.config = init_config
         self.boundary_marker = boundary_marker
@@ -355,10 +363,12 @@ class BTE(TokeniserWithVocabDict):
         self.syncWithGraph()
 
         # Finish by completing the TkTkT interface.
-        preprocessor = Preprocessor(
-            uninvertible_mapping=normalisation,
-            splitter=BoundariesFromSpacesPretokeniser(marker=self.boundary_marker, byte_based=self.config.bytebased == ByteBasedMode.INPUT_TO_BYTES)
-        )
+        if preprocessor is None:  # Impute the preprocessor with everything we know.
+            preprocessor = Preprocessor(
+                uninvertible_mapping=normalisation,
+                splitter=BoundariesFromSpacesPretokeniser(marker=self.boundary_marker, byte_based=self.config.bytebased == ByteBasedMode.INPUT_TO_BYTES)
+            )
+        preprocessor.splitter = PretokeniserSequence([preprocessor.splitter, MapperAsPretokeniser(Replace(" ", ""))])  # Make the pretokeniser remove all spaces at the end.
         super().__init__(preprocessor=preprocessor, vocab=self.merge_graph.vocab)
 
         if autorun_modes:
@@ -413,12 +423,12 @@ class BTE(TokeniserWithVocabDict):
             1. It must ensure all spaces have been removed from the input, because these are control characters in the
                merge file and hence they will never partake in any merge. We use them as control characters in the
                algorithm, and hence if pretokenisation didn't get rid of all spaces, we must do so.
-               TODO: Might want to actually just tack this transformation onto the end of the preprocessor. Makes more sense.
+               This happens in the preprocessor, not here.
             2. BPE starts out by splitting up the input into units that can be merged. This is not pretokenisation,
                because these units will interact during tokenisation. The units are usually characters, but they don't
                have to be; Sennrich's repo shows this with an attached end-of-word, e.g. "word" -> "w o r d</w>".
         """
-        return self.applyMerges(pretoken.replace(" ", ""))
+        return self.applyMerges(self.boundary_marker.intoCharacters(pretoken))
 
     def applyMerges(self, sequence_of_nonspaces: Iterable[str]) -> List[str]:
         buffer = " " + " ".join(sequence_of_nonspaces) + " "
