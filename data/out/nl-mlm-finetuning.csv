@@ -1,0 +1,44 @@
+Name,State,Notes,User,Tags,Created,Runtime,global_step,ner-f1,nli-acc,pos-f1,sa-acc,Group,pppl
+,,,,,,,39093,,,,,bpe-2,3.663196086883545
+,,,,,,,39281,,,,,bpe-conversion,4.3511223793029785
+,,,,,,,35156,,,,,bpe-2,3.7367899417877197
+,,,,,,,34968,,,,,bpe-conversion,4.61586856842041
+,,,,,,,30187,,,,,bpe-2,3.882288932800293
+,,,,,,,30000,,,,,bpe-knockout-2,4.673908233642578
+,,,,,,,30187,,,,,bpe-conversion,200.3732147216797
+,,,,,,,30187,0.8057514684367972,,,,bpe-conversion,
+,,,,,,,30187,,,,0.8133992805755396,bpe-conversion,
+,,,,,,,30187,,0.8173664900122299,,,bpe-conversion,
+,,,,,,,30187,,,0.9482131193430998,,bpe-conversion,
+exalted-waterfall-93,finished,-,pieter-delobelle,,2024-03-31T12:07:03.000Z,11962,39093,,,,0.8143,bpe-2,
+zesty-sun-92,finished,-,pieter-delobelle,,2024-03-31T11:57:23.000Z,11476,39281,,,,0.8174460431654677,bpe-conversion,
+floral-shadow-91,finished,-,pieter-delobelle,,2024-03-31T11:10:17.000Z,3377,39093,0.8398,,,,bpe-2,
+effortless-dawn-90,finished,-,pieter-delobelle,,2024-03-31T10:58:15.000Z,3286,39281,0.8751446573228752,,,,bpe-conversion,
+youthful-yogurt-89,finished,-,pieter-delobelle,,2024-03-31T10:50:30.000Z,1164,39093,,,0.9378,,bpe-2,
+devoted-monkey-88,finished,-,pieter-delobelle,,2024-03-31T10:36:30.000Z,1136,39281,,,0.9600597935254824,,bpe-conversion,
+wise-moon-87,finished,-,pieter-delobelle,,2024-03-31T10:02:45.000Z,2847,39093,,0.8353,,,bpe-2,
+restful-dust-86,finished,-,pieter-delobelle,,2024-03-31T09:48:21.000Z,2736,39281,,0.8314309009376274,,,bpe-conversion,
+frosty-terrain-85,finished,-,pieter-delobelle,,2024-03-30T20:47:37.000Z,11530,35156,,,,0.8156474820143885,bpe-2,
+charmed-sea-84,finished,-,pieter-delobelle,,2024-03-30T19:52:32.000Z,3275,35156,0.8317948717948719,,,,bpe-2,
+lucky-salad-83,finished,-,pieter-delobelle,,2024-03-30T19:33:16.000Z,1133,35156,,,0.8590635577284693,,bpe-2,
+worldly-silence-81,finished,-,pieter-delobelle,,2024-03-30T18:47:06.000Z,2752,35156,,0.8255197717081125,,,bpe-2,
+resilient-donkey-80,finished,-,pieter-delobelle,,2024-03-30T17:45:33.000Z,11432,34968,,,,0.8241906474820144,bpe-conversion,
+glowing-blaze-79,finished,-,pieter-delobelle,,2024-03-30T16:46:31.000Z,3276,34968,0.8677398583386993,,,,bpe-conversion,
+lyric-butterfly-78,finished,-,pieter-delobelle,,2024-03-30T16:24:44.000Z,1137,34968,,,0.960324869305452,,bpe-conversion,
+dandy-star-77,finished,-,pieter-delobelle,,2024-03-30T15:36:33.000Z,2735,34968,,0.8259274357929066,,,bpe-conversion,
+vivid-sea-76,finished,-,pieter-delobelle,,2024-03-30T15:34:06.000Z,11536,30187,,,,0.8210431654676259,bpe-2,
+stellar-bush-75,finished,-,pieter-delobelle,,2024-03-30T14:39:14.000Z,3261,30187,0.8004081112103049,,,,bpe-2,
+dainty-shape-74,finished,-,pieter-delobelle,,2024-03-30T14:19:54.000Z,1137,30187,,,0.9349983691347096,,bpe-2,
+balmy-resonance-73,finished,-,pieter-delobelle,,2024-03-30T13:33:32.000Z,2766,30187,,0.8316347329800244,,,bpe-2,
+ancient-glade-101,finished,"-","pieter-delobelle","","2024-04-01T22:24:44.000Z",11452,30000,,,,0.8201438848920863,bpe-knockout-2,
+rich-cosmos-98,finished,"-","pieter-delobelle","","2024-04-01T21:26:03.000Z","3268",30000,0.8621309370988447,"","",,bpe-knockout-2,
+confused-armadillo-97,"finished","-","pieter-delobelle","","2024-04-01T21:04:29.000Z","1131",30000,,,0.911943793911007,,bpe-knockout-2,
+deft-blaze-95,finished,"-","pieter-delobelle","","2024-04-01T20:16:14.000Z","2744", 30000,,0.8298002445984509,"","",bpe-knockout-2,
+# giddy-voice-53,finished,-,pieter-delobelle,,2024-03-28T08:22:50.000Z,3298,24562,0.8574727389352148,,,,bpe-knockout-2,
+# different-leaf-50,finished,-,pieter-delobelle,,2024-03-22T22:10:36.000Z,11434,24562,,,,0.8138489208633094,bpe-knockout-2,
+# comfy-firefly-48,finished,-,pieter-delobelle,,2024-03-22T20:56:28.000Z,1138,24562,,,0.9574557511791902,,bpe-knockout-2,
+# solar-snow-47,finished,-,pieter-delobelle,,2024-03-22T20:08:24.000Z,2734,24562,,0.8255197717081125,,,bpe-knockout-2,
+# hopeful-wildflower-45,finished,-,pieter-delobelle,,2024-03-21T11:37:21.000Z,11438,24656,,,,0.8223920863309353,bpe-2,
+# polar-brook-44,finished,-,pieter-delobelle,,2024-03-21T10:42:49.000Z,3239,24656,0.8241335044929395,,,,bpe-2,
+# misty-pond-43,finished,-,pieter-delobelle,,2024-03-21T10:23:35.000Z,1126,24656,,,0.798676435830773,,bpe-2,
+# still-wildflower-42,finished,-,pieter-delobelle,,2024-03-21T09:37:37.000Z,2738,24656,,0.836526701997554,,,bpe-2,
