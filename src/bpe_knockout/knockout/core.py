@@ -28,7 +28,7 @@ from tqdm.auto import tqdm
 
 from tktkt.util.printing import *
 from tktkt.interfaces.tokeniser import TokeniserWithVocabDict
-from tktkt.preparation.spacemarking import SpaceMarker
+from tktkt.preparation.boundaries import BoundaryMarker
 from tktkt.preparation.instances import Preprocessor, PretokeniserSequence, BoundariesFromSpacesPretokeniser, RobertaSpaceMarker, \
     TextMapper, IdentityMapper, AddWordBoundary, PseudoByteMapping, Replace, MapperAsPretokeniser
 
@@ -74,7 +74,7 @@ class Merge:
         return all([len(part) >= minimum for part in self.parts])
 
 
-def undoByteMappingKeepMarker(text: str, marker: SpaceMarker, has_padding=False):
+def undoByteMappingKeepMarker(text: str, marker: BoundaryMarker, has_padding=False):
     byte_mapping = PseudoByteMapping()  # Maps spaces to spaces when decoding, which helps when handling merge strings.
     marker_mapping = AddWordBoundary(marker)
 
@@ -209,6 +209,9 @@ class MergeGraph:
                 if merge_to_edit not in self.merges_with[t]:
                     self.merges_with[t].append(merge_to_edit)
 
+    def getRawMerges(self) -> List[str]:
+        return [" ".join(merge.parts) for merge in sorted(self.merges)]  # Have to sort explicitly because priorities aren't returned, and they are sometimes changed during execution causing the list to be out of order.
+
     def getPaddedMerges(self) -> List[MergeAsTuple]:
         return [merge.asTuple() for merge in self.merges]
 
@@ -314,7 +317,7 @@ class BTE(TokeniserWithVocabDict):
     def __init__(self, init_config: BteInitConfig,
                  starting_vocab: Dict[str,int]=None, starting_mergelist: List[str]=None,
 
-                 boundary_marker: SpaceMarker=RobertaSpaceMarker,
+                 boundary_marker: BoundaryMarker=RobertaSpaceMarker, unk_type: str=None,
                  preprocessor: Preprocessor=None, normalisation: TextMapper=None,
 
                  autorun_modes=True, holdout: Holdout=None, quiet=False):
@@ -369,7 +372,7 @@ class BTE(TokeniserWithVocabDict):
                 splitter=BoundariesFromSpacesPretokeniser(marker=self.boundary_marker, byte_based=self.config.bytebased == ByteBasedMode.INPUT_TO_BYTES)
             )
         preprocessor.splitter = PretokeniserSequence([preprocessor.splitter, MapperAsPretokeniser(Replace(" ", ""))])  # Make the pretokeniser remove all spaces at the end.
-        super().__init__(preprocessor=preprocessor, vocab=self.merge_graph.vocab)
+        super().__init__(preprocessor=preprocessor, vocab=self.merge_graph.vocab, unk_type=unk_type)
 
         if autorun_modes:
             self.runModes()
@@ -433,21 +436,40 @@ class BTE(TokeniserWithVocabDict):
     def applyMerges(self, sequence_of_nonspaces: Iterable[str]) -> List[str]:
         buffer = " " + " ".join(sequence_of_nonspaces) + " "
         while True:
-            # print(buffer)
             types = buffer[1:-1].split(" ")
             possible_merges = []
             for t in types:
                 for m in self.merges_starting_with.get(t, []):
-                    if m[1] in buffer:  # Note that m[1] is padded with spaces. If not, "a bc d" would allow the merge "a b".
+                    if m[1] in buffer:  # Somehow, 'in' is even faster than slicing at the exact position (buffer[index_in_buffer:index_in_buffer+len(m[1])] == m[1]) which in turn is faster than .startswith ... https://stackoverflow.com/q/31917372/9352077
                         possible_merges.append(m)
-                        # print("\t", m[1])
+                        # print("\t", m[1])  # Note that m[1] is padded with spaces. If not, "a bc d" would allow the merge "a b".
 
             if not possible_merges:
                 break
 
             best_merge = min(possible_merges)
             buffer = buffer.replace(best_merge[1], best_merge[2])
-            # print(best_merge)
+
+        return buffer[1:-1].split(" ")
+
+    def applyMerges_faster(self, sequence_of_nonspaces: Iterable[str]) -> List[str]:
+        buffer = " " + " ".join(sequence_of_nonspaces) + " "
+        while True:
+            tokens = buffer[1:-1].split(" ")
+            tokens.pop()  # Slight speedup; the last token in the sequence will never be the initial token of a merge, so it's useless to check merges that start with it.
+
+            possible_merges = []
+            for t in set(tokens):  # Slight speedup; don't check for merges of the same type twice. Will be especially important at the start with single-character tokens.
+                for m in self.merges_starting_with.get(t, []):
+                    if m[1] in buffer:  # Somehow, 'in' is even faster than slicing at the exact position (buffer[index_in_buffer:index_in_buffer+len(m[1])] == m[1]) which in turn is faster than .startswith ... https://stackoverflow.com/q/31917372/9352077
+                        possible_merges.append(m)
+                        # print("\t", m[1])  # Note that m[1] is padded with spaces. If not, "a bc d" would allow the merge "a b".
+
+            if not possible_merges:
+                break
+
+            best_merge = min(possible_merges)
+            buffer = buffer.replace(best_merge[1], best_merge[2])
 
         return buffer[1:-1].split(" ")
 

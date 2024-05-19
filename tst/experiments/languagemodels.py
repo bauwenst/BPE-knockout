@@ -118,7 +118,7 @@ def round_to_nearest_1000(x: int):
     return 1000*round(x/1000)
 
 
-def main_pretrainingGraph():
+def main_pretrainingGraph(aspect_ratio=(5,3.25)):
     NAME_PATTERN = re.compile(r"Group: (.+) - validation/loss_epoch")
     # keys = ["Group", "global_step", "trainer/global_step", "ner-f1", "nli-acc", "pos-f1", "sa-acc"]
     # nonempty = ["ner-f1", "nli-acc", "pos-f1", "sa-acc"]
@@ -153,10 +153,15 @@ def main_pretrainingGraph():
 
     graph.commitWithArgs(
         LineGraph.ArgsGlobal(x_label="Training batches", y_label="Validation loss", legend_position="upper right", logy=True,
-                             aspect_ratio=(5,3.25), y_tickspacing=1, tick_scientific_notation=False, tick_log_multiples=True),
+                             aspect_ratio=aspect_ratio, y_tickspacing=1, tick_scientific_notation=False, tick_log_multiples=True,
+                             curve_linewidth=1.5),
         LineGraph.ArgsPerLine(show_points=False)
     )
 
 
 if __name__ == "__main__":
-    main_pretrainingGraph()
+    from fiject import FIJECT_DEFAULTS
+    FIJECT_DEFAULTS.RENDERING_FORMAT = "pdf"
+
+    UPSCALE = 1.9
+    main_pretrainingGraph((2.25*UPSCALE,1*UPSCALE))

@@ -1,14 +1,30 @@
 # BPE-knockout
 Repo hosting all the code used for the BPE-knockout paper.
-Below are the instructions for reproducing and extending the intrinsic evaluations.
 
+
+Below are the instructions for reproducing and extending the intrinsic evaluations.
 Extrinsic evaluations are done with [RobBERT's](https://github.com/iPieter/RobBERT) framework. The pre-trained model
 checkpoints are available on the [HuggingFace Hub](https://huggingface.co/collections/Bauwens/bpe-knockout-660be8a33336a7e1289be624).
 
-## Data
-All data is included in the repo, because it is obtainable for free elsewhere and free of license too.
-- Morphological decompositions were derived from [WebCelex at the Max Plank Institute](http://celex.mpi.nl/).
-- Language modelling data is derived from [OSCAR on HuggingFace](https://huggingface.co/datasets/oscar).
+## HuggingFace compatibility
+If you are used to working with the HuggingFace suite for language modelling and tokenisation, this is your lucky day! 
+You can incorporate BPE-knockout anywhere you're already using a BPE tokeniser loaded from HuggingFace, 
+with only 2 extra imports and 2 more lines of code. For example, if you're using `roberta-base`'s English tokeniser, 
+you would run:
+```python
+# Load HuggingFace object
+from transformers import AutoTokenizer
+hf_bpe_tokeniser = AutoTokenizer.from_pretrained("roberta-base")
+
+# Construct TkTkT object
+from tktkt.models.bpe.knockout import BPEKnockout
+tktkt_bpek_tokeniser = BPEKnockout.fromHuggingFace(hf_bpe_tokeniser, "English")
+
+# Convert back to HuggingFace
+from tktkt.interfaces.huggingface import TktktToHuggingFace
+hf_bpek_tokeniser = TktktToHuggingFace(tktkt_bpek_tokeniser, specials_from=hf_bpe_tokeniser)
+```
+The resulting object is indeed a HuggingFace tokeniser, but internally it works using BPE-knockout.
 
 ## Installing
 ### Minimal package
@@ -18,6 +34,9 @@ from the paper, you likely just want to run:
 ```shell
 pip install "bpe_knockout[github] @ git+https://github.com/bauwenst/BPE-knockout.git"
 ```
+As shown in the above example, user-friendly encapsulations for BPE-knockout are provided by the [TkTkT package](https://github.com/bauwenst/TkTkT),
+which may be more interesting to you than the core algorithm and configuration code which is provided here. In any case, installing
+either package will install the other automatically anyway.
 
 ### Full experiments, editable code
 If you want to run experiments from the paper and/or have access to the word count files, this means you want to download
@@ -51,3 +70,7 @@ Here is how you would do that:
    the relevant files, as well as the name of the relevant `LemmaMorphology` subclass. Use the `setup()` functions as examples.
 4. In `main.py`, specify this new config.
 
+## Data licenses
+All data is included in the repo, because it is obtainable for free elsewhere and free of license too.
+- Morphological decompositions were derived from [WebCelex at the Max Plank Institute](http://celex.mpi.nl/).
+- Language modelling data is derived from [OSCAR on HuggingFace](https://huggingface.co/datasets/oscar).
