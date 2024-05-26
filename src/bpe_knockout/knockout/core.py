@@ -371,7 +371,6 @@ class BTE(TokeniserWithVocabDict):
                 uninvertible_mapping=normalisation,
                 splitter=BoundariesFromSpacesPretokeniser(marker=self.boundary_marker, byte_based=self.config.bytebased == ByteBasedMode.INPUT_TO_BYTES)
             )
-        preprocessor.splitter = PretokeniserSequence([preprocessor.splitter, MapperAsPretokeniser(Replace(" ", ""))])  # Make the pretokeniser remove all spaces at the end.
         super().__init__(preprocessor=preprocessor, vocab=self.merge_graph.vocab, unk_type=unk_type)
 
         if autorun_modes:
@@ -426,12 +425,13 @@ class BTE(TokeniserWithVocabDict):
             1. It must ensure all spaces have been removed from the input, because these are control characters in the
                merge file and hence they will never partake in any merge. We use them as control characters in the
                algorithm, and hence if pretokenisation didn't get rid of all spaces, we must do so.
-               This happens in the preprocessor, not here.
+               This cannot happen in the preprocessor, because it is a non-invertible mapping AFTER pretokenisation,
+               which is invertible.
             2. BPE starts out by splitting up the input into units that can be merged. This is not pretokenisation,
                because these units will interact during tokenisation. The units are usually characters, but they don't
                have to be; Sennrich's repo shows this with an attached end-of-word, e.g. "word" -> "w o r d</w>".
         """
-        return self.applyMerges(self.boundary_marker.intoCharacters(pretoken))
+        return self.applyMerges(self.boundary_marker.intoCharacters(pretoken.replace(" ", "")))
 
     def applyMerges(self, sequence_of_nonspaces: Iterable[str]) -> List[str]:
         buffer = " " + " ".join(sequence_of_nonspaces) + " "
@@ -943,9 +943,13 @@ class BTE(TokeniserWithVocabDict):
         return applied_merges
 
     def _preprocessAlreadySegmentedString(self, segmentation: str) -> str:
-        segmentation = segmentation.replace(" ", SPLIT_MARKER)
+        # TODO: Even this method isn't completely watertight against all preprocessors. If a preprocessor separates different scripts by a boundary marker, some part of the BPE-knockout code will crash.
+        space_preserver_decoded = "🂠"  # Cannot be punctuation or a number since some preprocessors treat that specially. Also can't really be a character in any language.
+        space_preserver_encoded, _ = self.boundary_marker.isolate("".join(self.preprocessor.do(space_preserver_decoded)))
+
+        segmentation = segmentation.replace(" ", space_preserver_decoded)
         segmentation = "".join(self.preprocessor.do(segmentation))
-        segmentation = segmentation.replace(SPLIT_MARKER, " ")
+        segmentation = segmentation.replace(space_preserver_encoded, " ")
         return segmentation
 
     #################################################################################################################
