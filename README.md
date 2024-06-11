@@ -1,4 +1,5 @@
-# BPE-knockout
+<img src="doc/logo.png">
+
 Repo hosting all the code used for the BPE-knockout paper.
 
 
