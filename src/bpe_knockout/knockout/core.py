@@ -384,6 +384,8 @@ class BTE(TokeniserWithVocabDict):
         Synchronise the class's caching structures with the merge graph, which is the actual knowledge representation of
         the tokeniser's functionality.
         """
+        self.tokenise.cache_clear()  # Changing the tokeniser => LRU cache is invalid.
+
         padded_merge_rules = self.merge_graph.getPaddedMerges()  # There's no use storing these in one big set/list aside from merges_starting_with, since they're tuples and hence don't have a reference.
         self.merges_starting_with = {t: [] for t in self.merge_graph.vocab}
 
@@ -402,7 +404,7 @@ class BTE(TokeniserWithVocabDict):
         self._removeMerges(merges_to_remove)
         return merges_to_remove  # For diagnostic purposes
 
-    def _removeMerges(self, merges_to_remove: List[Merge]):
+    def _removeMerges(self, merges_to_remove: Iterable[Merge]):
         for merge in tqdm(merges_to_remove, desc="PRUNING GRAPH", disable=not self.print.verbose):
             self.merge_graph.knockout(merge.childType())
         self.syncWithGraph()
@@ -413,7 +415,7 @@ class BTE(TokeniserWithVocabDict):
         self._addMerges(merges_to_add)
         return merges_to_add  # For diagnostic purposes
 
-    def _addMerges(self, merges_to_add: List[str]):
+    def _addMerges(self, merges_to_add: Iterable[str]):
         for merge_string in tqdm(merges_to_add, desc="ANNEALING GRAPH", disable=not self.print.verbose):
             self.merge_graph.addArc(merge_string)
         self.syncWithGraph()
@@ -513,6 +515,52 @@ class BTE(TokeniserWithVocabDict):
 
         return buffer[1:-1].split(" "), mergepoint_to_mergeid
 
+    def tokenise_diagnostic(self, pretoken: str) -> Tuple[List[str], Dict[int,int]]:
+        return self.applyMerges_diagnostic(self.boundary_marker.intoCharacters(pretoken.replace(" ", "")))
+
+    def prepareAndTokenise_diagnostic(self, text: str) -> List[str]:
+        """
+        Get BPE split and the ID of the merge that caused a space to disappear at each index.
+         - You need to pass the lemma to applyMerges_diagnostic. You cannot just prepend a SoW for this. Here's why:
+              - Minor problem: any BPE tokeniser that doesn't have a SoW (and specifically the SoW you use) won't work.
+              - Major problem: you'd be segmenting a lemma without converting it to byte-based representation (if
+                applicable to your vocab). That means that byte-based BPE will not recognise letters like ë (it is
+                used to seeing Ã«) and hence never merge with it, so you can never blame those merges.
+         - You need to tackle two problems:
+              - Segment strings as if they're in a corpus, which means you need to run the full pretokeniser on
+                the input. Technically you want to do exactly what tokeniseAndDecode does,
+                which is to say: run preprocessor, tokenise every pretoken, concatenate into one token list, run
+                the inverse preprocessor on all tokens, join with spaces, and strip. This is what happens during
+                evaluation, where you only need segmentation boundaries.
+              - However, you also need to get the index-to-merge diagnosis, whose indices refer to the string as
+                seen by the tokeniser rather than the raw lemma string, which is to say:
+                      1. originating from a modified version of the string that has both the SoW and the byte characters, and
+                      2. if the string has multiple pretokens, each pretoken obviously resets the index to 0.
+                The only way around (1) is to pretokenise the reference segmentation to bring its split points
+                into the same domain. This will require a hand-crafted pretokeniser, because you can't run a string
+                with spaces through the actual preprocessor nor split on those spaces and run each substring through.
+                To solve (2), you could concatenate the pretokens, or (because the tokenisers relies on them NOT
+                being concatenated) shift all indices up by the length of the previous pretokens.
+         - There are two inaccuracies that sneak into the calculation when you compare preprocessed segmentations:
+              - You will have even more negatives than there already are, because the positions between special
+                bytes (like Ã and «) will never be a split point. Luckily we only care about positives here.
+              - The reference will never have a space after SoW or before EoW because we glue it on manually, whilst
+                BPE might predict it. For a Latin alphabet, this is very unlikely though, and even if it happens, it
+                doesn't affect the results because it isn't a case of BPE merging too much (but rather, too little).
+        """
+        tokens = []
+        merge_ids = dict()
+
+        offset = 0
+        for pretoken in self.preprocessor.do(lemma):
+            partial_tokens, partial_merge_ids = self.tokenise_diagnostic(pretoken)  # TODO: Technically this treats multi-character start-of-word characters as one character, which will mismatch indices when using this diagnostic to interpret raw string indices. The fix is to increase the first partial_merge_ids by the length of the SoW.
+
+            tokens.extend(partial_tokens)
+            merge_ids.update({k + offset: v for k, v in partial_merge_ids.items()})
+            offset += len(pretoken)
+
+        return tokens, merge_ids
+
     def getBadOldMerges(self, relative_blame_threshold=0.5, except_if_all_parts_longer_than=100) -> List[Tuple[float,int,Merge]]:
         """
         Compares BPE tokenisation to morphological tokenisation, and records the amount of times each BPE merge is used as
@@ -543,42 +591,7 @@ class BTE(TokeniserWithVocabDict):
             reference_segmentation = self._preprocessAlreadySegmentedString(reference_segmentation)
 
             # Get BPE split and the ID of the merge that caused a space to disappear at each index.
-            #  - You need to pass the lemma to applyMerges_diagnostic. You cannot just prepend a SoW for this. Here's why:
-            #       - Minor problem: any BPE tokeniser that doesn't have a SoW (and specifically the SoW you use) won't work.
-            #       - Major problem: you'd be segmenting a lemma without converting it to byte-based representation (if
-            #         applicable to your vocab). That means that byte-based BPE will not recognise letters like ë (it is
-            #         used to seeing Ã«) and hence never merge with it, so you can never blame those merges.
-            #  - You need to tackle two problems:
-            #       - Segment strings as if they're in a corpus, which means you need to run the full pretokeniser on
-            #         the input. Technically you want to do exactly what tokeniseAndDecode does,
-            #         which is to say: run preprocessor, tokenise every pretoken, concatenate into one token list, run
-            #         the inverse preprocessor on all tokens, join with spaces, and strip. This is what happens during
-            #         evaluation, where you only need segmentation boundaries.
-            #       - However, you also need to get the index-to-merge diagnosis, whose indices refer to the string as
-            #         seen by the tokeniser rather than the raw lemma string, which is to say:
-            #               1. originating from a modified version of the string that has both the SoW and the byte characters, and
-            #               2. if the string has multiple pretokens, each pretoken obviously resets the index to 0.
-            #         The only way around (1) is to pretokenise the reference segmentation to bring its split points
-            #         into the same domain. This will require a hand-crafted pretokeniser, because you can't run a string
-            #         with spaces through the actual preprocessor nor split on those spaces and run each substring through.
-            #         To solve (2), you could concatenate the pretokens, or (because the tokenisers relies on them NOT
-            #         being concatenated) shift all indices up by the length of the previous pretokens.
-            #  - There are two inaccuracies that sneak into the calculation when you compare preprocessed segmentations:
-            #       - You will have even more negatives than there already are, because the positions between special
-            #         bytes (like Ã and «) will never be a split point. Luckily we only care about positives here.
-            #       - The reference will never have a space after SoW or before EoW because we glue it on manually, whilst
-            #         BPE might predict it. For a Latin alphabet, this is very unlikely though, and even if it happens, it
-            #         doesn't affect the results because it isn't a case of BPE merging too much (but rather, too little).
-            tokens    = []
-            merge_ids = dict()
-            offset = 0
-            for pretoken in self.preprocessor.do(lemma):
-                partial_tokens, partial_merge_ids = self.applyMerges_diagnostic(pretoken)
-                tokens.extend(partial_tokens)
-                partial_merge_ids = {k+offset: v for k,v in partial_merge_ids.items()}
-                merge_ids.update(partial_merge_ids)
-                offset += len(pretoken)
-
+            tokens, merge_ids = self.prepareAndTokenise_diagnostic(lemma)
             bpe_segmentation = " ".join(tokens)
 
             # tokens, merge_ids = self.applyMerges_diagnostic(SOW + lemma)
