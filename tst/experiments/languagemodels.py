@@ -10,8 +10,8 @@ import re
 from fiject import LineGraph, CacheMode, Table, ColumnStyle
 
 
-PATH_PRETRAINING_RESULTS = PATH_DATA_OUT / "nl-mlm-pretraining.csv"
-PATH_FINETUNING_RESULTS  = PATH_DATA_OUT / "nl-mlm-finetuning.csv"
+PATH_PRETRAINING_RESULTS = PATH_EXPERIMENTS_OUT / "nl-mlm-pretraining.csv"
+PATH_FINETUNING_RESULTS  = PATH_EXPERIMENTS_OUT / "nl-mlm-finetuning.csv"
 
 BPE_NAME   = "BPE"
 KNOCK_NAME = "BPE-knockout"

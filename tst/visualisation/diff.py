@@ -58,7 +58,7 @@ def matchListElements(list1: List[str], list2: List[str], max_length: int=1_000_
     tex += "\t" + "\end{scope}\n"
     tex += "\end{tikzpicture}"
 
-    with open(PATH_DATA_OUT / "figures" / "diff.tex", "w", encoding="utf-8") as handle:
+    with open(PATH_EXPERIMENTS_OUT / "figures" / "diff.tex", "w", encoding="utf-8") as handle:
         handle.write(tex)
 
 

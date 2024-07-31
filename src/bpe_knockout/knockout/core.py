@@ -356,14 +356,12 @@ class BTE(TokeniserWithVocabDict):
 
         # Graph
         self.print("Instantiating", self.name, "...")
-
+        self.merge_graph: MergeGraph                       = None
+        self.merges_starting_with: Dict[str, MergeAsTuple] = None  # Will be synchronised with the graph
         if starting_vocab is None or starting_mergelist is None:
             starting_vocab     = Pℛ𝒪𝒥ℰ𝒞𝒯.config.base_tokeniser.loadVocabulary()
             starting_mergelist = Pℛ𝒪𝒥ℰ𝒞𝒯.config.base_tokeniser.loadMerges()
-        self.merge_graph = MergeGraph(starting_vocab, starting_mergelist, quiet=quiet)
-
-        self.merges_starting_with: Dict[str, MergeAsTuple] = None  # Will be synchronised with the graph
-        self.syncWithGraph()
+        self.initialiseGraph(starting_vocab, starting_mergelist, quiet=quiet)
 
         # Finish by completing the TkTkT interface.
         if preprocessor is None:  # Impute the preprocessor with everything we know.
@@ -379,12 +377,16 @@ class BTE(TokeniserWithVocabDict):
     def runModes(self):
         self.iterative(self.config.iterations)
 
+    def initialiseGraph(self, vocab: Dict[str,int], mergelist: List[str], quiet: bool=True):
+        self.merge_graph = MergeGraph(vocab, mergelist, quiet=quiet)
+        self.syncWithGraph()
+
     def syncWithGraph(self):
         """
         Synchronise the class's caching structures with the merge graph, which is the actual knowledge representation of
         the tokeniser's functionality.
         """
-        self.tokenise.cache_clear()  # Changing the tokeniser => LRU cache is invalid.
+        self.tokenise.cache_clear()  # Because syncing is what changes the tokeniser, you must invalidate the LRU cache.
 
         padded_merge_rules = self.merge_graph.getPaddedMerges()  # There's no use storing these in one big set/list aside from merges_starting_with, since they're tuples and hence don't have a reference.
         self.merges_starting_with = {t: [] for t in self.merge_graph.vocab}

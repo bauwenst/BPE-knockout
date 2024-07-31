@@ -1,6 +1,6 @@
 <img src="doc/logo.png">
 
-Repo hosting all the code used for the BPE-knockout paper.
+Repo hosting all the code used for the NAACL 2024 paper [*"BPE-knockout: Pruning Pre-existing BPE Tokenisers with Backwards-compatible Morphological Semi-supervision"*](https://aclanthology.org/2024.naacl-long.324/).
 
 
 Below are the instructions for reproducing and extending the intrinsic evaluations.
@@ -50,7 +50,7 @@ pip install -e .[github]
 ```
 *Warning*:
 - If you're using conda or venv, don't forget to activate your environment before running any calls to `pip install`.
-- If you have an editable installation of `TkTkT` or `fiject` and would like to keep it, do *not* include the `[github]` suffix.
+- If you have an editable installation of my other packages `TkTkT` and/or `Fiject` and would like to keep it, do *not* include the `[github]` suffix.
 
 ## Running experiments
 Given that you have an editable install, follow these steps to reproduce the paper results:
@@ -75,3 +75,19 @@ Here is how you would do that:
 All data is included in the repo, because it is obtainable for free elsewhere and free of license too.
 - Morphological decompositions were derived from [WebCelex at the Max Plank Institute](http://celex.mpi.nl/).
 - Language modelling data is derived from [OSCAR on HuggingFace](https://huggingface.co/datasets/oscar).
+
+## Citation
+If you use BPE-knockout in your own work, cite the paper using e.g.:
+```bibtex
+@inproceedings{bauwens-delobelle-2024-bpe,
+    title = "{BPE}-knockout: Pruning Pre-existing {BPE} Tokenisers with Backwards-compatible Morphological Semi-supervision",
+    author = "Bauwens, Thomas  and  Delobelle, Pieter",
+    booktitle = "Proceedings of the 2024 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies (Volume 1: Long Papers)",
+    month = jun,
+    year = "2024",
+    address = "Mexico City, Mexico",
+    publisher = "Association for Computational Linguistics",
+    url = "https://aclanthology.org/2024.naacl-long.324",
+    pages = "5810--5832"
+}
+```
