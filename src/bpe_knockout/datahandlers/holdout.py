@@ -13,14 +13,13 @@ import numpy.random as npr
 
 class Holdout:
 
-    SEED = 0
-
-    def __init__(self, train_fraction: float):
+    def __init__(self, train_fraction: float, seed: int=0):
         self.threshold = train_fraction
+        self.seed = seed
 
     def __call__(self, iterator, train=False, test=False):
         self.it = iterator
-        self.rng = npr.default_rng(seed=Holdout.SEED)
+        self.rng = npr.default_rng(seed=self.seed)
 
         for output in self.it:  # This lets the iterator yield
             train_split = self.rng.random() < self.threshold

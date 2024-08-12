@@ -11,3 +11,9 @@ PATH_EXPERIMENTS_OUT.mkdir(exist_ok=True, parents=True)
 # Point Fiject to this folder
 from fiject import setFijectOutputFolder
 setFijectOutputFolder(PATH_EXPERIMENTS_OUT)
+
+# And TkTkT if you need it
+from tktkt import setTkTkToutputRoot
+from tktkt.files.paths import PathManager
+setTkTkToutputRoot(PATH_EXPERIMENTS_OUT)
+OutputPaths = PathManager("bpe-knockout")

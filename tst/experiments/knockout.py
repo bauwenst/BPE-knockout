@@ -85,11 +85,11 @@ def visualise():
 
 def test_save_and_load():
     bte = BTE(init_config=BteInitConfig(knockout=RefMode.MORPHEMIC), autorun_modes=True)
-    print(bte.vocab_size)
+    print(bte.getVocabSize())
     out_path = bte.save(PATH_DATA_TEMP)
 
     bte = BTE.load(out_path)
-    print(bte.vocab_size)
+    print(bte.getVocabSize())
 
 
 def time_iterators():
@@ -147,74 +147,6 @@ def test_onlyTrivials():
     commitEvaluationTable(table)
 
 
-def test_chainEffect():
-    """
-    Goal: Find chains of merges whose result only appear in a single merge, and specifically those
-          that then feed into a leaf.
-    TODO:
-        What we don't detect is chains that are distantly connected. Imagine you have 5 merges.
-        M1's type is only used in M2. M2's type is used in M3 and M4. M3's type is only used in M5. That looks like
-                /--- M3 --- M5
-        M1 --- M2
-                \--- M4
-        wherein M1-M2 and M3-M5 are two separate chains.
-    """
-    bte = BTE(BteInitConfig())
-    singletons_in_order = [merge for merge in bte.merge_graph.merges if len(bte.merge_graph.merges_with[merge.childType()]) == 1]
-    singletons = {merge.childType(): merge for merge in singletons_in_order}
-    # print(singletons)
-    # print(len(singletons))
-
-    chains = []
-    exist_in_chains = set()
-    for merge in reversed(singletons_in_order):  # Due to the order, you know that the largest chain to which a type could possibly belong will have been found by the time you get to it.
-        if merge.childType() in exist_in_chains:
-            continue
-
-        chain = []
-        while True:
-            chain.append(merge)
-            for part in merge.parts:  # Try to go DOWN the chain.
-                merge = singletons.get(part)
-                if merge is not None:  # Early exit when you find a type.
-                    break
-            else:  # If there was no type found (no early exit), the chain is done.
-                break
-        exist_in_chains.update([merge.childType() for merge in chain])
-        chains.append(chain[::-1])
-
-    class Chain:
-        def __init__(self, chain: List[Merge]):
-            self.as_list: List[Merge] = chain
-            self.connected_to_leaves: List[Merge] = []
-
-    # chains.sort(key=lambda chain: len(chain))
-    # lprint(chains)
-
-    # Now find the chains that end in a leaf; these are purpose-built chains for that leaf,
-    # or alternatively a compound built from two words that would've been standalone words
-    # but ended up as part of an even bigger standalone word and hence became single-use instead of a leaf.
-    chains = {chain[-1].childType(): Chain(chain) for chain in chains}
-    leaves = [merge for merge in bte.merge_graph.merges if len(bte.merge_graph.merges_with[merge.childType()]) == 0]
-    for leaf in leaves:
-        for part in leaf.parts:
-            chain = chains.get(part)
-            if chain is not None:
-                chain.connected_to_leaves.append(leaf)
-
-    lprint(
-        map(lambda chain: (chain.connected_to_leaves[0].childType(), chain.as_list + chain.connected_to_leaves),  # what is displayed
-            sorted(  # sort them first by chain length and then by leaf type length
-                filter(  # get all chains that end in 1 leaf
-                    lambda chain: len(chain.connected_to_leaves) == 1,
-                    chains.values()
-                ),
-                key=lambda chain: (len(chain.as_list), len(chain.connected_to_leaves[0].childType()))
-            )
-        )
-    )
-
-
 def test_iterative():
     HOLDOUTS = [(None, "normal"), (Holdout(0.8), "holdout")]
     MAX_ITERATIONS = 20
@@ -233,7 +165,7 @@ def test_iterative():
             # Do reification
             bte = BTE(BteInitConfig(knockout=RefMode.MORPHEMIC, reify=ReifyMode.ALL, iterations=MAX_ITERATIONS),
                       autorun_modes=False, holdout=holdout)
-            bte.iterative(iterations=MAX_ITERATIONS, evaluator=ForIntermediateTests())
+            bte._iterative(iterations=MAX_ITERATIONS, evaluator=ForIntermediateTests())
 
     commitEvaluationTable(table)
 
@@ -687,10 +619,10 @@ def main_deleteRandomMerges_Monolingual():
             # for merge_idx in tqdm(merge_indices, desc="RANDOMLY PRUNING GRAPH"):
             for merge in merges:
                 bte.merge_graph.knockout(merge.childType())
-            bte.syncWithGraph()
+            bte._syncWithGraph()
 
             # Evaluate
-            cm, cm_w = morphologyVersusTokenisation(morphologyGenerator(), MorphSplit(), bte, log_name=bte.name, quiet=True)
+            cm, cm_w = morphologyVersusTokenisation(morphologyGenerator(), MorphSplit(), bte, log_name=bte.getName(), quiet=True)
             pr, re, f1 = cm.computePrReF1()
             return pr, re, f1
 
@@ -774,10 +706,10 @@ def main_deleteLastMerges_Monolingual():
                 merges = bte.merge_graph.merges[-to_knock_out:]  # "Select the last {size} merges"
                 for merge in tqdm(merges, total=len(merges)):
                     bte.merge_graph.knockout(merge.childType())
-                bte.syncWithGraph()
+                bte._syncWithGraph()
 
             # Evaluate
-            cm, _ = morphologyVersusTokenisation(morphologyGenerator(), MorphSplit(), bte, log_name=bte.name + f"_minus_{p}%", quiet=False, weights=None)
+            cm, _ = morphologyVersusTokenisation(morphologyGenerator(), MorphSplit(), bte, log_name=bte.getName() + f"_minus_{p}%", quiet=False, weights=None)
             pr, re, f1 = cm.computePrReF1()
 
             results.append((pr,re,f1))
@@ -866,10 +798,10 @@ def main_deleteLastLeaves_Monolingual():
 
             for merge in tqdm(merges, total=len(merges)):
                 bte.merge_graph.knockout(merge.childType())
-            bte.syncWithGraph()
+            bte._syncWithGraph()
 
             # Evaluate
-            cm, cm_w = morphologyVersusTokenisation(morphologyGenerator(), MorphSplit(), bte, log_name=bte.name + f"_minus_{p}%", quiet=False)
+            cm, cm_w = morphologyVersusTokenisation(morphologyGenerator(), MorphSplit(), bte, log_name=bte.getName() + f"_minus_{p}%", quiet=False)
             pr, re, f1 = cm.computePrReF1()
 
             results.append((pr,re,f1))
@@ -952,7 +884,7 @@ def main_blameThreshold_Monolingual():
                 bte = BTE(BteInitConfig(knockout=RefMode.MORPHEMIC), autorun_modes=False, quiet=True)
                 for merge in relevant_merges:
                     bte.merge_graph.knockout(merge.childType())
-                bte.syncWithGraph()
+                bte._syncWithGraph()
 
                 # Evaluate
                 cm, _ = morphologyVersusTokenisation(morphologyGenerator(), MorphSplit(), bte)
