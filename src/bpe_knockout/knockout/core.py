@@ -10,29 +10,32 @@ TODO:
       then adds 100 merges, ending up with the same vocab size.
 """
 import dataclasses
-import warnings
 from enum import Enum
-from typing import List, Dict, Callable, Tuple, Set, Iterable, Any
+from typing import List, Dict, Callable, Tuple, Set, Iterable, Any, Union
 from collections import Counter
 from pathlib import Path
 
+import warnings
 import re
 import json
 import time
 from functools import cache, lru_cache
 from tqdm.auto import tqdm
 
+import tktkt
 from tktkt.util.printing import *
+from tktkt.util.timing import datetimeDashed
 from tktkt.interfaces.tokeniser import TokeniserWithVocabDict
-from tktkt.preparation.boundaries import BoundaryMarker
+from tktkt.interfaces.huggingface import TktktToHuggingFace
+from tktkt.preparation.boundaries import BoundaryMarker, BoundaryMarkerLocation
 from tktkt.preparation.instances import Preprocessor, PretokeniserSequence, BoundariesFromSpacesPretokeniser, RobertaSpaceMarker, \
     TextMapper, IdentityMapper, AddWordBoundary, PseudoByteMapping, Replace, MapperAsPretokeniser
 
+from .. import __version__
 from ..datahandlers.holdout import Holdout
 from ..datahandlers.morphology import LexSplit, MorphSplit
 from ..project.config import Pℛ𝒪𝒥ℰ𝒞𝒯, lexiconWeights, morphologyGenerator
-from ..auxiliary.tokenizer_interface import Evaluator
-
+from ..auxiliary.tokenizer_interface import Evaluator, fetchAndCacheDict, DEFAULT_TOKENISER_STEM, PATH_DATA_TEMP
 
 MergeAsTuple = Tuple[int, str, str]
 
@@ -392,8 +395,13 @@ class BTE(TokeniserWithVocabDict):
         Synchronise the class's caching structures with the merge graph, which is the actual knowledge representation of
         the tokeniser's functionality.
         """
-        self.tokenise.cache_clear()  # Because syncing is what changes the tokeniser, you must invalidate the LRU cache.
+        # Because syncing is what changes the tokeniser, you must invalidate the LRU cache.
+        self.tokenise.cache_clear()
 
+        # Synchronise ID lookup
+        self.reverse_vocab = {v:k for k,v in self.merge_graph.vocab.items()}
+
+        # Synchronise merge strings
         padded_merge_rules = self.merge_graph.getPaddedMerges()  # There's no use storing these in one big set/list aside from merges_starting_with, since they're tuples and hence don't have a reference.
         self.merges_starting_with = {t: [] for t in self.merge_graph.vocab}
 
@@ -986,59 +994,109 @@ class BTE(TokeniserWithVocabDict):
             metadata       = tkz_as_dict["init-metadata"]
             tokeniser_data = tkz_as_dict["tokeniser"]
 
-        metadata["knockout"] = RefMode(metadata["knockout"])
-        metadata["anneal"]   = RefMode(metadata["anneal"])
-        metadata["starting_from_bytechars"] = ByteBasedMode(metadata["starting_from_bytechars"])
+        # Convert enums from string to object
+        metadata["knockout"]  = RefMode(metadata["knockout"])
+        metadata["anneal"]    = RefMode(metadata["anneal"])
+        metadata["bytebased"] = ByteBasedMode(metadata["bytebased"])
+        metadata["marker"]["location"] = BoundaryMarkerLocation(metadata["marker"]["location"])
 
+        # At this point, all data have been read properly and we can start using them.
         if metadata["custom-preprocessor"] and preprocessor is None:  # All other configurations are allowed: in particular, you can overwrite the default preprocessor if you want.
             raise ValueError("Tokeniser was saved when it had a custom preprocessor, but it was loaded without giving any preprocessor.")
 
-        init_config = dataclassFromDictionary(BteInitConfig, metadata)
-        bte = BTE(init_config,
+        bte = BTE(init_config=dataclassFromDictionary(BteInitConfig, metadata),  # Extract all relevant fields from the metadata dictionary to build the init config.
                   preprocessor=preprocessor,
                   boundary_marker=dataclassFromDictionary(BoundaryMarker, metadata["marker"]),
                   starting_vocab=tokeniser_data["types"],
                   starting_mergelist=tokeniser_data["merges"],
                   holdout=Holdout(train_fraction=metadata["holdout"], seed=metadata["seed"]),
-                  autorun_modes=False)  # Always false because either it already ran or didn't yet and then it didn't have auto-run clearly.
+                  autorun_modes=False,  # Always false because either it already ran or didn't yet and then it didn't have auto-run clearly.
+                  quiet=True)
         bte._has_run = metadata["has-run"]
         return bte
 
     def save(self, folder: Path) -> Path:
-        if not folder.is_dir():
-            raise ValueError(f"Cannot find directory {folder.as_posix()}")
+        # Folder setup
+        if not folder.parent.is_dir():
+            raise ValueError(f"Cannot find folder parent {folder.parent.as_posix()}")
+        folder.mkdir(exist_ok=True)
 
-        data = {
+        # Separate alphabet from merged types
+        alphabet   = {t: i for t,i in self.vocab.items() if not self.merge_graph.merges_of[t]}
+        composites = {m.childType(): m.priority for m in self.merge_graph.merges}
+        if set(self.vocab.keys()) != set(alphabet.keys()) | set(composites.keys()):
+            warnings.warn("While saving, it was discovered that the set of types without a merge plus the set of types formed by the merge list DO NOT make up the vocabulary. This is weird!")
+
+        # Serialise
+        serialised = {
+            "versions": {
+                "bpe_knockout": __version__,
+                "tktkt": tktkt.__version__
+            },
             "init-metadata": dataclasses.asdict(self._config) | \
-                             {
+                {
                     "marker": {
                         "substitute": self._boundary_marker.substitute,
-                        "detached": self._boundary_marker.detacted,
+                        "detached": self._boundary_marker.detached,
                         "location": self._boundary_marker.location
                     },
                     "holdout": self._holdout.threshold,
+                    "seed": self._holdout.seed,
                     "has-run": self._has_run,
                     "custom-preprocessor": not self._default_preprocessor
                 },
             "tokeniser": {
-                "types": {k:v for k,v in sorted(self.merge_graph.vocab.items(), key=lambda item: item[1])},  # Sorted by ID.
+                "types": {t: self.vocab[t] for t in sorted(alphabet.keys(), key=alphabet.get) + sorted(composites.keys(), key=composites.get)},  # Alphabet is sorted by ID, composites are sorted by merge priority (even if that means the IDs are out of order, which is the case for RoBERTa!).
                 "merges": [" ".join(merge.parts) for merge in sorted(self.merge_graph.merges)]  # Sorted by priority; very important. Isn't necessarily the case in the graph by default.
             }
         }
 
-        out_path = folder / time.strftime("BTE_%Y-%m-%d_%H%M%S.json")
+        out_path = folder / time.strftime(f"tokenizer_BTE_{datetimeDashed()}.json")
         with open(out_path, "w", encoding="utf-8") as handle:
-            json.dump(data, handle, indent=4, ensure_ascii=False)
+            json.dump(serialised, handle, indent=4, ensure_ascii=False)
         return out_path
+
+    @staticmethod
+    def from_pretrained_tktkt(checkpoint: Union[str, Path], preprocessor: Preprocessor=None) -> "BTE":
+        """
+        Wrapper around BTE.load(file) that adds three features:
+            1. You can give a local path as a string, like you would in HuggingFace for local files.
+            2. You can give a directory path (as Path or as string), in which case the .json file stem will be imputed.
+            3. You can give a string that is NOT an existing file or directory, and it will instead be looked up
+               as if it is a checkpoint on the HuggingFace hub.
+        """
+        # Make sure that you have the tokeniser file locally on disk.
+        pathified = Path(checkpoint)
+        if pathified.is_dir() or pathified.is_file():
+            if pathified.is_dir():
+                path = pathified / f"{DEFAULT_TOKENISER_STEM}.json"
+                if not pathified.is_file():
+                    raise ValueError(f"Couldn't load tokeniser from checkpoint: {pathified.as_posix()} is a directory without recognisable tokeniser file.")
+            else:
+                path = pathified
+        else:  # Comes from a remote location. Could've been cached already though.
+            path = PATH_DATA_TEMP / checkpoint.replace("/", "--") / f"{DEFAULT_TOKENISER_STEM}.json"
+            if not path.exists():
+                # TODO: I wonder how this function fails, actually.
+                fetchAndCacheDict(f"https://huggingface.co/{checkpoint}/raw/main/tokenizer.json",
+                                  cache_folder=path.parent, stem=DEFAULT_TOKENISER_STEM)
+                assert path.exists()
+
+        # Load from disk.
+        return BTE.load(path, preprocessor=preprocessor)
+
+    @staticmethod
+    def from_pretrained(checkpoint: Union[str, Path], preprocessor: Preprocessor=None) -> TktktToHuggingFace:
+        """
+        Wrapper around from_pretrained_tktkt() to give it the HuggingFace interface, which is what you expect from a
+        call to from_pretrained().
+
+        Special types are detected automatically. That won't work for all vocabs, but it does for what we need.
+        """
+        return TktktToHuggingFace(BTE.from_pretrained_tktkt(checkpoint, preprocessor))
 
     def getName(self):
         return self._name
-
-    def convert_tokens_to_string(self, tokens: List[str]) -> str:
-        """
-        Method to convert special characters back to the intended text.
-        """
-        return self.preprocessor.undo(tokens)
 
 
 def dataclassFromDictionary(cls, args: Dict[str, Any]):  # https://stackoverflow.com/a/72164665/9352077

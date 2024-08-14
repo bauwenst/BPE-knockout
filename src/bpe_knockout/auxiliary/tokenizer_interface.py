@@ -199,7 +199,12 @@ def fetchAndCacheDict(url: str, stem: str, cache_folder: Path=PATH_DATA_TEMP) ->
             j = json.load(handle)
     else:
         response = requests.get(url)
-        j = response.json()  # Convert response to JSON dict.
+        try:
+            j = response.json()  # Convert response to JSON dict.
+        except:
+            raise RuntimeError(f"Could not retrieve JSON file from URL: {url}")
+
+        cache_folder.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as handle:
             json.dump(j, handle, ensure_ascii=False, indent=4)
 
