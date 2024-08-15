@@ -9,6 +9,9 @@ Given the same deterministic iterator, this class will always select the same
 examples to assign to the train or test split, even across multiple object instances.
 """
 import numpy.random as npr
+from typing import TypeVar, Iterable
+
+T = TypeVar("T")
 
 
 class Holdout:
@@ -17,7 +20,7 @@ class Holdout:
         self.threshold = train_fraction
         self.seed = seed
 
-    def __call__(self, iterator, train=False, test=False):
+    def __call__(self, iterator: Iterable[T], train=False, test=False) -> Iterable[T]:
         self.it = iterator
         self.rng = npr.default_rng(seed=self.seed)
 

@@ -8,7 +8,7 @@ Extrinsic evaluations are done with [RobBERT's](https://github.com/iPieter/RobBE
 checkpoints are available on the [HuggingFace Hub](https://huggingface.co/collections/Bauwens/bpe-knockout-660be8a33336a7e1289be624).
 
 ## HuggingFace compatibility
-If you are used to working with the HuggingFace suite for language modelling and tokenisation, this is your lucky day! 
+Are you used to working with the HuggingFace suite for language modelling and tokenisation? No problem!
 You can incorporate BPE-knockout anywhere you're already using a BPE tokeniser loaded from HuggingFace, 
 with only 2 extra imports and 2 more lines of code. For example, if you're using `roberta-base`'s English tokeniser, 
 you would run:
@@ -52,24 +52,64 @@ pip install -e .[github]
 - If you're using conda or venv, don't forget to activate your environment before running any calls to `pip install`.
 - If you have an editable installation of my other packages `TkTkT` and/or `Fiject` and would like to keep it, do *not* include the `[github]` suffix.
 
-## Running experiments
+## More usage examples
+### Saving and loading tokeniser after knockout
+Although knockout takes under 3 minutes to complete and lasts as long as the tokeniser's lifetime, you may still want to
+cache the resulting BPE-knockout tokeniser for using it again without re-doing knockout. Starting from a HuggingFace tokeniser,
+that would look like this:
+```python
+from pathlib import Path
+from transformers import AutoTokenizer
+from tktkt.models.bpe.knockout import BPEKnockout
+from tktkt.models.huggingface.wrapper import HuggingFacePreprocessor
+
+# Load old tokeniser and apply knockout.
+hf_base = AutoTokenizer.from_pretrained("roberta-base")
+tktkt_knockout = BPEKnockout.fromHuggingFace(hf_base, language="English")
+
+# Save new tokeniser and reload it.
+save_path = tktkt_knockout.save(folder=Path(".") / "roberta-knockout")
+tktkt_knockout_loaded = BPEKnockout.load(save_path, preprocessor=HuggingFacePreprocessor(hf_base))
+```
+The objects `tktkt_knockout` and `tktkt_knockout_loaded` have the exact same internals. (If you want to give them the
+HuggingFace interface, wrap them with a call to `TktktToHuggingFace`.)
+
+Notice how `.load()` requires a preprocessor. That's because `.save()` does not store the preprocessor with the tokeniser,
+as it assumes that you already have a code snippet that loads the preprocessor. In this case, because the original tokeniser
+was a HuggingFace tokeniser, its preprocessor was a HuggingFace preprocessor as well.
+
+### Loading from the HuggingFace hub
+The BPE-knockout tokeniser used for the (continued) pre-training of language models in the paper were saved as above and
+uploaded to the HuggingFace hub. Rather than downloading them manually, you can load them with a `from_pretrained` call.
+For convenience, there is one that has the TkTkT interface and one that converts it to the HuggingFace interface:
+```python
+from tktkt.models.bpe.knockout import BPEKnockout
+
+dutch_bpe_knockout_hf    = BPEKnockout.from_pretrained("Bauwens/RoBERTa-nl_BPE_30k_BPE-knockout_9k")
+dutch_bpe_knockout_tktkt = BPEKnockout.from_pretrained_tktkt("Bauwens/RoBERTa-nl_BPE_30k_BPE-knockout_9k")
+```
+
+## Running experiments from the paper
 Given that you have an editable install, follow these steps to reproduce the paper results:
 1. Unzip the `.rar` file under `data/compressed/`.
 2. Run `py tst/main.py` or `python tst/main.py` in a terminal.
 
 ## Using your own data
-It is possible to use other datasets (even other languages) than the ones used for the paper. 
-Here is how you would do that:
-1. Make sure you have the following files: 
-   1. A word-count tab-separated file from a sufficiently large corpus; 
-   2. A file with morphological decompositions (not necessarily of the same words);
+It is possible to use other datasets (even other languages) than the ones used for the paper.
+All files read by the package are declared in a globally accessible `ProjectConfig` object. We ship three default
+`ProjectConfig`s with the package for English, German and Dutch (see the `bpe_knockout.project.config` file).
+
+To add a config, you'll need the following files:
+   1. A dataset of morphological decompositions. BPE-knockout is built on top of [MoDeST](https://github.com/bauwenst/MoDeST)
+      for supplying morphological data, so your data format must be compatible with those supported by MoDeST. (Otherwise,
+      you can always write your own class.)
+   2. *Optional:* if you want to run all experiments, you also need a tab-separated file of words and their frequencies from a sufficiently large corpus (morphologies without such a frequency will get frequency 1, and words that don't have a morphology will be ignored);
    3. *Optional:* if you don't want to generate a new BPE tokeniser from your word counts, the file(s) that specify your 
       existing BPE tokeniser.
-2. If your morphological decompositions are *not* in CELEX format, you still need to write your own parser for the
-   morphology file. Do this in `src/bpe_knockout/datahandlers/morphology.py` by creating a subclass of the abstract `LemmaMorphology` class.
-3. In `src/bpe_knockout/project/config.py`, create a new function that creates a `ProjectConfig` object declaring the paths to all 
-   the relevant files, as well as the name of the relevant `LemmaMorphology` subclass. Use the `setup()` functions as examples.
-4. In `main.py`, import this new config.
+
+Now write a function akin to `setupEnglish()` to return your new config. If you want to run the experiments on these new data, 
+import it in `tst/main.py`. If you want to just use these new data for knockout, import your function in `tktkt.models.bpe.knockout`
+and add it to the `CONFIGS` dictionary.
 
 ## Data licenses
 All data is included in the repo, because it is obtainable for free elsewhere and free of license too.

@@ -38,7 +38,7 @@ def assert_tokenisers_equal(tokeniser1=robbert_tokenizer, tokeniser2=untrained_b
     errors  = 0
     for obj in morphologyGenerator():
         total += 1
-        lemma = obj.lemma()
+        lemma = obj.word
 
         tokens1 = tokeniseAndDecode(lemma, tokeniser=tokeniser1)
         tokens2 = tokeniseAndDecode(lemma, tokeniser=tokeniser2)
@@ -107,20 +107,20 @@ def time_iterators():
 
     # Time to generate objects + tokenise fast: 21s - 13s = 8s
     for morpho in morphologyGenerator():
-        " ".join(tokeniseAndDecode(morpho.lemma(), tokeniser=robbert_tokenizer)).strip()
+        " ".join(tokeniseAndDecode(morpho.word, tokeniser=robbert_tokenizer)).strip()
 
     # Time to generate objects + get morph split: 24s - 13s = 11s
     for morpho in morphologyGenerator():
-        morpho.morphSplit()
+        morpho.segment()
 
     # Time to generate objects + tokenise slow: 1m35s - 13s = 1m22s  (more than 10x difference with fast tokenizer)
     for morpho in morphologyGenerator():
-        " ".join(tokeniseAndDecode(morpho.lemma(), tokeniser=bte_tokenizer)).strip()
+        " ".join(tokeniseAndDecode(morpho.word, tokeniser=bte_tokenizer)).strip()
 
     # Time to generate objects + get morph split + tokenise fast: 34s
     for morpho in morphologyGenerator():
-        morpho.morphSplit()
-        " ".join(tokeniseAndDecode(morpho.lemma(), tokeniser=robbert_tokenizer)).strip()
+        morpho.segment()
+        " ".join(tokeniseAndDecode(morpho.word, tokeniser=robbert_tokenizer)).strip()
 
 
 def test_onlyTrivials():
@@ -262,7 +262,7 @@ def main_morphsPerWord_Multilingual(include_monomorphemic=True):
         for language in getAllConfigs():
             with KnockoutDataConfiguration(language):
                 for obj in morphologyGenerator():
-                    n = len(obj.morphSplit().split())
+                    n = len(obj.segment())
                     if include_monomorphemic or n != 1:
                         histo.add(language.language_name, n)
 
@@ -283,7 +283,7 @@ def main_tokenDiffs_Monolingual():
             bpe = BTE(BteInitConfig())
             bte = BTE(BteInitConfig(knockout=mode))
             for obj in morphologyGenerator():
-                lemma = obj.lemma()
+                lemma = obj.word
 
                 tokens_bpe = tokeniseAndDecode(lemma, tokeniser=bpe)
                 tokens_bte = tokeniseAndDecode(lemma, tokeniser=bte)
@@ -469,8 +469,9 @@ def main_intrinsicMultilingual():
                 name_of_language = language.language_name.capitalize()
 
                 # --- BPE ---
-                bpe          = HuggingFaceTokeniser(language.base_tokeniser.toFastBPE(), for_single_words=True)
-                bpe_dropout  = HuggingFaceTokeniser(language.base_tokeniser.toFastBPE(), for_single_words=True)
+                vocab_and_merges = defaultTokeniserFiles()
+                bpe          = HuggingFaceTokeniser(vocab_and_merges.toFastBPE(), for_single_words=True)
+                bpe_dropout  = HuggingFaceTokeniser(vocab_and_merges.toFastBPE(), for_single_words=True)
                 bpe_dropout.backend.backend_tokenizer.model.dropout = DROPOUT_RATE
 
                 results = intrinsicEvaluation([bpe], do_whole_word=True, verbose=True,
@@ -831,16 +832,16 @@ def main_wholeWordCeiling_Multilingual():
                 cm_w = ConfusionMatrix()
 
                 for obj in morphologyGenerator():
-                    best_possible_segmentation = obj.morphSplit()
-                    only_whole_words           = obj.lexemeSplit()
+                    best_possible_segmentation = obj.segment()
+                    only_whole_words           = obj.segmentFree()
 
-                    tp, predicted, relevant, total = compareSplits_cursors(candidate=best_possible_segmentation,
-                                                                           reference=only_whole_words)
-                    amplification = weights.get(obj.lemma(), 1)
+                    tp, predicted, relevant, total = compareSplits_cursors(candidate=" ".join(best_possible_segmentation),
+                                                                           reference=" ".join(only_whole_words))
+                    amplification = weights.get(obj.word, 1)
                     cm.add(  tp, predicted, relevant, total, 1)
                     cm_w.add(tp, predicted, relevant, total, amplification)
 
-                    unique_morphs.update(best_possible_segmentation.split())
+                    unique_morphs.update(best_possible_segmentation)
 
                 print(language.language_name, "whole-word boundaries:")
                 print("\tUnweighted:")
@@ -902,6 +903,7 @@ def main_blameThreshold_Monolingual():
 @timeit
 def main_intrinsicDropout_Monolingual():
     language = Pℛ𝒪𝒥ℰ𝒞𝒯.config
+    vocab_and_merges = defaultTokeniserFiles()
     table = Table(f"bte-intrinsic-dropout_{language.langTag()}", caching=CacheMode.IF_MISSING)
 
     import transformers
@@ -913,7 +915,7 @@ def main_intrinsicDropout_Monolingual():
         print("Will take about", round(2*TRIALS*len(DROPOUT_PROBABILITIES)*45/60,2), "minutes.")
         for p in DROPOUT_PROBABILITIES:
             print("p =", p)
-            bpe_dropout = HuggingFaceTokeniser(language.base_tokeniser.toFastBPE(), for_single_words=True)
+            bpe_dropout = HuggingFaceTokeniser(vocab_and_merges.toFastBPE(), for_single_words=True)
             bpe_dropout.backend.backend_tokenizer.model.dropout = p
 
             results = intrinsicEvaluation([bpe_dropout]*TRIALS, do_whole_word=True, verbose=False, reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)

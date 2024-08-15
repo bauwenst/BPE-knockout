@@ -1,12 +1,13 @@
 from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 
-from bpe_knockout import BTE, BteInitConfig, RefMode, ByteBasedMode, Pℛ𝒪𝒥ℰ𝒞𝒯
+from bpe_knockout import BTE, BteInitConfig, RefMode, ByteBasedMode
+from bpe_knockout.project.config import defaultTokeniserFiles
 from bpe_knockout.datahandlers.bpetrainer import SPECIAL_TYPES
 from tktkt.interfaces.huggingface import TktktToHuggingFace
 
 
 def constructForHF_BPE() -> PreTrainedTokenizerFast:
-    return Pℛ𝒪𝒥ℰ𝒞𝒯.config.base_tokeniser.toFastBPE()
+    return defaultTokeniserFiles().toFastBPE()
 
 
 def constructForHF_BPEknockout() -> PreTrainedTokenizer:

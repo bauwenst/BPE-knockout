@@ -39,5 +39,6 @@ dependencies = [
 [project.optional-dependencies]
 github = [
     "tktkt[github] @ git+https://github.com/bauwenst/TkTkT",
+    "modest[github] @ git+https://github.com/bauwenst/MoDeST",
     "fiject        @ git+https://github.com/bauwenst/fiject"
 ]

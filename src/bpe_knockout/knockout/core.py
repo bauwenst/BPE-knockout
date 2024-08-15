@@ -11,15 +11,14 @@ TODO:
 """
 import dataclasses
 from enum import Enum
-from typing import List, Dict, Callable, Tuple, Set, Iterable, Any, Union
+from typing import Dict, Tuple, Set, Any, Union
 from collections import Counter
 from pathlib import Path
 
 import warnings
 import re
 import json
-import time
-from functools import cache, lru_cache
+from functools import lru_cache
 from tqdm.auto import tqdm
 
 import tktkt
@@ -28,13 +27,14 @@ from tktkt.util.timing import datetimeDashed
 from tktkt.interfaces.tokeniser import TokeniserWithVocabDict
 from tktkt.interfaces.huggingface import TktktToHuggingFace
 from tktkt.preparation.boundaries import BoundaryMarker, BoundaryMarkerLocation
-from tktkt.preparation.instances import Preprocessor, PretokeniserSequence, BoundariesFromSpacesPretokeniser, RobertaSpaceMarker, \
-    TextMapper, IdentityMapper, AddWordBoundary, PseudoByteMapping, Replace, MapperAsPretokeniser
+from tktkt.preparation.instances import Preprocessor, BoundariesFromSpacesPretokeniser, RobertaSpaceMarker, \
+    TextMapper, AddWordBoundary, PseudoByteMapping
+
+from modest.interfaces.morphologies import MorphSplit, FreeMorphSplit, MorphologyVisitor
 
 from .. import __version__
 from ..datahandlers.holdout import Holdout
-from ..datahandlers.morphology import LexSplit, MorphSplit
-from ..project.config import Pℛ𝒪𝒥ℰ𝒞𝒯, lexiconWeights, morphologyGenerator
+from ..project.config import Pℛ𝒪𝒥ℰ𝒞𝒯, lexiconWeights, morphologyGenerator, defaultTokeniserFiles
 from ..auxiliary.tokenizer_interface import Evaluator, fetchAndCacheDict, DEFAULT_TOKENISER_STEM, PATH_DATA_TEMP
 
 MergeAsTuple = Tuple[int, str, str]
@@ -252,9 +252,9 @@ class RefMode(str, Enum):  # The str parent allows JSON serialisation: https://s
     LEXEMIC   = 3
 
     @staticmethod
-    def toMethod(mode: "RefMode") -> Callable:
+    def toMethod(mode: "RefMode") -> MorphologyVisitor:
         if mode == RefMode.LEXEMIC:
-            return LexSplit()
+            return FreeMorphSplit()
         elif mode == RefMode.MORPHEMIC:
             return MorphSplit()
 
@@ -358,8 +358,9 @@ class BTE(TokeniserWithVocabDict):
         self.merge_graph: MergeGraph                       = None
         self.merges_starting_with: Dict[str, MergeAsTuple] = None  # Will be synchronised with the graph
         if starting_vocab is None or starting_mergelist is None:
-            starting_vocab     = Pℛ𝒪𝒥ℰ𝒞𝒯.config.base_tokeniser.loadVocabulary()
-            starting_mergelist = Pℛ𝒪𝒥ℰ𝒞𝒯.config.base_tokeniser.loadMerges()
+            vocab_and_merges = defaultTokeniserFiles()
+            starting_vocab     = vocab_and_merges.loadVocabulary()
+            starting_mergelist = vocab_and_merges.loadMerges()
         self._initialiseGraph(starting_vocab, starting_mergelist, quiet=quiet)
 
         # Finish by completing the TkTkT interface.
@@ -598,12 +599,12 @@ class BTE(TokeniserWithVocabDict):
         total        = {m.priority: 0 for m in self.merge_graph.merges}
 
         for obj in self._holdout(morphologyGenerator(verbose=self._print.verbose), train=True):
-            lemma = obj.lemma()
+            lemma = obj.word
             weight = weights.get(lemma, 1)
             log(lemma)
 
             # Get morphological split
-            reference_segmentation = self._knockout_segmentation(obj)
+            reference_segmentation = " ".join(self._knockout_segmentation(obj))
             reference_segmentation = self._preprocessAlreadySegmentedString(reference_segmentation)
 
             # Get BPE split and the ID of the merge that caused a space to disappear at each index.
@@ -668,12 +669,12 @@ class BTE(TokeniserWithVocabDict):
         total_count       = Counter()
 
         for obj in self._holdout(morphologyGenerator(verbose=self._print.verbose), train=True):
-            lemma = obj.lemma()
+            lemma = obj.word
             weight = weights.get(lemma, 1)
             log(lemma)
 
             # Get morphological split
-            reference_segmentation = self._anneal_segmentation(obj)
+            reference_segmentation = " ".join(self._anneal_segmentation(obj))
             reference_segmentation = self._preprocessAlreadySegmentedString(reference_segmentation)
 
             # Get BPE split
@@ -976,7 +977,8 @@ class BTE(TokeniserWithVocabDict):
         return applied_merges
 
     def _preprocessAlreadySegmentedString(self, segmentation: str) -> str:
-        # TODO: Even this method isn't completely watertight against all preprocessors. If a preprocessor separates different scripts by a boundary marker, some part of the BPE-knockout code will crash.
+        # TODO: Even this method isn't completely watertight against all preprocessors.
+        #       If a preprocessor separates different scripts by a boundary marker, some part of the BPE-knockout code will crash.
         space_preserver_decoded = "🂠"  # Cannot be punctuation or a number since some preprocessors treat that specially. Also can't really be a character in any language.
         space_preserver_encoded, _ = self._boundary_marker.isolate("".join(self.preprocessor.do(space_preserver_decoded)))
 

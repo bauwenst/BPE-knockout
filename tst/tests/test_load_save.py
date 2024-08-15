@@ -5,7 +5,7 @@ from tktkt.evaluation.compare import exactMatches
 
 
 def areEquivalentTokenisers(tk1, tk2):
-    ratio, _, _ = exactMatches((" " + obj.lemma() for obj in morphologyGenerator()), tk1, tk2)
+    ratio, _, _ = exactMatches((" " + obj.word for obj in morphologyGenerator()), tk1, tk2)
     return ratio == 1.0
 
 
@@ -53,6 +53,17 @@ def test_hf():
     assert areEquivalentTokenisers(tktkt_knockout, tktkt_knockout_loaded)
 
 
+def test_from_pretrained():
+    bte_from_huggingface = BTE.from_pretrained_tktkt("Bauwens/RoBERTa-nl_BPE_30k_BPE-knockout_9k")
+    print(bte_from_huggingface.getVocabSize())
+    print(bte_from_huggingface.prepareAndTokenise(" Deze bruidsjurk is zo mooi geconserveerd!"))
+
+    bte_from_huggingface = BTE.from_pretrained("Bauwens/RoBERTa-nl_BPE_30k_BPE-knockout_9k")
+    print(bte_from_huggingface.vocab_size)
+    print(bte_from_huggingface.tokenize(" Deze bruidsjurk is zo mooi geconserveerd!"))
+
+
 if __name__ == "__main__":
-    test_native()
-    test_hf()
+    # test_native()
+    # test_hf()
+    test_from_pretrained()

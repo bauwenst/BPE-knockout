@@ -1,5 +1,5 @@
 from typing import List
-from bpe_knockout.datahandlers.morphology import ViterbiNode
+from modest.algorithms.alignment import ViterbiNode
 
 
 def printTrellis(trellis: List[List[ViterbiNode]]):

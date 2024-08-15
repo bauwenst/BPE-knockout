@@ -10,24 +10,28 @@ It itself cannot run anything. Imputation should only be done by calling its
 functions.
 """
 from dataclasses import dataclass
-from typing import Callable, Type, Optional, Iterable, Dict
+from typing import Callable, Optional, Iterable, Dict
 import json
 import math
 import langcodes
 from langcodes import Language
 from abc import abstractmethod, ABC
 
+from modest.datasets.webcelex import CelexDataset
+from modest.interfaces.datasets import ModestDataset
+from modest.interfaces.morphologies import WordDecompositionWithFreeSegmentation
+
 # None of the below files import the config.
 from ..project.paths import *
 from ..auxiliary.tokenizer_interface import BpeTokeniserPath, SennrichTokeniserPath
-from ..datahandlers.morphology import LemmaMorphology, CelexLemmaMorphology
 from ..datahandlers.wordfiles import loadAndWeightLexicon
 from ..datahandlers.bpetrainer import BPETrainer
 
 
-@dataclass
-class DataPath(ABC):
-    path: Path
+class ImputablePath(ABC):
+
+    def __init__(self, path: Path):
+        self.path = path
 
     def exists(self):
         return self.path.exists()
@@ -37,12 +41,6 @@ class DataPath(ABC):
         pass
 
 
-@dataclass
-class MorphologyPath(DataPath):
-    # The class used to interpret the morphologies of your file's format.
-    parser: Type[LemmaMorphology]
-
-
 LINEAR_WEIGHTER  = lambda f: f
 ZIPFIAN_WEIGHTER = lambda f: 1 + math.log10(f)
 
@@ -50,14 +48,14 @@ ZIPFIAN_WEIGHTER = lambda f: 1 + math.log10(f)
 class ProjectConfig(ABC):
     # Name of the tested language, e.g. "English". Should exist, so that its standardised language code can be looked up.
     language_name: str
-    # Text file that contains morphological decompositions (e.g. for CELEX, each line is a word, a space, and the "StrucLab" label).
-    morphologies: Optional[MorphologyPath]
+    # MoDeST dataset that contains morphological segmentations, both bound and free.
+    morphologies: Optional[ModestDataset[WordDecompositionWithFreeSegmentation]]
     # Text file that contains the frequencies of words in a large corpus. Each line is a word, a space, and an integer.
-    lemma_counts: Optional[DataPath]
+    lemma_counts: Optional[ImputablePath]
     # File(s) for constructing the base tokeniser (see above).
     base_tokeniser: BpeTokeniserPath
     # Function to run over the frequencies to turn them into the weights that are used later on.
-    reweighter: Callable[[float], float] = LINEAR_WEIGHTER  # an alternative is lambda x: 1 + math.log10(x).
+    reweighter: Callable[[float], float] = LINEAR_WEIGHTER
 
     def langTag(self) -> str:
         return langcodes.find(self.language_name).to_tag()
@@ -70,8 +68,7 @@ class ProjectConfig(ABC):
         if self.morphologies is None:
             raise RuntimeError("Cannot impute morphologies because no path was given.")
 
-        if not self.morphologies.exists():
-            self.morphologies.impute(langcodes.find(self.language_name))
+        self.morphologies._get()
 
     def imputeTokeniser(self):
         # TODO: These should probably go somewhere else.
@@ -102,7 +99,10 @@ class ProjectConfig(ABC):
                                  out_folder=self.base_tokeniser.path)  # Takes about 3h40m (English).
 
 
-class OscarWordFile(DataPath):
+#########################################################################################
+
+
+class OscarWordFile(ImputablePath):
 
     def impute(self, language: Language):
         print(f"{language.display_name()} lemma weights not found. Counting...")
@@ -114,14 +114,26 @@ class OscarWordFile(DataPath):
         counts.rename(self.path)
 
 
-class CelexMorphologyFile(MorphologyPath):
+class LocalCelexDataset(CelexDataset):
+    """
+    Wrapper around CelexDataset which, rather than relying on MoDeST's built-in cache and imputation,
+    expects the dataset to be at a predefined path and errors if it isn't. (The reason we want this is
+    because CELEX, unlike GitHub, is hosted by academic servers that we don't want to overwhelm, so we pre-deliver files.)
 
+    The reason we don't make a more general "LocalDataset" class is because other than CELEX, all MoDeST's datasets
+    with the right object interface can be used without worrying about accidentally DDoSing a university server.
+
+    Inherits from CelexDataset to copy its generator's implementation and type signature.
+    """
     def __init__(self, path: Path):
-        super().__init__(path, parser=CelexLemmaMorphology)
+        super().__init__(language=Language(""))  # We are banking on the fact that dataset._language will never be used. The BPE-knockout config has its own language tag anyway. (Maybe that's backwards.)
+        self.local_file = path
 
-    def impute(self, language: Language):
-        # TODO: Could probably query the MPI database
-        raise ValueError(f"{language.display_name()} morphologies not found.")
+    def _get(self) -> Path:
+        if not self.local_file.exists():
+            raise FileNotFoundError(f"Cannot find {self.local_file.as_posix()}.")
+
+        return self.local_file
 
 
 #########################################################################################
@@ -131,7 +143,7 @@ def setupDutch() -> ProjectConfig:
     return ProjectConfig(
         language_name="Dutch",
         lemma_counts=OscarWordFile(PATH_DATA_COMPRESSED / "words_oscar-nl.txt"),
-        morphologies=CelexMorphologyFile(PATH_MORPHOLOGY / "celex_morphology_nl.txt"),
+        morphologies=LocalCelexDataset(PATH_MORPHOLOGY / "celex_morphology_nl.txt"),
         base_tokeniser=SennrichTokeniserPath(PATH_MODELBASE / "bpe-40k_oscar-nl-clean"),
         reweighter=LINEAR_WEIGHTER
     )
@@ -141,7 +153,7 @@ def setupGerman() -> ProjectConfig:
     return ProjectConfig(
         language_name="German",
         lemma_counts=OscarWordFile(PATH_DATA_COMPRESSED / "words_oscar-de.txt"),
-        morphologies=CelexMorphologyFile(PATH_MORPHOLOGY / "celex_morphology_de.txt"),
+        morphologies=LocalCelexDataset(PATH_MORPHOLOGY / "celex_morphology_de.txt"),
         base_tokeniser=SennrichTokeniserPath(PATH_MODELBASE / "bpe-40k_oscar-de-clean"),
         reweighter=LINEAR_WEIGHTER
     )
@@ -151,7 +163,7 @@ def setupEnglish() -> ProjectConfig:
     return ProjectConfig(
         language_name="English",
         lemma_counts=OscarWordFile(PATH_DATA_COMPRESSED / "words_oscar-en.txt"),
-        morphologies=CelexMorphologyFile(PATH_MORPHOLOGY / "celex_morphology_en.txt"),
+        morphologies=LocalCelexDataset(PATH_MORPHOLOGY / "celex_morphology_en.txt"),
         base_tokeniser=SennrichTokeniserPath(PATH_MODELBASE / "bpe-40k_oscar-en-clean"),
         reweighter=LINEAR_WEIGHTER
     )
@@ -199,11 +211,16 @@ class KnockoutDataConfiguration:
     def __exit__(self, exc_type, exc_val, exc_tb):
         Pℛ𝒪𝒥ℰ𝒞𝒯.config = self.old_context
 
-
 TemporaryContext = KnockoutDataConfiguration  # Alias for backwards compatibility with old users of the library.
 
 
-def morphologyGenerator(**kwargs) -> Iterable[LemmaMorphology]:
+def defaultTokeniserFiles() -> BpeTokeniserPath:
+    Pℛ𝒪𝒥ℰ𝒞𝒯.config.imputeTokeniser()
+
+    return Pℛ𝒪𝒥ℰ𝒞𝒯.config.base_tokeniser
+
+
+def morphologyGenerator(**kwargs) -> Iterable[WordDecompositionWithFreeSegmentation]:
     """
     Alias for LemmaMorphology.generator that automatically uses the project's file path for morphologies.
     Without this, you would need to repeat the below statement everywhere you iterate over morphologies.
@@ -211,7 +228,7 @@ def morphologyGenerator(**kwargs) -> Iterable[LemmaMorphology]:
     Pℛ𝒪𝒥ℰ𝒞𝒯.config.imputeMorphologies()
 
     kwargs["legacy"] = Pℛ𝒪𝒥ℰ𝒞𝒯.do_old_iterator
-    return Pℛ𝒪𝒥ℰ𝒞𝒯.config.morphologies.parser.generator(Pℛ𝒪𝒥ℰ𝒞𝒯.config.morphologies.path, **kwargs)  # https://discuss.python.org/t/difference-between-return-generator-vs-yield-from-generator/2997
+    return Pℛ𝒪𝒥ℰ𝒞𝒯.config.morphologies.generate(**kwargs)  # https://discuss.python.org/t/difference-between-return-generator-vs-yield-from-generator/2997
 
 
 def lexiconWeights(override_reweighter: Callable[[float],float]=None) -> Dict[str, float]:
@@ -222,7 +239,7 @@ def lexiconWeights(override_reweighter: Callable[[float],float]=None) -> Dict[st
 
     return loadAndWeightLexicon(
         all_lemmata_wordfile=Pℛ𝒪𝒥ℰ𝒞𝒯.config.lemma_counts.path,  # Imputed above.  TODO: Possibly doesn't work when lemma_counts is None though.
-        subset_lexicon=(obj.lemma() for obj in morphologyGenerator()),  # The generator will impute morphologies itself.
-        subset_name=Pℛ𝒪𝒥ℰ𝒞𝒯.config.morphologies.path.stem,
+        subset_lexicon=(obj.word for obj in morphologyGenerator()),  # The generator will impute morphologies itself.
+        subset_name=Pℛ𝒪𝒥ℰ𝒞𝒯.config.morphologies.card().name + "-" + Pℛ𝒪𝒥ℰ𝒞𝒯.config.langTag(),
         reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter if override_reweighter is None else override_reweighter
     )
