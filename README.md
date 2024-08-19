@@ -1,11 +1,22 @@
 <img src="doc/logo.png">
 
-Repo hosting all the code used for the NAACL 2024 paper [*"BPE-knockout: Pruning Pre-existing BPE Tokenisers with Backwards-compatible Morphological Semi-supervision"*](https://aclanthology.org/2024.naacl-long.324/).
+Repo hosting all the code used for the NAACL 2024 paper [*"BPE-knockout: Pruning Pre-existing BPE Tokenisers with Backwards-compatible Morphological Semi-supervision"*](https://aclanthology.org/2024.naacl-long.324/),
+including source code for BPE-knockout tokenisation.
 
-
-Below are the instructions for reproducing and extending the intrinsic evaluations.
+Want to reproduce or extend the intrinsic evaluations of the paper? Read on!
 Extrinsic evaluations are done with [RobBERT's](https://github.com/iPieter/RobBERT) framework. The pre-trained model
 checkpoints are available on the [HuggingFace Hub](https://huggingface.co/collections/Bauwens/bpe-knockout-660be8a33336a7e1289be624).
+
+Table of contents:
+- [Installation](#installing)
+- Usage:
+  - [HuggingFace compatibility](#huggingface-compatibility)
+  - [Saving and loading](#more-usage-examples)
+- Paper results:
+  - [Running experiments from the paper](#running-experiments-from-the-paper)
+  - [Using your own data](#using-your-own-data)
+- [Data licenses](#data-licenses)
+- [BibTeX citation](#citation)
 
 ## HuggingFace compatibility
 Are you used to working with the HuggingFace suite for language modelling and tokenisation? No problem!
