@@ -33,7 +33,7 @@ If you are only interested in using the BPE-knockout package (including our Engl
 the respective morphological data loaders, but **not** including corpus word counts) and not in running the experiments
 from the paper, you likely just want to run:
 ```shell
-pip install "bpe_knockout[github] @ git+https://github.com/bauwenst/BPE-knockout.git"
+pip install "bpe_knockout[github] @ git+https://github.com/bauwenst/BPE-knockout"
 ```
 As shown in the above example, user-friendly encapsulations for BPE-knockout are provided by the [TkTkT package](https://github.com/bauwenst/TkTkT),
 which may be more interesting to you than the core algorithm and configuration code which is provided here. In any case, installing
@@ -44,7 +44,7 @@ If you want to run experiments from the paper and/or have access to the word cou
 everything in this repository and tell Python to use the folder into which you cloned for the package code, rather than
 copying the code to your global or virtual `site-packages` directory. In that case, run:
 ```shell
-git clone https://github.com/bauwenst/BPE-knockout.git
+git clone https://github.com/bauwenst/BPE-knockout
 cd BPE-knockout
 pip install -e .[github]
 ```

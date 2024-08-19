@@ -18,7 +18,6 @@ from pathlib import Path
 import warnings
 import re
 import json
-from functools import lru_cache
 from tqdm.auto import tqdm
 
 import tktkt
@@ -396,9 +395,6 @@ class BTE(TokeniserWithVocabDict):
         Synchronise the class's caching structures with the merge graph, which is the actual knowledge representation of
         the tokeniser's functionality.
         """
-        # Because syncing is what changes the tokeniser, you must invalidate the LRU cache.
-        self.tokenise.cache_clear()
-
         # Synchronise ID lookup
         self.reverse_vocab = {v:k for k,v in self.merge_graph.vocab.items()}
 
@@ -437,7 +433,6 @@ class BTE(TokeniserWithVocabDict):
             self.merge_graph.addArc(merge_string)
         self._syncWithGraph()
 
-    @lru_cache(maxsize=1024*1024)
     def tokenise(self, pretoken: str) -> List[str]:
         """
         BPE requires two special kinds of pretokenisation that aren't really pretokenisation, before tokenising.
