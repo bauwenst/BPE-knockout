@@ -64,11 +64,12 @@ class ProjectConfig(ABC):
         if self.lemma_counts is not None and not self.lemma_counts.exists():
             self.lemma_counts.impute(langcodes.find(self.language_name))
 
-    def imputeMorphologies(self):
+    def imputeMorphologies(self):  # This is technically no longer relevant since MoDeST auto-imputes on a .generate() call.
         if self.morphologies is None:
             raise RuntimeError("Cannot impute morphologies because no path was given.")
 
-        self.morphologies._get()
+        if not self.morphologies._rerouted:
+            self.morphologies._get()
 
     def imputeTokeniser(self):
         # TODO: These should probably go somewhere else.
@@ -114,28 +115,6 @@ class OscarWordFile(ImputablePath):
         counts.rename(self.path)
 
 
-class LocalCelexDataset(CelexDataset):
-    """
-    Wrapper around CelexDataset which, rather than relying on MoDeST's built-in cache and imputation,
-    expects the dataset to be at a predefined path and errors if it isn't. (The reason we want this is
-    because CELEX, unlike GitHub, is hosted by academic servers that we don't want to overwhelm, so we pre-deliver files.)
-
-    The reason we don't make a more general "LocalDataset" class is because other than CELEX, all MoDeST's datasets
-    with the right object interface can be used without worrying about accidentally DDoSing a university server.
-
-    Inherits from CelexDataset to copy its generator's implementation and type signature.
-    """
-    def __init__(self, path: Path):
-        super().__init__(language=Language(""))  # We are banking on the fact that dataset._language will never be used. The BPE-knockout config has its own language tag anyway. (Maybe that's backwards.)
-        self.local_file = path
-
-    def _get(self) -> Path:
-        if not self.local_file.exists():
-            raise FileNotFoundError(f"Cannot find {self.local_file.as_posix()}.")
-
-        return self.local_file
-
-
 #########################################################################################
 
 
@@ -143,7 +122,7 @@ def setupDutch() -> ProjectConfig:
     return ProjectConfig(
         language_name="Dutch",
         lemma_counts=OscarWordFile(PATH_DATA_COMPRESSED / "words_oscar-nl.txt"),
-        morphologies=LocalCelexDataset(PATH_MORPHOLOGY / "celex_morphology_nl.txt"),
+        morphologies=CelexDataset("Dutch").rerouted(PATH_MORPHOLOGY / "celex_morphology_nl.txt"),
         base_tokeniser=SennrichTokeniserPath(PATH_MODELBASE / "bpe-40k_oscar-nl-clean"),
         reweighter=LINEAR_WEIGHTER
     )
@@ -153,7 +132,7 @@ def setupGerman() -> ProjectConfig:
     return ProjectConfig(
         language_name="German",
         lemma_counts=OscarWordFile(PATH_DATA_COMPRESSED / "words_oscar-de.txt"),
-        morphologies=LocalCelexDataset(PATH_MORPHOLOGY / "celex_morphology_de.txt"),
+        morphologies=CelexDataset("German").rerouted(PATH_MORPHOLOGY / "celex_morphology_de.txt"),
         base_tokeniser=SennrichTokeniserPath(PATH_MODELBASE / "bpe-40k_oscar-de-clean"),
         reweighter=LINEAR_WEIGHTER
     )
@@ -163,7 +142,7 @@ def setupEnglish() -> ProjectConfig:
     return ProjectConfig(
         language_name="English",
         lemma_counts=OscarWordFile(PATH_DATA_COMPRESSED / "words_oscar-en.txt"),
-        morphologies=LocalCelexDataset(PATH_MORPHOLOGY / "celex_morphology_en.txt"),
+        morphologies=CelexDataset("English").rerouted(PATH_MORPHOLOGY / "celex_morphology_en.txt"),
         base_tokeniser=SennrichTokeniserPath(PATH_MODELBASE / "bpe-40k_oscar-en-clean"),
         reweighter=LINEAR_WEIGHTER
     )
