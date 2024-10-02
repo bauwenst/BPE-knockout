@@ -6,7 +6,7 @@ from tokenizers import Tokenizer, models, normalizers, pre_tokenizers, trainers,
 from ..project.paths import *
 from ..auxiliary.tokenizer_interface import SennrichTokeniserPath, HuggingFaceTokeniserPath
 from ..datahandlers.wordfiles import wordfileToBpeCorpus
-from .._lib.sbpe.learn_bpe import learn_bpe, SowEowSpecification
+from .._lib.sbpe.learn_bpe import learn_bpe
 
 from transformers import SpecialTokensMixin
 PAD = "<pad>"
@@ -47,7 +47,7 @@ class BPETrainer:
         with open(path_merges, "w", encoding="utf-8") as out_handle:
             with open(wordfile, "r", encoding="utf-8") as in_handle:
                 learn_bpe([in_handle], out_handle, num_symbols_ori=self.size, total_symbols=True,
-                          is_dict=True, word_preprocessor=preprocessor, soweow=self.soweow)
+                          is_dict=True, preprocessor=preprocessor, marker=self.soweow)
 
         # Deduce vocab
         vocab = BPETrainer.deduceVocabFromMerges(path_merges, byte_based=self.byte_based)

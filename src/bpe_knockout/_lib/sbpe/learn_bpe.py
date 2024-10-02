@@ -27,88 +27,74 @@ import re
 import sys
 import math
 
-from typing import Callable, List, Iterable, TextIO
+from typing import List, Iterable, TextIO
 from collections import defaultdict
-from dataclasses import dataclass
 from tqdm.auto import tqdm
 
+from tktkt.interfaces.preparation import Preprocessor
+from tktkt.preparation.boundaries import BoundaryMarker
+from tktkt.preparation.instances import SennrichSpaceMarker, IdentityMapper, PretokeniserSequence, AddWordBoundary, HyphenMode, PunctuationPretokeniser, WhitespacePretokeniser
+
 from .heap import HeapWithInverseIndex
-
-
-@dataclass
-class SowEowSpecification:
-    detached: bool
-    start_not_end: bool
-    character: str
-
-SOWEOW = SowEowSpecification(detached=False, start_not_end=False, character="</w>")
-
-WordPreprocessor = Callable[[str],List[str]]
-def defaultWordPreprocessor(word: str):
-    return [word]
-
 
 def error(message: str):
     sys.stderr.write(message)
 
+DEFAULT_PREPROCESSOR = Preprocessor(  # [Bauwens] This is a minimal preprocessor that is correct, but there are better ones (to support numbers and so on). E.g.: "BPE-knockout is (very) cool." -> ["BPE", "-", "knockout</w>", "is</w>", "(</w>", "very</w>", ")</w>", "cool</w>", ".</w>"]
+    IdentityMapper(),
+    IdentityMapper(),
+    PretokeniserSequence([
+        PunctuationPretokeniser(HyphenMode.EXCLUDED, protect_apostrophes_without_spaces=False),
+        WhitespacePretokeniser(destructive=True),
+        AddWordBoundary(SennrichSpaceMarker),
+        PunctuationPretokeniser(HyphenMode.ONLY),
+    ])
+)
+
 
 class VocabCounter:
     """
-    Extract the word-level vocabulary from a file (which can be a plain text or a
-    dictionary file (i.e. (words, freq) pairs).
+    Extract the word-level vocabulary from a file
+    (which can be a plain text or a dictionary file (i.e. (words, freq) pairs).
     """
 
     def __init__(self, input_handles: Iterable[Iterable[str]], dictionary_mode: bool=False,
-                 soweow: SowEowSpecification=SOWEOW, word_preprocessor: WordPreprocessor=defaultWordPreprocessor):
+                 marker: BoundaryMarker=SennrichSpaceMarker, preprocessor: Preprocessor=DEFAULT_PREPROCESSOR):
         self.forward_index = dict()  # tuple of word characters -> token ID
         self.inverse_index = []      # token ID (list index) -> tuple of word characters
         self.counter = []            # token ID (list index) -> count in corpus
-        self.soweow = soweow
-        self.wp     = word_preprocessor
+        self.marker = marker
+        self.preprocessor = preprocessor
 
         for file_handle in input_handles:
             for line in tqdm(file_handle):  # Although it should be a handle, any iterator that produces strings works.
                 if dictionary_mode:
                     fields = line.strip("\r\n ").split(" ")
                     assert len(fields) == 2  # Each line in the file looks like e.g. "potato 69420".
-                    self._add_word(fields[0], count=int(fields[1]))
+                    pretokens = self.preprocessor.do(fields[0])
+                    count     = int(fields[1])
                 else:
-                    fields = line.strip("\r\n ").split()
-                    for w in fields:
-                        if w:
-                            self._add_word(w)
+                    pretokens = self.preprocessor.do(line.strip("\r\n "))  # [Bauwens] Support for byte-level conversion, punctuation splitting, etc...
+                    count     = 1
 
-    def _add_word(self, word: str, count=1):
-        # [Bauwens] Support for byte-level conversion.
-        pre_tokens = self.wp(word)
+                for p in pretokens:
+                    self._add_pretoken(p, count=count)
 
-        # [Bauwens] Support for every style of start-of-word or end-of-word.
-        affix = self.soweow.character
-        for idx, pre_token in enumerate(pre_tokens):
-            if affix:
-                if idx == 0 and self.soweow.start_not_end:
-                    if self.soweow.detached:  # RobBERT-style: Ġ w o r d
-                        pre_token = (affix,) + tuple(pre_token)
-                    else:  # BERT-style, except the complement: Ġw o r d
-                        pre_token = (affix + pre_token[0],) + tuple(pre_token[1:])
-                elif idx == len(pre_tokens)-1 and not self.soweow.start_not_end:
-                    if self.soweow.detached:  # BPE v1.0: w o r d </w>
-                        pre_token = tuple(pre_token) + (affix,)
-                    else:  # BPE v1.1: w o r d</w>
-                        pre_token = tuple(pre_token[:-1]) + (pre_token[-1] + affix,)
-                else:
-                    pre_token = tuple(pre_token)
-            else:
-                pre_token = tuple(pre_token)
+    def _add_pretoken(self, pretoken: str, count=1):
+        if not pretoken:
+            return
 
-            # The original code
-            index = self.forward_index.get(pre_token)
-            if index is None:
-                index = len(self.inverse_index)
-                self.forward_index[pre_token] = index
-                self.inverse_index.append(pre_token)
-                self.counter.append(0)
-            self.counter[index] += count
+        # [Bauwens] Proper treatment of boundary markers.
+        pretoken_as_tuple = tuple(self.marker.intoCharacters(pretoken))
+
+        # The original code
+        index = self.forward_index.get(pretoken_as_tuple)
+        if index is None:
+            index = len(self.inverse_index)
+            self.forward_index[pretoken_as_tuple] = index
+            self.inverse_index.append(pretoken)
+            self.counter.append(0)
+        self.counter[index] += count
 
     def substitute(self, old_word, new_word):
         pos = self.forward_index[old_word]
@@ -333,7 +319,7 @@ class PairStats:
                     stats_changes[pair] = freq_change
 
 
-def adapt_num_symbols(num_symbols, vocab: VocabCounter, total_symbols: bool):
+def adapt_num_symbols(num_symbols: int, vocab: VocabCounter, total_symbols: bool):
     """
     Handle the parameter --total_symbols.
     """
@@ -354,7 +340,7 @@ def learn_bpe(infiles: List[Iterable[str]], outfile: TextIO,
               num_symbols_ori: int, total_symbols=False,
               probabilistic=False, frac_stopping=None, frac_stopping_average_n=100, min_frequency=2,
               is_dict=False, verbose=False,
-              soweow: SowEowSpecification=SOWEOW, word_preprocessor: WordPreprocessor=defaultWordPreprocessor):
+              marker: BoundaryMarker=SennrichSpaceMarker, preprocessor: Preprocessor=DEFAULT_PREPROCESSOR):
     """
     Learn num_symbols BPE operations from vocabulary, and write to outfile.
 
@@ -378,7 +364,7 @@ def learn_bpe(infiles: List[Iterable[str]], outfile: TextIO,
     outfile.write('#version: 0.2\n')
 
     print("Generating word vocabulary...")
-    vocab       = VocabCounter(infiles, is_dict, soweow=soweow, word_preprocessor=word_preprocessor)
+    vocab       = VocabCounter(infiles, is_dict, marker=marker, preprocessor=preprocessor)
     num_symbols = adapt_num_symbols(num_symbols_ori, vocab, total_symbols)
 
     print("Getting pair statistics...")
