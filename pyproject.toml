@@ -42,3 +42,7 @@ github = [
     "modest[github] @ git+https://github.com/bauwenst/MoDeST",
     "fiject        @ git+https://github.com/bauwenst/fiject"
 ]
+
+# Include morphological data and tokeniser files.
+[tool.setuptools.package-data]
+"*" = ["*.txt", "*.json"]

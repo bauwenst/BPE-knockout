@@ -86,9 +86,9 @@ class ProjectConfig(ABC):
                 if base_merges.exists() and not base_vocab.exists():
                     retrain_from_scratch = False
 
-                vocab = BPETrainer.deduceVocabFromMerges(base_merges, byte_based=True)  # assume it's byte-based
-                with open(base_vocab, "w", encoding="utf-8") as handle:
-                    json.dump(vocab, handle, ensure_ascii=False, indent=4)
+                    vocab = BPETrainer.deduceVocabFromMerges(base_merges, byte_based=True)  # assume it's byte-based
+                    with open(base_vocab, "w", encoding="utf-8") as handle:
+                        json.dump(vocab, handle, ensure_ascii=False, indent=4)
 
             # If you couldn't deduce anything, write vocab and merges.
             if retrain_from_scratch:
