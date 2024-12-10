@@ -6,6 +6,7 @@ import requests
 
 from tktkt.interfaces.tokeniser import Tokeniser
 from transformers import AutoTokenizer, RobertaTokenizerFast, PreTrainedTokenizerFast
+from huggingface_hub import hf_hub_download
 
 from ..datahandlers.holdout import Holdout
 from ..project.paths import *
@@ -140,39 +141,53 @@ class HuggingFaceTokeniserPath(BpeTokeniserPath):
         return AutoTokenizer_from_pretrained(self.path.as_posix())
 
     @staticmethod
-    def fromName(name: str) -> BpeTokeniserPath:
+    def fromName(name: str, use_hf_cache: bool=True) -> BpeTokeniserPath:
         """
         Automatically constructs the file path, and ALSO imputes the tokeniser file by getting it from the
         HuggingFace tokeniser with the given name.
         (The reason you can't do this in getAsDict() is because the name isn't known there, only the path.)
         """
-        cache = HuggingFaceTokeniserPath(PATH_DATA_TEMP / name.replace("/", "--") / f"{DEFAULT_TOKENISER_STEM}.json")
-        if not cache.exists():
+        if use_hf_cache:
             try:
-                fetchAndCacheDict(f"https://huggingface.co/{name}/raw/main/tokenizer.json",
-                                  cache_folder=cache.path.parent, stem=DEFAULT_TOKENISER_STEM)
-            except:  # Likely means that this is a GPT2 tokeniser where there was no tokenizer.json and instead there is only a vocab and merge file.
-                cache = SennrichTokeniserPath(cache.path.parent)
-                if not cache.exists():
-                    try:
-                        url = f"https://huggingface.co/{name}/raw/main/vocab.json"
-                        response = requests.get(url)
-                        vocab = response.json()
+                cache = Path(hf_hub_download(repo_id=name, filename="tokenizer.json"))
+                return HuggingFaceTokeniserPath(cache)
+            except:
+                try:
+                    path_vocab  = Path(hf_hub_download(repo_id=name, filename="vocab.json"))
+                    path_merges = Path(hf_hub_download(repo_id=name, filename="merges.txt"))
+                    return SennrichTokeniserPath(path_vocab.parent)
+                except:
+                    raise RuntimeError(f"Could not find (or access) the online tokeniser file for HuggingFace model '{name}'.")
+        else:
+            temp_cache = HuggingFaceTokeniserPath(PATH_DATA_TEMP / name.replace("/", "--") / f"{DEFAULT_TOKENISER_STEM}.json")
+            if not temp_cache.exists():
+                try:
+                    Path(hf_hub_download(repo_id=name, filename="tokenizer.json", local_dir=temp_cache.path.parent))
+                    # fetchAndCacheDict(f"https://huggingface.co/{name}/raw/main/tokenizer.json",
+                    #                   cache_folder=cache.path.parent, stem=DEFAULT_TOKENISER_STEM)
+                except:  # Likely means that this is a GPT2 tokeniser where there was no tokenizer.json and instead there is only a vocab and merge file.
+                    temp_cache = SennrichTokeniserPath(temp_cache.path.parent)
+                    if not temp_cache.exists():
+                        try:
+                            path_vocab  = Path(hf_hub_download(repo_id=name, filename="vocab.json", local_dir=temp_cache.path))
+                            path_merges = Path(hf_hub_download(repo_id=name, filename="merges.txt", local_dir=temp_cache.path))
+                        except:
+                            raise RuntimeError(f"Could not find (or access) the online tokeniser file for HuggingFace model '{name}'.")
 
-                        url = f"https://huggingface.co/{name}/raw/main/merges.txt"
-                        response = requests.get(url)
-                        merges = response.text.split("\n")
-                        merges = merges[merges[0].startswith("#version"):]
-                    except:
-                        raise RuntimeError(f"I really can't find an online tokeniser file for HuggingFace model '{name}'.")
+                        # Reformat the local files.
+                        with open(path_vocab, "r", encoding="utf-8") as handle:
+                            vocab = json.load(handle)
+                        with open(path_merges, "r", encoding="utf-8") as handle:
+                            merges = handle.readlines()
+                            merges = merges[merges[0].startswith("#version"):]
 
-                    vocab_path, merges_path = cache.getPaths()
-                    with open(vocab_path, "w", encoding="utf-8") as handle:
-                        json.dump(vocab, handle, ensure_ascii=False, indent=4)
-                    with open(merges_path, "w", encoding="utf-8") as handle:
-                        handle.write("\n".join(merges))
+                        vocab_path, merges_path = temp_cache.getPaths()
+                        with open(vocab_path, "w", encoding="utf-8") as handle:
+                            json.dump(vocab, handle, ensure_ascii=False, indent=4)
+                        with open(merges_path, "w", encoding="utf-8") as handle:
+                            handle.write("\n".join(merges))
 
-        return cache
+            return temp_cache
 
     @staticmethod
     def fromTokeniser(tk_model: RobertaTokenizerFast) -> "BpeTokeniserPath":
@@ -202,7 +217,7 @@ def fetchAndCacheDict(url: str, stem: str, cache_folder: Path=PATH_DATA_TEMP) ->
         try:
             j = response.json()  # Convert response to JSON dict.
         except:
-            raise RuntimeError(f"Could not retrieve JSON file from URL: {url}")
+            raise RuntimeError(f"Could not retrieve JSON file (status code: {response.status_code}) from URL: {url}")
 
         cache_folder.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as handle:

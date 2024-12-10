@@ -109,6 +109,7 @@ class MergeGraph:
     def __init__(self, vocab: Dict[str,int], raw_merges: List[str], quiet=True):
         self.next_type  = 0  # == 1 + max(self.vocab.values()), not always len(self.vocab) due to knockout.
         self.next_merge = 0  # == 1 + max([m.priority for m in self.merges]), not always len(self.merges) due to knockout.
+        self.id_range = set()
 
         # Initialise graph
         self.merges: List[Merge] = []
@@ -117,10 +118,10 @@ class MergeGraph:
         self.merges_of:   Dict[str, List[Merge]] = dict()
 
         # Fill graph
-        for raw_type, type_id in vocab.items():
+        for raw_type, type_id in tqdm(vocab.items(), desc="ADDING VERTICES", disable=quiet):
             self.addVertex(raw_type, suggested_id=type_id)
 
-        for raw_merge in tqdm(raw_merges, desc="CONSTRUCTING GRAPH", disable=quiet):
+        for raw_merge in tqdm(raw_merges, desc="LINKING VERTICES", disable=quiet):
             self.addArc(raw_merge)
 
     def addVertex(self, type_to_add: str, suggested_id: int=-1):
@@ -130,7 +131,7 @@ class MergeGraph:
             raise ValueError(f"The type '{type_to_add}' contains a space. This is illegal.")
 
         # Bad suggestions are replaced by the ID that is 1 bigger than the biggest ID so far (NOT the smallest unused).
-        if suggested_id < 0 or suggested_id in self.vocab.values():
+        if suggested_id < 0 or suggested_id in self.id_range:
             suggested_id = self.next_type
             self.next_type += 1
         else:
@@ -139,6 +140,7 @@ class MergeGraph:
         self.vocab[type_to_add]       = suggested_id
         self.merges_with[type_to_add] = []
         self.merges_of[type_to_add]   = []
+        self.id_range.add(suggested_id)
 
     def addArc(self, merge_to_add: str) -> Merge:
         """
@@ -179,7 +181,8 @@ class MergeGraph:
         replacement = replacements[0]  # TODO: Not sure how to decide the replacement in case you have a merge graph without OFS.
 
         # Remove from vocab.
-        self.vocab.pop(type_to_delete)
+        removed_id = self.vocab.pop(type_to_delete)
+        self.id_range.pop(removed_id)
 
         # Remove the merge(s, if OFS doesn't hold) that created this type.
         deleted_merges_of = self.merges_of.pop(type_to_delete)
@@ -1056,7 +1059,9 @@ class BTE(TokeniserWithVocabDict):
     @staticmethod
     def from_pretrained_tktkt(checkpoint: Union[str, Path], preprocessor: Preprocessor=None) -> "BTE":
         """
-        Wrapper around BTE.load(file) that adds three features:
+        Load a TkTkT-saved checkpoint (not a HuggingFace-trained checkpoint!) into a TkTkT object.
+
+        Wraps BTE.load(file) to add three features:
             1. You can give a local path as a string, like you would in HuggingFace for local files.
             2. You can give a directory path (as Path or as string), in which case the .json file stem will be imputed.
             3. You can give a string that is NOT an existing file or directory, and it will instead be looked up
@@ -1085,10 +1090,14 @@ class BTE(TokeniserWithVocabDict):
     @staticmethod
     def from_pretrained(checkpoint: Union[str, Path], preprocessor: Preprocessor=None) -> TktktToHuggingFace:
         """
-        Wrapper around from_pretrained_tktkt() to give it the HuggingFace interface, which is what you expect from a
+        Load a TkTkT-saved checkpoint (not a HuggingFace-trained checkpoint!) into a HuggingFace tokeniser.
+        If you want to load a HuggingFace-saved checkpoint into a TkTkT tokeniser, use .fromHuggingFace() in any
+        of the subclasses of this class.
+
+        Wraps around from_pretrained_tktkt() to give it the HuggingFace interface, which is what you expect from a
         call to from_pretrained().
 
-        Special types are detected automatically. That won't work for all vocabs, but it does for what we need.
+        Special types are detected automatically. That won't work for all vocabs, but it works for what we need.
         """
         return TktktToHuggingFace(BTE.from_pretrained_tktkt(checkpoint, preprocessor))
 
