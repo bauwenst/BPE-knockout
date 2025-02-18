@@ -36,7 +36,9 @@ from ..datahandlers.holdout import Holdout
 from ..project.config import Pℛ𝒪𝒥ℰ𝒞𝒯, lexiconWeights, morphologyGenerator, defaultTokeniserFiles
 from ..auxiliary.tokenizer_interface import Evaluator, fetchAndCacheDict, DEFAULT_TOKENISER_STEM, PATH_DATA_TEMP
 
-MergeAsTuple = Tuple[int, str, str]
+MergeOnDisk = Union[str, List[str], Tuple[str,...]]  # "a b c" or ("a", "b", "c") with implicit priority.
+MergeList   = List[MergeOnDisk]
+MergeAsTuple = Tuple[int, str, str]  # (priority, "a b c", "abc")
 
 @dataclasses.dataclass
 class Merge:
@@ -106,7 +108,7 @@ class MergeGraph:
                           In vanilla BPE or BPE with just knockout, this list always has length 1 due to original functional sin.
     """
 
-    def __init__(self, vocab: Dict[str,int], raw_merges: List[str], quiet=True):
+    def __init__(self, vocab: Dict[str,int], raw_merges: MergeList, quiet=True):
         self.next_type  = 0  # == 1 + max(self.vocab.values()), not always len(self.vocab) due to knockout.
         self.next_merge = 0  # == 1 + max([m.priority for m in self.merges]), not always len(self.merges) due to knockout.
         self.id_range = set()
@@ -142,13 +144,14 @@ class MergeGraph:
         self.merges_of[type_to_add]   = []
         self.id_range.add(suggested_id)
 
-    def addArc(self, merge_to_add: str) -> Merge:
+    def addArc(self, merge_to_add: MergeOnDisk) -> Merge:
         """
         Adds arcs to the merge graph, and the resulting type if necessary.
         Also returns the constructed merge object for diagnostic purposes.
-        :param merge_to_add: Space-separated merge, e.g. "ab cd e".
+
+        :param merge_to_add: tupled or space-separated merge, e.g. "ab cd e".
         """
-        parts = merge_to_add.split(" ")
+        parts = merge_to_add.split(" ") if isinstance(merge_to_add, str) else list(merge_to_add)
         if not all([p in self.vocab for p in parts]):
             raise ValueError(f"The merge '{merge_to_add}' contains types not in the vocab yet.")
         if any([p == "" for p in parts]):
@@ -316,7 +319,7 @@ class BTE(TokeniserWithVocabDict):
     LONGPART_THRESHOLD = 4
 
     def __init__(self, init_config: BteInitConfig,
-                 starting_vocab: Dict[str,int]=None, starting_mergelist: List[str]=None,
+                 starting_vocab: Dict[str,int]=None, starting_mergelist: MergeList=None,
 
                  boundary_marker: BoundaryMarker=RobertaSpaceMarker, unk_type: str=None,
                  preprocessor: Preprocessor=None, normalisation: TextMapper=None,
@@ -389,7 +392,7 @@ class BTE(TokeniserWithVocabDict):
         self._iterative(self._config.iterations)
         self._has_run = True
 
-    def _initialiseGraph(self, vocab: Dict[str, int], mergelist: List[str], quiet: bool=True):
+    def _initialiseGraph(self, vocab: Dict[str, int], mergelist: MergeList, quiet: bool=True):
         self.merge_graph = MergeGraph(vocab, mergelist, quiet=quiet)
         self._syncWithGraph()
 
