@@ -281,14 +281,14 @@ class ByteBasedMode(str, Enum):
 
 class ReifyMode(str, Enum):
     NONE                 = 1
-    BACKWARDS_COMPATIBLE = 2  # Reify only those merges available after knockout that already exist.
+    BACKWARDS_COMPATIBLE = 2  # Reify only those merges available after knockout that already exist. TODO: Possibly you actually want to extend this to "merges available after knockout WHOSE RESULTING TYPES already exist".
     ALL                  = 3  # Reify any available merges after knockout.
 
 
 @dataclasses.dataclass
 class BteInitConfig:
     """
-    :param do_swap_stages: whether to instead do mending first and then knockout.
+    :param do_swap_stages: whether to instead do annealing first and then knockout+reification.
     :param keep_long_merges: whether to skip knockout for merges with relatively long parts (because they likely
                              form compounds; these need to be removed from the vocab, but by not doing so, you can
                              measure their effect on intrinsic evaluation metrics).
@@ -327,7 +327,6 @@ class BTE(TokeniserWithVocabDict):
                  autorun_modes=True, holdout: Holdout=None, quiet=False):
         """
         :param autorun_modes: whether to actually run the given modes, or only set their segmentation function.
-                              swap_stages has no effect when this is true.
         :param boundary_marker: Needed regardless of whether a preprocessor is defined or not.
         :param normalisation: If no preprocessor is given, a pretokeniser will be imputed automatically given the boundary
                               marker. The normalisation cannot be imputed in that case, and needs to be given explicitly.
@@ -814,7 +813,7 @@ class BTE(TokeniserWithVocabDict):
 
         # Stopping conditions
         END_IF_NO_MORE_DELETIONS = False  # If False, it's possible to just be reifying merges recursively (you reify, do no knockout, then reify again). Note that it's possible to have no knockout in one iteration, but do knockout in the next after adding some novel merges.
-        END_IF_NO_MORE_ADDITIONS = False  # If True, will cause early stopping when there are no more non-disqualified merges to be suggested, or when all that are suggested exist above their triplet.
+        END_IF_NO_MORE_ADDITIONS = False  # If True, will cause early stopping when there are no more non-disqualified merges to be suggested, or those that were suggested didn't yet exist whilst backwards-compatibility was asked, or if it wasn't, they exist above their triplet.
         DO_KNOCKOUT_IF_NOT_ENDED_ON_IT = True  # Recommendable because the latest additions might be morphologically bad.
         needs_final_knockout = DO_KNOCKOUT_IF_NOT_ENDED_ON_IT and iterations > 0
 
@@ -897,7 +896,7 @@ class BTE(TokeniserWithVocabDict):
         #       - If yes: check for each triplet it appears in whether it is below it.
         #           - If yes, replace it in the triplet. Not because the triplet results in a different token with or without it, but rather because right now it is preventing the triplet from being applied at all.
         #           - If not, don't do anything (the triplet stays a triplet like vanilla BPE-knockout, and will steal a fraction of all pairs that would go to the merge).
-        existing_merge_strings = {" ".join(m.parts) for m in self.merge_graph.merges}
+        existing_merge_strings = {" ".join(m.parts): m for m in self.merge_graph.merges}
         applied_merges = set()
         for merge_string, triplets_this_appears_in in tqdm(suggested_merge_strings.items(), desc="REIFICATION", disable=not self._print.verbose):
             parts = merge_string.split()
@@ -930,17 +929,11 @@ class BTE(TokeniserWithVocabDict):
                 submerge = self.merge_graph.addArc(merge_string)
 
                 # Set the priority to be under the lowest triplet of all triplets that contain it.
-                lowest_triplet = min(indices_occurs_in_triplet.keys())  # TODO: If this triplet is the lowest triplet for another submerge, that submerge will get the same priority... You probably want a heuristic to order these submerges of the same triplet, such that BPE does the best one first. Also, this problem cascades into more priority collisions when submerges create submerges themselves.
+                lowest_triplet = min(indices_occurs_in_triplet.keys())  # TODO: If this triplet is the lowest triplet for another submerge, that submerge will get the same priority... You probably want a heuristic to order these submerges of the same triplet, such that BPE does the best one first. Also, this problem cascades into more priority collisions as follows: merge cd+e with priority 3 is knocked out, so merge ab+cde with priority 4 becomes triplet merge ab+cd+e with priority 4. Then ab+cd is chosen as a submerge with priority 2.5, making the triplet a binary merge abcd+e with priority 3. Then merge a+b is knocked out and you get a triplet merge a+b+cd with priority 2.5. AND NOW, merge b+cd is a submerge whose priority is based on that 2.5.
                 submerge.priority = lowest_triplet.priority - 0.05
             else:
                 log(f"Merge '{merge_string}' already exists.")
-                one_of_these = self.merge_graph.merges_of[subtype]
-                submerge = None
-                for merge in one_of_these:
-                    if merge.parts == parts:  # Equivalent to merge_string == " ".join(merge.parts)
-                        submerge = merge
-                        break
-                assert submerge is not None
+                submerge = existing_merge_strings[merge_string]
 
             # In the triplets that are currently blocked by the existence of the submerge (a problem which vanilla BPE-knockout even has), replace the relevant parts by the submerge result.
             merge_was_applied = False  # "was loop not empty"
