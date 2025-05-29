@@ -185,7 +185,7 @@ class MergeGraph:
 
         # Remove from vocab.
         removed_id = self.vocab.pop(type_to_delete)
-        self.id_range.pop(removed_id)
+        self.id_range.remove(removed_id) # sets do not have a .pop(item) method.
 
         # Remove the merge(s, if OFS doesn't hold) that created this type.
         deleted_merges_of = self.merges_of.pop(type_to_delete)
