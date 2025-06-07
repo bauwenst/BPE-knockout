@@ -21,6 +21,8 @@ import json
 from tqdm.auto import tqdm
 
 import tktkt
+from tktkt.util.iterables import cumsum
+from tktkt.util.strings import indicesToTokens
 from tktkt.util.printing import *
 from tktkt.util.timing import datetimeDashed
 from tktkt.interfaces.tokeniser import TokeniserWithVocabDict
@@ -39,6 +41,7 @@ from ..auxiliary.tokenizer_interface import Evaluator, fetchAndCacheDict, DEFAUL
 MergeOnDisk = Union[str, List[str], Tuple[str,...]]  # "a b c" or ("a", "b", "c") with implicit priority.
 MergeList   = List[MergeOnDisk]
 MergeAsTuple = Tuple[int, str, str]  # (priority, "a b c", "abc")
+
 
 @dataclasses.dataclass
 class Merge:
@@ -117,7 +120,7 @@ class MergeGraph:
         self.merges: List[Merge] = []
         self.vocab:       Dict[str, int]         = dict()
         self.merges_with: Dict[str, List[Merge]] = dict()
-        self.merges_of:   Dict[str, List[Merge]] = dict()
+        self.merges_of:   Dict[str, List[Merge]] = dict()  # TODO: In a future version, this should become Dict[str, Optional[Merge]] due to the proof in the ReBPE paper.
 
         # Fill graph
         for raw_type, type_id in tqdm(vocab.items(), desc="ADDING VERTICES", disable=quiet):
@@ -151,11 +154,7 @@ class MergeGraph:
 
         :param merge_to_add: tupled or space-separated merge, e.g. "ab cd e".
         """
-        parts = merge_to_add.split(" ") if isinstance(merge_to_add, str) else list(merge_to_add)
-        if not all([p in self.vocab for p in parts]):
-            raise ValueError(f"The merge '{merge_to_add}' contains types not in the vocab yet.")
-        if any([p == "" for p in parts]):
-            raise ValueError(f"The merge '{merge_to_add}' seems to have double spaces.")
+        parts = self._parseRawMerge(merge_to_add)
 
         new_merge = Merge(self.next_merge, parts)
         new_type = new_merge.childType()
@@ -171,6 +170,25 @@ class MergeGraph:
         return new_merge
 
     def knockout(self, type_to_delete: str):
+        """New implementation that is equivalent to that in the paper, but more modularised."""
+        # Collect all the information we have about this type.
+        affected_merges   = self.merges_with[type_to_delete]
+        replacement_parts = self.merges_of[type_to_delete][0].parts
+
+        # Rewire all the affected merges.
+        for m in list(affected_merges):  # list() because the whole point of this loop is to shrink the list.
+            self.rewire(
+                m.childType(),
+                        (" " + " ".join(m.parts)           + " ")
+                .replace(" " + type_to_delete              + " ",
+                         " " + " ".join(replacement_parts) + " ")
+                .strip()
+            )
+
+        # Cut the type out of the graph.
+        self.cascade(type_to_delete, cleanup=False)
+
+    def knockoutOld(self, type_to_delete: str):
         """
         Remove the given type from the vocabulary, and remap all the merges it is involved in appropriately.
         Note: will cause merges to appear with more than 2 parts.
@@ -212,6 +230,85 @@ class MergeGraph:
             for t in replacement_types:
                 if merge_to_edit not in self.merges_with[t]:
                     self.merges_with[t].append(merge_to_edit)
+
+    def rewire(self, type_to_rewire: str, new_merge: MergeOnDisk) -> Merge:
+        if type_to_rewire not in self.vocab:
+            raise ValueError(f"Type does not exist: {type_to_rewire}")
+
+        print("Rewiring", type_to_rewire, "to", new_merge)
+
+        merge = self.merges_of[type_to_rewire][0]
+        old_parts = merge.parts
+
+        # Unlink all the old parts
+        for part in set(old_parts):
+            self.merges_with[part].remove(merge)
+
+        # Link up new parts
+        new_parts = self._parseRawMerge(new_merge)
+        merge.parts = new_parts
+        for part in set(new_parts):
+            self.merges_with[part].append(merge)
+
+        return merge
+
+    def cascade(self, type_to_delete: str, cleanup: bool=True) -> Set[str]:
+        """
+        Applies knockout to the entire tree of descendants of the given type.
+        This is easy to do: just prevent the type from being formed again, and all its descendants are blocked too.
+
+        :param cleanup: If false, the blocked merges and their resulting types keep existing in the tokeniser, but will
+                        just never be formed again.
+        """
+        if type_to_delete not in self.vocab:
+            raise ValueError(f"Type does not exist: {type_to_delete}")
+
+        in_alphabet = len(self.merges_of[type_to_delete]) == 0
+        if in_alphabet:
+            warn(f"Type {type_to_delete} is in the alphabet. Knockout will result in some inputs being impossible to represent.")
+
+        # Detach this root from the rest of the graph
+        for m in self.merges_of[type_to_delete]:
+            for parent in set(m.parts):
+                self.merges_with[parent].remove(m)
+
+        # Handle the cascade
+        if not cleanup:
+            types_to_delete = {type_to_delete}
+        else:  # You might think that cascaded knockout can be done recursively, but it's more difficult than that since the BPE merge graph is a DAG, not a tree.
+            frontier        = {type_to_delete}
+            types_to_delete = set()
+            while frontier:
+                current_type = frontier.pop()
+                types_to_delete.add(current_type)
+
+                affected_types = set()
+                for m in self.merges_with[current_type]:
+                    affected_types |= m.parts
+                frontier |= affected_types - types_to_delete
+
+        for type_to_delete in types_to_delete:
+            # Remove from vocab.
+            removed_id = self.vocab.pop(type_to_delete)
+            self.id_range.remove(removed_id)
+
+            # Remove the merge that made this.
+            for m in self.merges_of[type_to_delete]:
+                self.merges.remove(m)
+
+            # Forget that you had merges for this.
+            self.merges_of.pop(type_to_delete)
+            self.merges_with.pop(type_to_delete)
+
+        return types_to_delete
+
+    def _parseRawMerge(self, merge_on_disk: MergeOnDisk) -> List[str]:
+        parts = merge_on_disk.split(" ") if isinstance(merge_on_disk, str) else list(merge_on_disk)
+        if not all([p in self.vocab for p in parts]):
+            raise ValueError(f"The merge '{merge_on_disk}' contains types not in the vocab yet.")
+        if any([p == "" for p in parts]):
+            raise ValueError(f"The merge '{merge_on_disk}' seems to have double spaces.")
+        return parts
 
     def getRawMerges(self) -> List[str]:
         return [" ".join(merge.parts) for merge in sorted(self.merges)]  # Have to sort explicitly because priorities aren't returned, and they are sometimes changed during execution causing the list to be out of order.
@@ -280,13 +377,34 @@ class ByteBasedMode(str, Enum):
 
 
 class ReifyMode(str, Enum):
-    NONE                 = 1
-    BACKWARDS_COMPATIBLE = 2  # Reify only those merges available after knockout that already exist. TODO: Possibly you actually want to extend this to "merges available after knockout WHOSE RESULTING TYPES already exist".
-    ALL                  = 3  # Reify any available merges after knockout.
+    """
+    Chooses between enabling the following reification features:
+        - Fixing diverging triplets created by knockout;
+        - Turning triplets back into binary merges by linking them to existing merges;
+        - Turning triplets back into binary merges by creating new merges, when linking is not possible.
+
+    There is no setting for creating new merges without linking existing merges, because realistically, nobody wants this.
+    """
+    NONE                  = 1
+    LINK                  = 2
+    LINK_AND_MAKE         = 3
+    FIX                   = 4
+    FIX_AND_LINK          = 5
+    FIX_AND_LINK_AND_MAKE = 6
+
+    def does_fix(self):
+        return self in {ReifyMode.FIX, ReifyMode.FIX_AND_LINK, ReifyMode.FIX_AND_LINK_AND_MAKE}
+
+    def does_link(self):
+        return self in {ReifyMode.LINK, ReifyMode.LINK_AND_MAKE, ReifyMode.FIX_AND_LINK, ReifyMode.FIX_AND_LINK_AND_MAKE}
+
+    def is_backwards_compatible(self):
+        """Whether new types will NOT be added to the vocabulary by reification. Equivalent to 'does_not_make()'."""
+        return self not in {ReifyMode.LINK_AND_MAKE, ReifyMode.FIX_AND_LINK_AND_MAKE}
 
 
 @dataclasses.dataclass
-class BteInitConfig:
+class BteInitConfig:  # TODO: Add a mode that uses cascading (no reification possible in that case).
     """
     :param do_swap_stages: whether to instead do annealing first and then knockout+reification.
     :param keep_long_merges: whether to skip knockout for merges with relatively long parts (because they likely
@@ -875,14 +993,46 @@ class BTE(TokeniserWithVocabDict):
         In the code below, when I use "triplet", I mean "thing with submerges". Often it has more than 3 subwords,
         even after just one iteration of knockout, meaning it also suggests more than one submerge.
         """
-        log = doPrint(Pℛ𝒪𝒥ℰ𝒞𝒯.debug_prints)
+        if self._config.reify == ReifyMode.NONE:
+            return set()
 
+        # Setup
+        log = doPrint(Pℛ𝒪𝒥ℰ𝒞𝒯.debug_prints)
         if all_disqualified_merges is None:
             all_disqualified_merges = set()
+        sorted_merges = sorted(self.merge_graph.merges)
+        new_merges    = set()
 
+        # Part 1: Find triplets which diverge from the actual tokenisation, and fix them.
+        for m in sorted_merges:
+            if not self._config.reify.does_fix():  # Skip this whole loop.
+                break
+            if len(m.parts) <= 2:  # Not a triplet
+                continue
+
+            # Find tokenisation up to the triplet.
+            # Approach: use the full tokeniser, then re-insert a space for each merge that happened AFTER the triplet.
+            typ = m.childType()
+            actual_tokens, causes = self._tokenise_diagnostic(typ)
+            token_lengths = list(cumsum(map(len, actual_tokens)))
+            start_of_tokens = {0} \
+                            | set(token_lengths[:-1]) \
+                            | {space_index+1 for space_index, priority in causes.items() if priority >= m.priority}
+            limited_tokens = indicesToTokens(typ, sorted(start_of_tokens))
+            assert "".join(limited_tokens) == typ, f"{limited_tokens} vs. {typ}"
+
+            # If the tokens are not as dictated by the merge that is supposed to concatenate them, it needs fixing.
+            if limited_tokens != m.parts:
+                print(f"Found divergent triplet: expected {m.parts} but got {limited_tokens}")
+                new_merges.add(self.merge_graph.rewire(typ, limited_tokens))
+
+        if not self._config.reify.does_link():
+            return new_merges
+
+        # Part 2: Find new binary merges inside all triplets.
         suggested_merge_strings: Dict[str, Set[Merge]] = dict()
-        for m in self.merge_graph.merges:
-            if len(m.parts) == 2:  # Shortcut; we know that no extra binary merge can be added between the parts because m is literally that merge.
+        for m in sorted_merges:
+            if len(m.parts) <= 2:  # Shortcut; we know that no extra binary merge can be added between the parts because m is literally that merge.
                 continue
 
             for p1, p2 in zip(m.parts[:-1], m.parts[1:]):
@@ -897,7 +1047,6 @@ class BTE(TokeniserWithVocabDict):
         #           - If yes, replace it in the triplet. Not because the triplet results in a different token with or without it, but rather because right now it is preventing the triplet from being applied at all.
         #           - If not, don't do anything (the triplet stays a triplet like vanilla BPE-knockout, and will steal a fraction of all pairs that would go to the merge).
         existing_merge_strings = {" ".join(m.parts): m for m in self.merge_graph.merges}
-        applied_merges = set()
         for merge_string, triplets_this_appears_in in tqdm(suggested_merge_strings.items(), desc="REIFICATION", disable=not self._print.verbose):
             parts = merge_string.split()
             subtype = "".join(parts)
@@ -920,25 +1069,29 @@ class BTE(TokeniserWithVocabDict):
             if len(indices_occurs_in_triplet) == 0:
                 continue
 
-            # Make or find the new merge.
-            if merge_string not in existing_merge_strings:
-                if self._config.reify == ReifyMode.BACKWARDS_COMPATIBLE:  # Although yes, these merges will be suggested again and again, the overhead for this is minimal. It also has no effect on the outcome of the algorithm (e.g. early stopping) that these merges keep being detected as possible.
+            # Link or make the new merge.
+            if subtype in self.merge_graph.vocab:  # Link if it's the right pair of tokens. Else do nothing.
+                submerge = existing_merge_strings[merge_string]
+                if submerge.parts == parts:
+                    log(f"Reified merge '{merge_string}' exists.")
+                else:
+                    log(f"Reified merge '{merge_string}' doesn't exist, but its result is already merged as '{' '.join(submerge.parts)}'. It hence cannot be created.")
+                    continue
+            else:  # Make new type.
+                if self._config.reify.is_backwards_compatible():
                     continue
 
-                log(f"Merge '{merge_string}' will be created.")
+                log(f"Reified merge '{merge_string}' will be created.")
                 submerge = self.merge_graph.addArc(merge_string)
 
                 # Set the priority to be under the lowest triplet of all triplets that contain it.
                 lowest_triplet = min(indices_occurs_in_triplet.keys())  # TODO: If this triplet is the lowest triplet for another submerge, that submerge will get the same priority... You probably want a heuristic to order these submerges of the same triplet, such that BPE does the best one first. Also, this problem cascades into more priority collisions as follows: merge cd+e with priority 3 is knocked out, so merge ab+cde with priority 4 becomes triplet merge ab+cd+e with priority 4. Then ab+cd is chosen as a submerge with priority 2.5, making the triplet a binary merge abcd+e with priority 3. Then merge a+b is knocked out and you get a triplet merge a+b+cd with priority 2.5. AND NOW, merge b+cd is a submerge whose priority is based on that 2.5.
                 submerge.priority = lowest_triplet.priority - 0.05
-            else:
-                log(f"Merge '{merge_string}' already exists.")
-                submerge = existing_merge_strings[merge_string]
 
             # In the triplets that are currently blocked by the existence of the submerge (a problem which vanilla BPE-knockout even has), replace the relevant parts by the submerge result.
-            merge_was_applied = False  # "was loop not empty"
+            merge_had_effect = False  # "was loop not empty"; this can only stay false for merges that (1) already existed and (2) are VERY late.
             for triplet in filter(lambda triplet: submerge < triplet, indices_occurs_in_triplet.keys()):
-                merge_was_applied = True
+                merge_had_effect = True
 
                 # 1. Update the tuple inside the triplet's merge node.
                 new_parts = []
@@ -964,11 +1117,11 @@ class BTE(TokeniserWithVocabDict):
                     if part not in triplet.parts:
                         self.merge_graph.merges_with[part].remove(triplet)
 
-            if merge_was_applied:
-                applied_merges.add(submerge)
+            if merge_had_effect:
+                new_merges.add(submerge)
 
         self._syncWithGraph()
-        return applied_merges
+        return new_merges
 
     def _preprocessAlreadySegmentedString(self, segmentation: str) -> str:
         # TODO: Even this method isn't completely watertight against all preprocessors.

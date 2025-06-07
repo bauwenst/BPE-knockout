@@ -21,7 +21,8 @@ class BPEngineer:
         says that every type in the vocabulary can be formed by exactly one merge, because (as the proof shows) there
         are no more strings in the corpus from which BPE can learn a second merge for that type after the first has been learnt.
 
-        With reification, this invariant can be broken. This function gives you the types for which the invariant is broken.
+        With reification, this invariant can be broken. TODO: This is only superficially true. You can add any merge you want to the tokeniser, but only one will be applied per type.
+        This function gives you the types for which the invariant is broken.
         """
         multimerge_types = []
         for typ, merges in self.bte.merge_graph.merges_of.items():
