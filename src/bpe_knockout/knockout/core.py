@@ -1177,6 +1177,7 @@ class BTE(TokeniserWithVocabDict):
             if out_path.exists() and not overwrite:
                 raise FileExistsError(f"File {out_path.as_posix()} already exists. Set overwrite=True to overwrite.")
             # enforce only one level up of directory creation
+            out_path.parent.mkdir(parents=False, exist_ok=True)
         else:
             # Treat as directory
             if not path.parent.is_dir(): # only allowed to create directories one level up
