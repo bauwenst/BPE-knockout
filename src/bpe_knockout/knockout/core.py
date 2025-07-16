@@ -1164,11 +1164,25 @@ class BTE(TokeniserWithVocabDict):
         bte._has_run = metadata["has-run"]
         return bte
 
-    def save(self, folder: Path) -> Path:
-        # Folder setup
-        if not folder.parent.is_dir():
-            raise ValueError(f"Cannot find folder parent {folder.parent.as_posix()}")
-        folder.mkdir(exist_ok=True)
+    def save(self, path: Path, overwrite: bool = False) -> Path:
+        """
+        Save the tokeniser to the given path.
+        If path is a directory, a default filename is used.
+        If path is a file (ending with .json), check the overwrite flag before writing.
+        """
+        # Determine output path
+        path = Path(path)
+        if path.suffix == ".json":
+            out_path = path
+            if out_path.exists() and not overwrite:
+                raise FileExistsError(f"File {out_path.as_posix()} already exists. Set overwrite=True to overwrite.")
+            # enforce only one level up of directory creation
+        else:
+            # Treat as directory
+            if not path.parent.is_dir(): # only allowed to create directories one level up
+                raise ValueError(f"Cannot find folder parent {path.parent.as_posix()}")
+            path.mkdir(exist_ok=True)
+            out_path = path / f"tokenizer_BTE_{datetimeDashed()}.json"
 
         # Separate alphabet from merged types
         alphabet   = {t: i for t,i in self.vocab.items() if not self.merge_graph.merges_of[t]}
@@ -1200,7 +1214,6 @@ class BTE(TokeniserWithVocabDict):
             }
         }
 
-        out_path = folder / time.strftime(f"tokenizer_BTE_{datetimeDashed()}.json")
         with open(out_path, "w", encoding="utf-8") as handle:
             json.dump(serialised, handle, indent=4, ensure_ascii=False)
         return out_path
