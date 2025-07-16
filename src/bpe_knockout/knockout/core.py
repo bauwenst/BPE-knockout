@@ -177,12 +177,30 @@ class MergeGraph:
 
         # Rewire all the affected merges.
         for m in list(affected_merges):  # list() because the whole point of this loop is to shrink the list.
+            # CHANGE
+            # making loop for instances when the type_to_delete appears
+            # more than once in the merge.
+            # old version:
+            #   type_to_delete = "zama"
+            #   replacement_parts = ["za", "ma"]
+            #   m = Merge(1, ["zama", "zama"]
+            #   runs self.rewire("zamazama", "za ma zama") # leaves "zama" in the graph
+
+            # new version:
+            #   type_to_delete = "zama"
+            #   replacement_parts = ["za", "ma"]
+            #   m = Merge(1, ["zama", "zama"])
+            #   runs self.rewire("zamazama", "za ma za ma") # removes "zama" from the graph
+            changed_parts = " " + " ".join(m.parts) + " "
+            search = " " + type_to_delete + " "
+            replacement = " " + " ".join(replacement_parts) + " "
+            while search in changed_parts:
+                # Replace the type to delete with its parts.
+                changed_parts = changed_parts.replace(search, replacement)
+
             self.rewire(
-                m.childType(),
-                        (" " + " ".join(m.parts)           + " ")
-                .replace(" " + type_to_delete              + " ",
-                         " " + " ".join(replacement_parts) + " ")
-                .strip()
+                type_to_rewire=m.childType(),
+                new_merge=changed_parts.strip()
             )
 
         # Cut the type out of the graph.
