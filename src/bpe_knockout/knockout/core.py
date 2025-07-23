@@ -179,9 +179,10 @@ class MergeGraph:
         for m in list(affected_merges):  # list() because the whole point of this loop is to shrink the list.
             self.rewire(
                 m.childType(),
-                        (" " + " ".join(m.parts)           + " ")
+                        (" " + "  ".join(m.parts)          + " ")  # Two spaces because " xy xy ".replace(" xy ", " x y ") == " x y xy " due to the middle space not being allowed to be the last space of one match and the first of another.
                 .replace(" " + type_to_delete              + " ",
                          " " + " ".join(replacement_parts) + " ")
+                .replace("  ", " ")
                 .strip()
             )
 
@@ -585,7 +586,7 @@ class BTE(TokeniserWithVocabDict):
                 break
 
             best_merge = min(possible_merges)
-            buffer = buffer.replace(best_merge[1], best_merge[2])
+            buffer = buffer.replace(best_merge[1], best_merge[2])  # TODO: There is an inefficiency bug here that " a b a b ".replace(" a b ", " ab ") == " ab a b " because the middle space cannot match the template twice. The way to solve this would be to join and split on "  " (double space) and have the templates also use double spaces. The problem is that I don't know whether any code relies on getRawMerges()/getPaddedMerges() having exactly one space rather than two between each part.
 
         return buffer[1:-1].split(" ")
 
