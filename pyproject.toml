@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bpe_knockout"
-version = "2024.08.01"
+version = "2025.09.01"  # Don't forget to update __version__ too.
 requires-python = ">= 3.10"
 authors = [
   {name = "Thomas Bauwens", email = "thomas.bauwens@kuleuven.be"}

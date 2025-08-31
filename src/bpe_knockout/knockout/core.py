@@ -120,7 +120,7 @@ class MergeGraph:
         self.merges: List[Merge] = []
         self.vocab:       Dict[str, int]         = dict()
         self.merges_with: Dict[str, List[Merge]] = dict()
-        self.merges_of:   Dict[str, List[Merge]] = dict()  # TODO: In a future version, this should become Dict[str, Optional[Merge]] due to the proof in the ReBPE paper.
+        self.merges_of:   Dict[str, List[Merge]] = dict()  # Note: in deterministic BPE vocabularisers, only one merge is learnt per type. And in deterministic BPE tokenisers, only one merge is ever used to form each type. Thus, in all practical scenarios, this list contains only one object (but it could contain more for BPE-dropout, in theory).
 
         # Fill graph
         for raw_type, type_id in tqdm(vocab.items(), desc="ADDING VERTICES", disable=quiet):
@@ -264,8 +264,7 @@ class MergeGraph:
         if type_to_delete not in self.vocab:
             raise ValueError(f"Type does not exist: {type_to_delete}")
 
-        in_alphabet = len(self.merges_of[type_to_delete]) == 0
-        if in_alphabet:
+        if self.inAlphabet(type_to_delete):
             warn(f"Type {type_to_delete} is in the alphabet. Knockout will result in some inputs being impossible to represent.")
 
         # Detach this root from the rest of the graph
@@ -316,6 +315,9 @@ class MergeGraph:
 
     def getPaddedMerges(self) -> List[MergeAsTuple]:
         return [merge.asTuple() for merge in self.merges]
+
+    def inAlphabet(self, typ: str) -> bool:
+        return len(self.merges_of[typ]) == 0
 
     def printSurroundingGraph(self, t: str):
         """
@@ -1002,7 +1004,7 @@ class BTE(TokeniserWithVocabDict):
         if all_disqualified_merges is None:
             all_disqualified_merges = set()
         sorted_merges = sorted(self.merge_graph.merges)
-        new_merges    = set()
+        new_merges    = set()  # Union of (1) triplets that were repaired into different triplets, (2) new binary merges that were applied in at least one triplet, and (3) old binary merges that were applied in at least one other triplet.
 
         # Part 1: Find triplets which diverge from the actual tokenisation, and fix them.
         for m in sorted_merges:
@@ -1012,13 +1014,13 @@ class BTE(TokeniserWithVocabDict):
                 continue
 
             # Find tokenisation up to the triplet.
-            # Approach: use the full tokeniser, then re-insert a space for each merge that happened AFTER the triplet.
+            # Approach: use the full tokeniser to create some spaces, and add to those spaces the MERGES that happened AFTER the triplet.
             typ = m.childType()
             actual_tokens, causes = self._tokenise_diagnostic(typ)
             token_lengths = list(cumsum(map(len, actual_tokens)))
             start_of_tokens = {0} \
                             | set(token_lengths[:-1]) \
-                            | {space_index+1 for space_index, priority in causes.items() if priority >= m.priority}
+                            | {space_index+1 for space_index, priority in causes.items() if priority >= m.priority}  # Equivalently, you could construct start_of_tokens subtractively as something like "all possible splits minus the ones taken away by early merges", so set(range(len(typ))) - {space_index+1 for space_index, priority in causes.items() if priority < m.priority}.
             limited_tokens = indicesToTokens(typ, sorted(start_of_tokens))
             assert "".join(limited_tokens) == typ, f"{limited_tokens} vs. {typ}"
 
@@ -1047,7 +1049,6 @@ class BTE(TokeniserWithVocabDict):
         #       - If yes: check for each triplet it appears in whether it is below it.
         #           - If yes, replace it in the triplet. Not because the triplet results in a different token with or without it, but rather because right now it is preventing the triplet from being applied at all.
         #           - If not, don't do anything (the triplet stays a triplet like vanilla BPE-knockout, and will steal a fraction of all pairs that would go to the merge).
-        existing_merge_strings = {" ".join(m.parts): m for m in self.merge_graph.merges}
         for merge_string, triplets_this_appears_in in tqdm(suggested_merge_strings.items(), desc="REIFICATION", disable=not self._print.verbose):
             parts = merge_string.split()
             subtype = "".join(parts)
@@ -1072,7 +1073,7 @@ class BTE(TokeniserWithVocabDict):
 
             # Link or make the new merge.
             if subtype in self.merge_graph.vocab:  # Link if it's the right pair of tokens. Else do nothing.
-                submerge = existing_merge_strings[merge_string]
+                submerge = self.merge_graph.merges_of[subtype][0]
                 if submerge.parts == parts:
                     log(f"Reified merge '{merge_string}' exists.")
                 else:
@@ -1086,7 +1087,15 @@ class BTE(TokeniserWithVocabDict):
                 submerge = self.merge_graph.addArc(merge_string)
 
                 # Set the priority to be under the lowest triplet of all triplets that contain it.
-                lowest_triplet = min(indices_occurs_in_triplet.keys())  # TODO: If this triplet is the lowest triplet for another submerge, that submerge will get the same priority... You probably want a heuristic to order these submerges of the same triplet, such that BPE does the best one first. Also, this problem cascades into more priority collisions as follows: merge cd+e with priority 3 is knocked out, so merge ab+cde with priority 4 becomes triplet merge ab+cd+e with priority 4. Then ab+cd is chosen as a submerge with priority 2.5, making the triplet a binary merge abcd+e with priority 3. Then merge a+b is knocked out and you get a triplet merge a+b+cd with priority 2.5. AND NOW, merge b+cd is a submerge whose priority is based on that 2.5.
+                lowest_triplet = min(indices_occurs_in_triplet.keys())
+                # TODO: If this triplet is the lowest triplet for another submerge, that submerge will get the same priority...
+                #       You probably want a heuristic to order these submerges of the same triplet, such that BPE executes the
+                #       best one first. Also, using fractional priorities is a problem because one can be based on another.
+                #       Imagine you had an offset of 0.5. Then:
+                #           - Merge cd+e with priority 2 is knocked out, so merge ab+cde with priority 3 becomes triplet merge ab+cd+e with priority 3.
+                #           - Then ab+cd is chosen as a submerge with priority 2.5, making the triplet a binary merge abcd+e with priority 3.
+                #           - Then merge a+b with priority 0 is knocked out and you get a triplet merge a+b+cd with priority 2.5.
+                #           - AND NOW, merge b+cd is a submerge whose priority is based on that 2.5.
                 submerge.priority = lowest_triplet.priority - 0.05
 
             # In the triplets that are currently blocked by the existence of the submerge (a problem which vanilla BPE-knockout even has), replace the relevant parts by the submerge result.
@@ -1172,7 +1181,7 @@ class BTE(TokeniserWithVocabDict):
         folder.mkdir(exist_ok=True)
 
         # Separate alphabet from merged types
-        alphabet   = {t: i for t,i in self.vocab.items() if not self.merge_graph.merges_of[t]}
+        alphabet   = {t: i for t,i in self.vocab.items() if self.merge_graph.inAlphabet(t)}
         composites = {m.childType(): m.priority for m in self.merge_graph.merges}
         if set(self.vocab.keys()) != set(alphabet.keys()) | set(composites.keys()):
             warnings.warn("While saving, it was discovered that the set of types without a merge plus the set of types formed by the merge list DO NOT make up the vocabulary. This is weird!")
