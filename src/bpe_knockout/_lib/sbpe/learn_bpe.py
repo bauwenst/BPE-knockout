@@ -33,7 +33,7 @@ from tqdm.auto import tqdm
 
 from tktkt.interfaces.preparation import Preprocessor
 from tktkt.preparation.boundaries import BoundaryMarker
-from tktkt.preparation.instances import SennrichSpaceMarker, IdentityMapper, PretokeniserSequence, AddWordBoundary, HyphenMode, PunctuationPretokeniser, WhitespacePretokeniser
+from tktkt.factories.preprocessing import SennrichSpaceMarker, IdentityMapper, PretokeniserSequence, AddWordBoundary, HyphenMode, PunctuationPretokeniser, WhitespacePretokeniser
 
 from .heap import HeapWithInverseIndex
 

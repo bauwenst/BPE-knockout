@@ -18,6 +18,8 @@ from pathlib import Path
 import warnings
 import re
 import json
+
+from tktkt.util.types import Tokens
 from tqdm.auto import tqdm
 
 import tktkt
@@ -27,8 +29,9 @@ from tktkt.util.printing import *
 from tktkt.util.timing import datetimeDashed
 from tktkt.interfaces.tokeniser import TokeniserWithVocabDict
 from tktkt.interfaces.huggingface import TktktToHuggingFace
+from tktkt.wrappers.multiplexing import SuccessionalTokeniser
 from tktkt.preparation.boundaries import BoundaryMarker, BoundaryMarkerLocation
-from tktkt.preparation.instances import Preprocessor, BoundariesFromSpacesPretokeniser, RobertaSpaceMarker, \
+from tktkt.factories.preprocessing import Preprocessor, BoundariesFromSpacesPretokeniser, RobertaSpaceMarker, \
     TextMapper, AddWordBoundary, PseudoByteMapping
 
 from modest.interfaces.morphologies import MorphSplit, FreeMorphSplit, MorphologyVisitor
@@ -430,7 +433,7 @@ SPLIT_MARKER = "|"
 SPLIT_MARKER_RE = re.compile(re.escape(SPLIT_MARKER))
 
 
-class BTE(TokeniserWithVocabDict):
+class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
     """
     Byte-tuple encoding (BTE): implementation of BPE that can deal with merges of more than 2 parts.
     """
@@ -559,7 +562,7 @@ class BTE(TokeniserWithVocabDict):
             self.merge_graph.addArc(merge_string)
         self._syncWithGraph()
 
-    def tokenise(self, pretoken: str) -> List[str]:
+    def _initialTokens(self, pretoken: str) -> Tokens:
         """
         BPE requires two special kinds of pretokenisation that aren't really pretokenisation, before tokenising.
             1. It must ensure all spaces have been removed from the input, because these are control characters in the
@@ -571,10 +574,13 @@ class BTE(TokeniserWithVocabDict):
                because these units will interact during tokenisation. The units are usually characters, but they don't
                have to be; Sennrich's repo shows this with an attached end-of-word, e.g. "word" -> "w o r d</w>".
         """
-        return self.applyMerges(self._boundary_marker.intoCharacters(pretoken.replace(" ", "")))
+        return self._boundary_marker.intoCharacters(pretoken.replace(" ", ""))
 
-    def applyMerges(self, sequence_of_nonspaces: Iterable[str]) -> List[str]:
-        buffer = " " + " ".join(sequence_of_nonspaces) + " "
+    def _finalTokens(self, tokens: Tokens) -> Tokens:
+        """
+        :param tokens: All spaces MUST have been removed from the given initial tokens, otherwise really bad things happen.
+        """
+        buffer = " " + " ".join(tokens) + " "
         while True:
             types = buffer[1:-1].split(" ")
             possible_merges = []
@@ -592,7 +598,7 @@ class BTE(TokeniserWithVocabDict):
 
         return buffer[1:-1].split(" ")
 
-    def applyMerges_faster(self, sequence_of_nonspaces: Iterable[str]) -> List[str]:
+    def _finalTokens_faster(self, sequence_of_nonspaces: Iterable[str]) -> List[str]:  # TODO: Replace _finalTokens by this.
         buffer = " " + " ".join(sequence_of_nonspaces) + " "
         while True:
             tokens = buffer[1:-1].split(" ")

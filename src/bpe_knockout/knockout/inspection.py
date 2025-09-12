@@ -143,7 +143,7 @@ class BPEngineer:
 
         starting_bitstring = state.bitstring
 
-        frontier: List[Tuple[str,BpeMergeState]] = [(buffer,state)]  # Buffers as in .applyMerges, along with the reference where to store the children.
+        frontier: List[Tuple[str,BpeMergeState]] = [(buffer,state)]  # Buffers as in ._finalTokens, along with the reference where to store the children.
         found: Dict[str, BpeMergeState]          = {state.bitstring: state}  # Bit strings that uniquely identify each segmentation that has been formed, without storing tokens. Saves up to 2x characters versus storing buffers.
         while frontier:
             buffer, state = frontier.pop(0)
