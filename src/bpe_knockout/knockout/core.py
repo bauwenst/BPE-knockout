@@ -890,7 +890,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
 
         # Stopping conditions
         END_IF_NO_MORE_DELETIONS = False  # If False, it's possible to just be reifying merges recursively (you reify, do no knockout, then reify again). Note that it's possible to have no knockout in one iteration, but do knockout in the next after adding some novel merges.
-        END_IF_NO_MORE_ADDITIONS = False  # If True, will cause early stopping when there are no more non-disqualified merges to be suggested, or those that were suggested didn't yet exist whilst backwards-compatibility was asked, or if it wasn't, they exist above their triplet.
+        END_IF_NO_MORE_ADDITIONS = False  # If True, will cause early stopping when there are no more non-disqualified merges to be suggested, or those that were suggested all need to be created whereas the config demands backwards-compatibility, or if it wasn't, they exist above their triplet.
         DO_KNOCKOUT_IF_NOT_ENDED_ON_IT = True  # Recommendable because the latest additions might be morphologically bad.
         needs_final_knockout = DO_KNOCKOUT_IF_NOT_ENDED_ON_IT and iterations > 0
 
@@ -923,6 +923,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
 
             if not removed_merges and not applied_merges:
                 self._print("Early stop: tokeniser fully converged (no more deletions, no more additions).")
+                self._config.iterations = iteration - 1  # The iteration where you discover that you are identical to previous iteration does not count.
                 break
 
             if evaluator:
