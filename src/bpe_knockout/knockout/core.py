@@ -367,8 +367,6 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
         self._knockout_segmentation = RefMode.toMethod(self._config.knockout)
         self._anneal_segmentation   = RefMode.toMethod(self._config.anneal)
         self._do_prune_trivials = not self._config.keep_long_merges
-        do_prune  = self._knockout_segmentation is not None
-        do_anneal = self._anneal_segmentation is not None
 
         if holdout is None:
             holdout = Holdout(1.0)  # 100% of data goes to training.
@@ -409,12 +407,14 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
         if not self._has_run:
             return "BTE"
         else:
+            do_prune  = self._knockout_segmentation is not None
+            do_anneal = self._anneal_segmentation is not None
             return "BTE" \
                 + ("-knockout-" + RefMode.toLetter(self._config.knockout)) * do_prune \
                 + ("-reify" * (self._config.reify != ReifyMode.NONE)) \
                 + (f"_{self._config.iterations}it" if self._config.iterations > 0 else "") \
                 + (f"_anneal-{RefMode.toLetter(self._config.anneal)}-{AnnealingTime.toLetter(self._config.when_to_anneal)}") * do_anneal \
-                + (f"_{int(100*holdout.threshold)}-{int(100-100*holdout.threshold)}-holdout" if holdout is not None else "") \
+                + (f"_{int(100*self._holdout.threshold)}-{int(100-100*self._holdout.threshold)}-holdout" if self._holdout is not None else "") \
                 + "_keeptrivial" * self._config.keep_long_merges
 
     def _initialiseGraph(self, vocab: Dict[str, int], mergelist: MergeList, quiet: bool=True):
@@ -874,7 +874,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
                 self._print("Early stop: no merges knocked out.")
                 break
 
-            if evaluator:
+            if evaluator and removed_merges:
                 evaluator.evaluate(self, self._holdout, [f"{iteration} it", "+knockout"])
 
             # --- REIFICATION PHASE ---
@@ -882,20 +882,20 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
                 continue
 
             all_disqualified_merges.update(" ".join(m.parts) for m in removed_merges)
-            applied_merges = self._reify(all_disqualified_merges)
-            needs_final_knockout = len(applied_merges) > 0
-            self._print(f"Repaired or reified {len(applied_merges)} merges.")
+            novel_merges = self._reify(all_disqualified_merges)
+            needs_final_knockout = len(novel_merges) > 0
+            self._print(f"Repaired or reified {len(novel_merges)} merges.")
 
-            if END_IF_NO_MORE_ADDITIONS and not applied_merges:
+            if END_IF_NO_MORE_ADDITIONS and not novel_merges:
                 self._print("Early stop: no new sub-merges available that weren't knocked out before, nor that exist below their triplet(s).")
                 break
 
-            if not removed_merges and not applied_merges:
+            if not removed_merges and not novel_merges:
                 self._print("Early stop: tokeniser fully converged (no more deletions, no more additions).")
                 self._config.iterations = iteration - 1  # The iteration where you discover that you are identical to previous iteration does not count.
                 break
 
-            if evaluator:
+            if evaluator and novel_merges:
                 evaluator.evaluate(self, self._holdout, [f"{iteration} it", "+reify"])
 
         if needs_final_knockout and DO_KNOCKOUT_IF_NOT_ENDED_ON_IT:
