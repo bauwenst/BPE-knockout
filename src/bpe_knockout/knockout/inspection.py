@@ -138,7 +138,7 @@ class BPEngineer:
 
             return "".join(bits)
 
-        buffer = " " + " ".join(self.bte._boundary_marker.intoCharacters(pretoken)) + " "
+        buffer = " " + " ".join(self.bte._initialTokens(pretoken)) + " "
         state  = BpeMergeState(bufferToBits(buffer))
 
         starting_bitstring = state.bitstring

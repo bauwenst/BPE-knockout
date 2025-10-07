@@ -28,12 +28,6 @@ class RefMode(str, Enum):  # The str parent allows JSON serialisation: https://s
             raise NotImplementedError()
 
 
-class ByteBasedMode(str, Enum):
-    NONE           = 1
-    VOCAB_TO_CHARS = 2  # Take a vocab produced by HuggingFace's BBPE (which consists of the 256 byte-representing characters) and convert it to the corresponding characters.
-    INPUT_TO_BYTES = 3  # Take UTF-8 input and map it to HuggingFace's 256 byte-representing characters.
-
-
 class ReifyMode(str, Enum):
     """
     Chooses between enabling the following reification features:
@@ -98,4 +92,3 @@ class BteInitConfig:
     # Legacy arguments that are not really relevant anymore.
     keep_long_merges: bool = False   # Shown in my thesis to not be the essence of knockout.
     weighted_training: bool = False  # Shown in the paper to not really matter.
-    bytebased: ByteBasedMode = ByteBasedMode.INPUT_TO_BYTES  # Replaced by TkTkT's Preprocessor. Since all our tests assume byte-based vocabularies, we use this value as default to not specify it every time.

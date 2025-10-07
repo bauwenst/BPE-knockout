@@ -14,11 +14,10 @@ from tst.tokenisation.robbert_tokenizer import robbert_tokenizer as rt
 from tktkt.models.huggingface.wrapper import HuggingFaceTokeniser
 robbert_tokenizer = HuggingFaceTokeniser(rt, for_single_words=True)
 
-from tktkt.evaluation.morphological import tokeniseAndDecode
-
 from bpe_knockout.auxiliary.bytemapping import *
-from bpe_knockout.knockout.core import BTE, BteInitConfig, RefMode, ByteBasedMode
+from bpe_knockout.knockout.core import BTE, BteInitConfig, RefMode
 from tktkt.util.timing import timeit
+from tktkt.interfaces.tokeniser import prepare_tokenise_decode
 from fiject import LineGraph, CacheMode
 
 
@@ -33,7 +32,7 @@ def robbert():
     # -> " Dát is efficiëntie!"
 
     w = "oriëntatietechniek"
-    bpe_segmentation = " ".join(tokeniseAndDecode(w, tokeniser=robbert_tokenizer))
+    bpe_segmentation = " ".join(prepare_tokenise_decode(w, tokeniser=robbert_tokenizer))
     print(bpe_segmentation)
     print(robbert_tokenizer_hf.clean_up_tokenization(bpe_segmentation))
     print(robbert_tokenizer_hf.convert_tokens_to_string([bpe_segmentation]))
@@ -43,7 +42,7 @@ def robbert():
     # General method that 1. fixes Unicode weirdness and 2. fixes adherence to RobBERT: let the tokeniser convert to
     # text, and then strip left and right to catch the effect of G or </w>.
     # Note that convert_tokens_to_string converts a list to a string and does NOT add spaces in between, yet we want those.
-    bpe_segmentation = tokeniseAndDecode(w, tokeniser=robbert_tokenizer)
+    bpe_segmentation = prepare_tokenise_decode(w, tokeniser=robbert_tokenizer)
     print(" ".join([robbert_tokenizer_hf.convert_tokens_to_string([token]) for token in bpe_segmentation]).strip())
 
     print(robbert_tokenizer_hf.convert_tokens_to_string(["aaaaaaaadfgdga-Ã«", "bb Ã«"]))  # As long as there is no space, the method works, even on strings that aren't tokens.
@@ -72,19 +71,19 @@ def pythonBTEvsHuggingFaceBPErevisited():
     print("Probably normal:")
     examples = ["energieleverancier", "aanvalspositie", "gekkenwerk"]
     for example in examples:
-        print("\t", tokeniseAndDecode(example, tokeniser=robbert_tokenizer))
-        print("\t", tokeniseAndDecode(example, tokeniser=bte))
+        print("\t", prepare_tokenise_decode(example, tokeniser=robbert_tokenizer))
+        print("\t", prepare_tokenise_decode(example, tokeniser=bte))
 
     print("Probably abnormal:")
     examples = ["efficiëntie", "oriëntatie", "beëindigen"]
     for example in examples:
-        print("\t", tokeniseAndDecode(example, tokeniser=robbert_tokenizer))
-        print("\t", tokeniseAndDecode(example, tokeniser=bte))
+        print("\t", prepare_tokenise_decode(example, tokeniser=robbert_tokenizer))
+        print("\t", prepare_tokenise_decode(example, tokeniser=bte))
 
-    print("Fixed:")
-    bte = BTE(BteInitConfig(bytebased=ByteBasedMode.VOCAB_TO_CHARS))
-    for example in examples:
-        print("\t", tokeniseAndDecode(example, tokeniser=bte))
+    # print("Fixed:")
+    # bte = BTE(BteInitConfig(bytebased=ByteBasedMode.VOCAB_TO_CHARS))
+    # for example in examples:
+    #     print("\t", prepare_tokenise_decode(example, tokeniser=bte))
 
 
 def huggingFaceByteAlphabet():
@@ -214,6 +213,8 @@ def doubleCollapse():
 
 
 def compareWithAndWithoutByteRemapping():
+    """This test was used when developing a precursor of TkTkT's PseudoByteMapping and is now deprecated."""
+    assert False
     from tst.experiments.knockout import assert_tokenisers_equal
 
     # bte1 = BTE(BteInitConfig(starting_from_bytechars=False))

@@ -80,28 +80,6 @@ class Merge:
         return all([len(part) >= minimum for part in self.parts])
 
 
-def undoByteMappingKeepMarker(text: str, marker: BoundaryMarker, has_padding=False):
-    byte_mapping = PseudoByteMapping()  # Maps spaces to spaces when decoding, which helps when handling merge strings.
-    marker_mapping = AddWordBoundary(marker)
-
-    # Take away the marker if there is one. You need to remove padding
-    if has_padding:
-        text = text.strip()
-    text_no_marker = marker_mapping.unsplit([text])
-    text_no_marker_no_bytes = byte_mapping.invert(text_no_marker)
-
-    # If there was a marker, you should add it back in.
-    if text != text_no_marker:  # There was a marker, and you should add it back in.
-        text_no_bytes = marker_mapping.split(text_no_marker_no_bytes)[0]
-    else:
-        text_no_bytes = text_no_marker_no_bytes
-
-    # Restore padding
-    if has_padding:
-        text_no_bytes = " " + text_no_bytes + " "
-    return text_no_bytes
-
-
 class MergeGraph:
     """
     Handles the relationships between BPE types and merges.
@@ -238,8 +216,7 @@ class MergeGraph:
     def rewire(self, type_to_rewire: str, new_merge: MergeOnDisk) -> Merge:
         if type_to_rewire not in self.vocab:
             raise ValueError(f"Type does not exist: {type_to_rewire}")
-
-        print("Rewiring", type_to_rewire, "to", new_merge)
+        # print("Rewiring", type_to_rewire, "to", new_merge)
 
         merge = self.merges_of[type_to_rewire][0]
         old_parts = merge.parts
@@ -369,20 +346,15 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
     LONGPART_THRESHOLD = 4
 
     def __init__(self, init_config: BteInitConfig,
-                 starting_vocab: Dict[str,int]=None, starting_mergelist: MergeList=None,
-
-                 boundary_marker: BoundaryMarker=RobertaSpaceMarker, unk_type: str=None,
-                 preprocessor: Preprocessor=None, normalisation: TextMapper=None,
+                 starting_vocab: Dict[str,int]=None, starting_mergelist: MergeList=None, unk_type: str=None,
+                 preprocessor: Preprocessor = None,
 
                  autorun_modes=True, holdout: Holdout=None, quiet=False):
         """
         :param autorun_modes: whether to actually run the given modes, or only set their segmentation function.
-        :param boundary_marker: Needed regardless of whether a preprocessor is defined or not.
-        :param normalisation: If no preprocessor is given, a pretokeniser will be imputed automatically given the boundary
-                              marker. The normalisation cannot be imputed in that case, and needs to be given explicitly.
         """
         self._config = init_config
-        self._boundary_marker = boundary_marker
+        self._has_run = False
         self._print = doPrint(not quiet, hesitate=True)
 
         # Training regime
@@ -397,20 +369,13 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
         self._do_prune_trivials = not self._config.keep_long_merges
         do_prune  = self._knockout_segmentation is not None
         do_anneal = self._anneal_segmentation is not None
-        self._name = "BTE" \
-                     + ("-knockout-" + RefMode.toLetter(self._config.knockout)) * do_prune \
-                     + ("-reify" * (self._config.reify != ReifyMode.NONE)) \
-                     + (f"_{self._config.iterations}it" if self._config.iterations > 0 else "") \
-                     + (f"_anneal-{RefMode.toLetter(self._config.anneal)}-{AnnealingTime.toLetter(self._config.when_to_anneal)}") * do_anneal \
-                     + (f"_{int(100*holdout.threshold)}-{int(100-100*holdout.threshold)}-holdout" if holdout is not None else "") \
-                     + "_keeptrivial" * self._config.keep_long_merges
 
         if holdout is None:
             holdout = Holdout(1.0)  # 100% of data goes to training.
         self._holdout = holdout
 
         # Graph
-        self._print("Instantiating", self._name, "...")
+        self._print("Instantiating", self.getName(), "...")
         self.merge_graph: MergeGraph                       = None
         self.merges_starting_with: Dict[str, MergeAsTuple] = None  # Will be synchronised with the graph
         if starting_vocab is None or starting_mergelist is None:
@@ -420,18 +385,15 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
         self._initialiseGraph(starting_vocab, starting_mergelist, quiet=quiet)
 
         # Finish by completing the TkTkT interface.
-        if preprocessor is None:  # Impute the preprocessor with everything we know.
-            preprocessor = Preprocessor(
-                uninvertible_mapping=normalisation,
-                splitter=BoundariesFromSpacesPretokeniser(marker=self._boundary_marker, byte_based=self._config.bytebased == ByteBasedMode.INPUT_TO_BYTES)
-            )
+        if preprocessor is None:  # TODO: This should perhaps be deprecated one day. It is a bad default preprocessor; it is just the one that was used in BPE-knockout's original work.
+            preprocessor = Preprocessor(splitter=BoundariesFromSpacesPretokeniser(marker=RobertaSpaceMarker, byte_based=True))
             self._default_preprocessor = True
         else:
             self._default_preprocessor = False
+        self._boundary_marker = preprocessor.getBoundaryMarker()
         super().__init__(preprocessor=preprocessor, vocab=self.merge_graph.vocab, unk_type=unk_type)
 
         # Run constrction
-        self._has_run = False
         if autorun_modes:
             self.runModes()
 
@@ -444,7 +406,16 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
         self._has_run = True
 
     def getName(self):
-        return self._name
+        if not self._has_run:
+            return "BTE"
+        else:
+            return "BTE" \
+                + ("-knockout-" + RefMode.toLetter(self._config.knockout)) * do_prune \
+                + ("-reify" * (self._config.reify != ReifyMode.NONE)) \
+                + (f"_{self._config.iterations}it" if self._config.iterations > 0 else "") \
+                + (f"_anneal-{RefMode.toLetter(self._config.anneal)}-{AnnealingTime.toLetter(self._config.when_to_anneal)}") * do_anneal \
+                + (f"_{int(100*holdout.threshold)}-{int(100-100*holdout.threshold)}-holdout" if holdout is not None else "") \
+                + "_keeptrivial" * self._config.keep_long_merges
 
     def _initialiseGraph(self, vocab: Dict[str, int], mergelist: MergeList, quiet: bool=True):
         self.merge_graph = MergeGraph(vocab, mergelist, quiet=quiet)
@@ -461,11 +432,6 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
         # Synchronise merge strings
         padded_merge_rules = self.merge_graph.getPaddedMerges()  # There's no use storing these in one big set/list aside from merges_starting_with, since they're tuples and hence don't have a reference.
         self.merges_starting_with = {t: [] for t in self.merge_graph.vocab}
-
-        if self._config.bytebased == ByteBasedMode.VOCAB_TO_CHARS:
-            padded_merge_rules = [(tup[0], undoByteMappingKeepMarker(tup[1], self._boundary_marker, has_padding=True), undoByteMappingKeepMarker(tup[2], self._boundary_marker, has_padding=True))
-                                  for tup in padded_merge_rules]
-            self.merges_starting_with = {undoByteMappingKeepMarker(t, self._boundary_marker, has_padding=False): [] for t in self.merge_graph.vocab}
 
         for tup in padded_merge_rules:
             head = tup[1][1:-1].split(" ")[0]
@@ -670,7 +636,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
         for obj in self._holdout(morphologyGenerator(verbose=self._print.verbose), train=True):
             lemma = obj.word
             weight = weights.get(lemma, 1)
-            log(lemma)
+            # log(lemma)
 
             # Get morphological split
             reference_segmentation = " ".join(self._knockout_segmentation(obj))
@@ -693,18 +659,19 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
             indices_that_shouldve_never_merged = {index//2 for index in ref_split_indices - bpe_split_indices}  # In an ideal tokeniser, subtracting the BPE split positions should result in an empty set. When it doesn't, BPE is missing split positions, i.e., it merged too many.
 
             # Blame the merges that caused these indices to contract.
-            log("\t", reference_segmentation, "->", bpe_segmentation)
-            log("\t", merge_ids)
+            # log("\t", reference_segmentation, "->", bpe_segmentation)
+            # log("\t", merge_ids)
             merge_ids_seen = set()
             for merge_id in merge_ids.values():
                 if blame_tuples_once and merge_id in merge_ids_seen:
                     continue
                 merge_ids_seen.add(merge_id)
                 total[merge_id] += weight
+
             merge_ids_seen = set()
             for index in indices_that_shouldve_never_merged:
-                merge_id = merge_ids[index]
-                log("\t", f"Blamed: space after '{reference_segmentation.replace(' ', '')[index]}' merged by", merge_lookup[merge_id])
+                merge_id = merge_ids[index]  # This will error if the word contains a space, I think.
+                # log("\t", f"Blamed: space after '{reference_segmentation.replace(' ', '')[index]}' merged by", merge_lookup[merge_id])
                 if blame_tuples_once and merge_id in merge_ids_seen:
                     continue
                 merge_ids_seen.add(merge_id)
@@ -901,6 +868,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
             # --- KNOCKOUT PHASE ---
             removed_merges = self._prune()
             needs_final_knockout = False
+            self._print(f"Knocked out {len(removed_merges)} merges.")
 
             if END_IF_NO_MORE_DELETIONS and not removed_merges:
                 self._print("Early stop: no merges knocked out.")
@@ -916,6 +884,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
             all_disqualified_merges.update(" ".join(m.parts) for m in removed_merges)
             applied_merges = self._reify(all_disqualified_merges)
             needs_final_knockout = len(applied_merges) > 0
+            self._print(f"Repaired or reified {len(applied_merges)} merges.")
 
             if END_IF_NO_MORE_ADDITIONS and not applied_merges:
                 self._print("Early stop: no new sub-merges available that weren't knocked out before, nor that exist below their triplet(s).")
@@ -982,7 +951,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
 
             # If the tokens are not as dictated by the merge that is supposed to concatenate them, it needs fixing.
             if limited_tokens != m.parts:
-                print(f"Found divergent triplet: expected {m.parts} but got {limited_tokens}")
+                # self._print(f"Found divergent triplet: expected {m.parts} but got {limited_tokens}")
                 new_merges.add(self.merge_graph.rewire(typ, limited_tokens))
 
         if not self._config.reify.does_link():
@@ -1006,7 +975,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
         #           - If yes, replace it in the triplet. Not because the triplet results in a different token with or without it, but rather because right now it is preventing the triplet from being applied at all.
         #           - If not, don't do anything (the triplet stays a triplet like vanilla BPE-knockout, and will steal a fraction of all pairs that would go to the merge).
         # Pairs are sorted by how many triplets they appear in.
-        for merge_string, triplets_this_appears_in in tqdm(sorted(suggested_merge_strings.items(), key=lambda t: len(t[1]), reverse=True), desc="REIFICATION", disable=not self._print.verbose):
+        for merge_string, triplets_this_appears_in in tqdm(sorted(suggested_merge_strings.items(), key=lambda t: len(t[1]), reverse=True), desc="REIFYING SUGGESTIONS", disable=not self._print.verbose):
             parts = merge_string.split()
             subtype = "".join(parts)
 
@@ -1113,8 +1082,6 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
         # Convert enums from string to object
         metadata["knockout"]  = RefMode(metadata["knockout"])
         metadata["anneal"]    = RefMode(metadata["anneal"])
-        metadata["bytebased"] = ByteBasedMode(metadata["bytebased"])
-        metadata["marker"]["location"] = BoundaryMarkerLocation(metadata["marker"]["location"])
 
         # At this point, all data have been read properly and we can start using them.
         if metadata["custom-preprocessor"] and preprocessor is None:  # All other configurations are allowed: in particular, you can overwrite the default preprocessor if you want.
@@ -1122,7 +1089,6 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
 
         bte = BTE(init_config=dataclassFromDictionary(BteInitConfig, metadata),  # Extract all relevant fields from the metadata dictionary to build the init config.
                   preprocessor=preprocessor,
-                  boundary_marker=dataclassFromDictionary(BoundaryMarker, metadata["marker"]),
                   starting_vocab=tokeniser_data["types"],
                   starting_mergelist=tokeniser_data["merges"],
                   holdout=Holdout(train_fraction=metadata["holdout"], seed=metadata["seed"]),
@@ -1151,11 +1117,6 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
             },
             "init-metadata": dataclasses.asdict(self._config) | \
                 {
-                    "marker": {
-                        "substitute": self._boundary_marker.substitute,
-                        "detached": self._boundary_marker.detached,
-                        "location": self._boundary_marker.location
-                    },
                     "holdout": self._holdout.threshold,
                     "seed": self._holdout.seed,
                     "has-run": self._has_run,
