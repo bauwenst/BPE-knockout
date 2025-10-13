@@ -9,7 +9,7 @@ def test_basic():
     Can you segment things with it?
     """
     with KnockoutDataConfiguration(setupDutch()):
-        bte_knockout = BTE(BteInitConfig(knockout=RefMode.MORPHEMIC), quiet=False)
+        bte_knockout = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC)), quiet=False)
         # print(bte_knockout.getBadOldMerges(relative_blame_threshold=0.5))
 
     print(bte_knockout.merge_graph.getRawMerges())
@@ -22,7 +22,7 @@ def test_iterative():
     Does the iterative implementation work?
     """
     with KnockoutDataConfiguration(setupDutch()):
-        bte_knockout = BTE(BteInitConfig(knockout=RefMode.MORPHEMIC, reify=ReifyMode.FIX_AND_LINK_AND_MAKE, iterations=3), quiet=False)
+        bte_knockout = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC), reify=ReifyMode.FIX_AND_LINK_AND_MAKE, iterations=3), quiet=False)
 
     print(bte_knockout.getVocabSize())
     print(bte_knockout.prepareAndTokenise(" Deze bruidsjurk is zo mooi geconserveerd!"))

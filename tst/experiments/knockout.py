@@ -1,28 +1,30 @@
+"""
+FIXME: Every occurrence of intrinsicEvaluation should be replaced by TkTkT's morphological evaluation pipeline.
+"""
+from tst.preamble import *
+from tst.tokenisation.robbert_tokenizer import robbert_tokenizer, getMergeList_RobBERT
+
 import math
 import scipy
 
-from tktkt.interfaces.tokeniser import Tokeniser
-from tktkt.util.printing import PrintTable, wprint, lprint
+from tktkt.interfaces.tokeniser import Tokeniser, prepare_tokenise_decode
 from tktkt.util.timing import timeit
-from tktkt.evaluation.morphological import intrinsicEvaluation, ConfusionMatrix, compareSplits_cursors, morphologyVersusTokenisation, TokeniserEvaluation, tokeniseAndDecode
+from tktkt.evaluation.morphological import ConfusionMatrix, compareSplits_cursors
 from tktkt.models.huggingface.wrapper import HuggingFaceTokeniser
+from tktkt.factories.evaluation import evaluateTokeniserOnMorphology
 
 from fiject import *  # Fiject project found at https://github.com/bauwenst/fiject
 from fiject.visuals.tables import ColumnStyle, Table, DeltaMode
 
 from bpe_knockout.knockout.core import *
 from bpe_knockout.project.config import *
-from bpe_knockout.project.paths import PATH_DATA_TEMP
 from bpe_knockout.datahandlers.wordfiles import ACCENTS
-
-from tst.preamble import *
-from tst.tokenisation.robbert_tokenizer import robbert_tokenizer, getMergeList_RobBERT
 
 
 print("Loading tests...")
-untrained_bte = BTE(BteInitConfig(), quiet=True)
+untrained_bte = BTE(BTEConfig(), quiet=True)
 # modes_to_test = [RefMode.MORPHEMIC, RefMode.LEXEMIC]  # Thesis, not paper.
-modes_to_test = [RefMode.MORPHEMIC]
+modes_to_test = [ReferenceMode.MORPHEMIC]
 def getAllConfigs():  # In a function to protect against imputation if these are never needed.
     return [setupEnglish(), setupGerman(), setupDutch()]
 
@@ -40,8 +42,8 @@ def assert_tokenisers_equal(tokeniser1=robbert_tokenizer, tokeniser2=untrained_b
         total += 1
         lemma = obj.word
 
-        tokens1 = tokeniseAndDecode(lemma, tokeniser=tokeniser1)
-        tokens2 = tokeniseAndDecode(lemma, tokeniser=tokeniser2)
+        tokens1 = prepare_tokenise_decode(lemma, tokeniser=tokeniser1, preprocessor=tokeniser1.preprocessor)
+        tokens2 = prepare_tokenise_decode(lemma, tokeniser=tokeniser2, preprocessor=tokeniser2.preprocessor)
         # if any(["Ã" in t or "Â" in t or "'" in t
         #         for t in robbert_tokenizer.tokenize(lemma)]):  # Weird Latin-1 or pretokeniser stuff I don't want to deal with. As long as 99.9% of all words are segmented the same, it's fine by me.
         #     # print("Unicode might cause assertion failure:", lemma)
@@ -58,23 +60,23 @@ def assert_tokenisers_equal(tokeniser1=robbert_tokenizer, tokeniser2=untrained_b
 
 
 def print_knockout():
-    bte = BTE(BteInitConfig(knockout=RefMode.LEXEMIC), autorun_modes=False)
+    bte = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.ONLY_FREE_MORPHS)), autorun_modes=False)
 
-    blame_ratios = bte.getBadOldMerges()
+    summaries = bte._rankOldMergesForKnockout()
     table = PrintTable()
-    for ratio, total, merge in sorted(blame_ratios, key=lambda t: (t[1],t[0])):
-        table.print(merge.__repr__(), "caused an incorrect merge", f"{round(100*ratio,2)}% of the", f"{total} times it was applied.")
-    print("Deleted:", len(blame_ratios))
+    for summary in sorted(summaries, key=lambda t: (t[1],t[0])):
+        table.print(summary.merge.__repr__(), "caused an incorrect merge", f"{round(100*summary.blame_ratio,2)}% of the", f"{summary.n_applications} times it was applied.")
+    print("Deleted:", len(summaries))
 
 
 def print_annealing():
-    ratios = untrained_bte.getGoodNewMerges()
+    summaries = untrained_bte._rankNewMergesForAnnealing()
 
     table = PrintTable()
-    for ratio, total, merge in sorted(ratios, key=lambda t: (t[1],t[0])):
-        table.print(merge, "cured a missing merge", f"{round(100*ratio,2)}% of the", f"{total} times it was applied.")
+    for summary in sorted(summaries, key=lambda t: (t[1],t[0])):
+        table.print(summary.merge, "cured a missing merge", f"{round(100*summary.amenability_ratio,2)}% of the", f"{summary.n_potential_applications} times it was applied.")
 
-    print("Cured:", len(ratios))
+    print("Cured:", len(summaries))
 
 
 def visualise():
@@ -84,7 +86,7 @@ def visualise():
 
 
 def test_save_and_load():
-    bte = BTE(init_config=BteInitConfig(knockout=RefMode.MORPHEMIC), autorun_modes=True)
+    bte = BTE(init_config=BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC)), autorun_modes=True)
     print(bte.getVocabSize())
     out_path = bte.save(PATH_DATA_TEMP)
 
@@ -98,7 +100,7 @@ def time_iterators():
     iterating with different bodies automatically displays the time taken to
     generate the iterator + whatever time the body takes.
     """
-    bte_tokenizer = BTE(BteInitConfig())
+    bte_tokenizer = BTE(BTEConfig())
     print()
 
     # Time to generate objects: 13s
@@ -107,7 +109,7 @@ def time_iterators():
 
     # Time to generate objects + tokenise fast: 21s - 13s = 8s
     for morpho in morphologyGenerator():
-        " ".join(tokeniseAndDecode(morpho.word, tokeniser=robbert_tokenizer)).strip()
+        " ".join(prepare_tokenise_decode(morpho.word, tokeniser=robbert_tokenizer)).strip()
 
     # Time to generate objects + get morph split: 24s - 13s = 11s
     for morpho in morphologyGenerator():
@@ -115,32 +117,31 @@ def time_iterators():
 
     # Time to generate objects + tokenise slow: 1m35s - 13s = 1m22s  (more than 10x difference with fast tokenizer)
     for morpho in morphologyGenerator():
-        " ".join(tokeniseAndDecode(morpho.word, tokeniser=bte_tokenizer)).strip()
+        " ".join(prepare_tokenise_decode(morpho.word, tokeniser=bte_tokenizer, preprocessor=bte_tokenizer.preprocessor)).strip()
 
     # Time to generate objects + get morph split + tokenise fast: 34s
     for morpho in morphologyGenerator():
         morpho.segment()
-        " ".join(tokeniseAndDecode(morpho.word, tokeniser=robbert_tokenizer)).strip()
+        " ".join(prepare_tokenise_decode(morpho.word, tokeniser=robbert_tokenizer)).strip()
 
 
 def test_onlyTrivials():
-    table = Table("bte-intrinsic-onlytrivials", caching=CacheMode.NONE)
+    longpart = 4
+    table = Table(f"bte-intrinsic-onlytrivials-{longpart}", caching=CacheMode.NONE)
 
     if table.needs_computation:
-        bte = BTE(BteInitConfig())
+        bte = BTE(BTEConfig())
 
         # Find trivial merges
-        trivials = [merge for merge in bte.merge_graph.merges if merge.isTrivial(minimum=BTE.LONGPART_THRESHOLD)]
+        trivials = [merge for merge in bte.merge_graph.merges if merge.isTrivial(minimum=longpart)]
         for trivial in trivials:
             bte.merge_graph.knockout(trivial.childType())
 
         # Evaluate
-        results = intrinsicEvaluation([bte], do_whole_word=True,
-                                      reweighting_function=lambda x: x)
+        results = evaluateTokeniserOnMorphology("onlytrivials", Pℛ𝒪𝒥ℰ𝒞𝒯.config.morphologies, bte, has_freemorphsplit=True)  # reweighting_function=lambda x: x
         addEvaluationToTable(table, results,
                              row_prefix=["Dutch", "linear test"], row_names=["nolong"])
-        results = intrinsicEvaluation([bte], do_whole_word=True,
-                                      reweighting_function=lambda x: 1 + math.log10(x))
+        results = evaluateTokeniserOnMorphology("onlytrivials", Pℛ𝒪𝒥ℰ𝒞𝒯.config.morphologies, bte, has_freemorphsplit=True)  # reweighting_function=lambda x: 1 + math.log10(x))
         addEvaluationToTable(table, results,
                              row_prefix=["Dutch", "log test"], row_names=["nolong"])
 
@@ -163,7 +164,7 @@ def test_iterative():
                                          row_names=[experiment_names[-1]])
 
             # Do reification
-            bte = BTE(BteInitConfig(knockout=RefMode.MORPHEMIC, reify=ReifyMode.ALL, iterations=MAX_ITERATIONS),
+            bte = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC), reify=ReifyMode.FIX_AND_LINK_AND_MAKE, iterations=MAX_ITERATIONS),
                       autorun_modes=False, holdout=holdout)
             bte._iterative(iterations=MAX_ITERATIONS, evaluator=ForIntermediateTests())
 
@@ -275,18 +276,18 @@ def main_morphsPerWord_Multilingual(include_monomorphemic=True):
 @timeit
 def main_tokenDiffs_Monolingual():
     for mode in modes_to_test:
-        histo = Histogram(f"knockout_tokendiffs_{RefMode.toLetter(mode)}_{Pℛ𝒪𝒥ℰ𝒞𝒯.config.langTag()}", caching=CacheMode.IF_MISSING)
+        histo = Histogram(f"knockout_tokendiffs_{ReferenceMode.toLetter(mode)}_{Pℛ𝒪𝒥ℰ𝒞𝒯.config.langTag()}", caching=CacheMode.IF_MISSING)
         if histo.needs_computation:
             # TODO: You should kinda treat the confusion matrix as a figure.
             #       Will allow caching and re-displaying when loading from cache.
             cm = ConfusionMatrix()
-            bpe = BTE(BteInitConfig())
-            bte = BTE(BteInitConfig(knockout=mode))
+            bpe = BTE(BTEConfig())
+            bte = BTE(BTEConfig(knockout=KnockoutConfig(reference=mode)))
             for obj in morphologyGenerator():
                 lemma = obj.word
 
-                tokens_bpe = tokeniseAndDecode(lemma, tokeniser=bpe)
-                tokens_bte = tokeniseAndDecode(lemma, tokeniser=bte)
+                tokens_bpe = prepare_tokenise_decode(lemma, tokeniser=bpe)
+                tokens_bte = prepare_tokenise_decode(lemma, tokeniser=bte)
 
                 histo.add(len(tokens_bte) - len(tokens_bpe))
                 tp, predicted, relevant, total = compareSplits_cursors(candidate=" ".join(tokens_bte),
@@ -314,12 +315,12 @@ def main_knockedMerges_Multilingual():
         with KnockoutDataConfiguration(language):
             language_object = langcodes.find(language.language_name)
             for mode in modes_to_test:
-                ids     =      Histogram(f"knockout-ids_{RefMode.toLetter(mode)}-mode_{language_object.to_tag()}",     caching=CacheMode.IF_MISSING)
-                lengths = MultiHistogram(f"knockout-lengths_{RefMode.toLetter(mode)}-mode_{language_object.to_tag()}", caching=CacheMode.IF_MISSING)
+                ids     =      Histogram(f"knockout-ids_{ReferenceMode.toLetter(mode)}-mode_{language_object.to_tag()}", caching=CacheMode.IF_MISSING)
+                lengths = MultiHistogram(f"knockout-lengths_{ReferenceMode.toLetter(mode)}-mode_{language_object.to_tag()}", caching=CacheMode.IF_MISSING)
 
                 if ids.needs_computation or lengths.needs_computation:
-                    bte = BTE(BteInitConfig(knockout=mode), autorun_modes=False)
-                    blamed_merges = bte.getBadOldMerges()
+                    bte = BTE(BTEConfig(knockout=KnockoutConfig(reference=mode)), autorun_modes=False)
+                    blamed_merges = bte._rankOldMergesForKnockout()
                     for _,_, merge in blamed_merges:
                         if ids.needs_computation:
                             ids.add(merge.priority)
@@ -375,17 +376,17 @@ def main_effectiveDropoutRate_Multilingual():
     if table.needs_computation:
         for language in getAllConfigs():
             with KnockoutDataConfiguration(language):
-                bte = BTE(BteInitConfig(knockout=RefMode.MORPHEMIC), autorun_modes=False)
+                bte = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC)), autorun_modes=False)
 
                 total_merges               = 0
                 total_dropped_merges       = 0
                 total_applications         = 0
                 total_dropped_applications = 0
-                for R, N, m in bte.getBadOldMerges(relative_blame_threshold=0.0):
-                    total_applications += N
+                for merge in bte._rankOldMergesForKnockout():
+                    total_applications += merge.n_applications
                     total_merges += 1
-                    if R >= BTE.KNOCKOUT_REL_THRESHOLD:
-                        total_dropped_applications += N
+                    if merge.blame_ratio >= bte._config.knockout.relative_blame_minimum:
+                        total_dropped_applications += merge.n_applications
                         total_dropped_merges += 1
 
                 p_eff_app = total_dropped_applications / total_applications
@@ -490,8 +491,8 @@ def main_intrinsicMultilingual():
                 # for mode in modes_to_test:  # Technically the user should expect this for loop, but no user would realistically want to test multiple training modes across different languages.
                 mode = modes_to_test[0]
 
-                bte_knockout          = BTE(BteInitConfig(knockout=mode))
-                bte_knockout_holdout  = BTE(BteInitConfig(knockout=mode), holdout=holdout)
+                bte_knockout          = BTE(BTEConfig(knockout=KnockoutConfig(reference=mode)))
+                bte_knockout_holdout  = BTE(BTEConfig(knockout=KnockoutConfig(reference=mode)), holdout=holdout)
                 # bte_knockout_keeplong = BTE(BteInitConfig(knockout=mode, keep_long_merges=True))
                 # bte_knockout_weighted = BTE(BteInitConfig(knockout=mode, weighted_training=True))
 
@@ -537,7 +538,7 @@ def main_intrinsicHoldout_Monolingual():
         for f in reversed(HOLDOUTS):
             holdout = Holdout(f)
             results = intrinsicEvaluation(
-                [BTE(BteInitConfig(knockout=mode, keep_long_merges=False), holdout=holdout)], do_whole_word=True,
+                [BTE(BTEConfig(knockout=KnockoutConfig(reference=mode)), holdout=holdout)], do_whole_word=True,
                 reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=holdout
             )
             addEvaluationToTable(table, results,
@@ -549,6 +550,8 @@ def main_intrinsicHoldout_Monolingual():
 
 @timeit
 def main_intrinsicWeightedTraining_Monolingual():
+    from bpe_knockout.knockout.inspection import BTE_NoTrivialKnockout
+
     table = Table(f"bte-intrinsic-weightedtraining_{Pℛ𝒪𝒥ℰ𝒞𝒯.config.langTag()}", caching=CacheMode.IF_MISSING)
     if table.needs_computation:
         old_config = Pℛ𝒪𝒥ℰ𝒞𝒯.config
@@ -557,12 +560,12 @@ def main_intrinsicWeightedTraining_Monolingual():
         # for mode in modes_to_test:
         mode = modes_to_test[0]
 
-        for keeplong in [False, True]:
+        for cls in [BTE, BTE_NoTrivialKnockout]:
             tokenisers = []
             Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter = lambda x: x
-            tokenisers.append(BTE(BteInitConfig(knockout=mode, weighted_training=True, keep_long_merges=keeplong)))
+            tokenisers.append(cls(BTEConfig(knockout=KnockoutConfig(reference=mode), weighted_training=True)))
             Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter = lambda x: 1 + math.log10(x)
-            tokenisers.append(BTE(BteInitConfig(knockout=mode, weighted_training=True, keep_long_merges=keeplong)))
+            tokenisers.append(cls(BTEConfig(knockout=KnockoutConfig(reference=mode), weighted_training=True)))
 
             results_idweighted = intrinsicEvaluation(
                 tokenisers, do_whole_word=True,
@@ -573,7 +576,7 @@ def main_intrinsicWeightedTraining_Monolingual():
                 reweighting_function=lambda x: 1 + math.log10(x)
             )
 
-            if keeplong:
+            if cls == BTE_NoTrivialKnockout:
                 name = "keep long"
             else:
                 name = "normal"
@@ -614,7 +617,7 @@ def main_deleteRandomMerges_Monolingual():
             # job_id[0] += 1
 
             # Construct tokeniser
-            bte = BTE(BteInitConfig(), quiet=True)
+            bte = BTE(BTEConfig(), quiet=True)
             merges = list(map(lambda i: bte.merge_graph.merges[i],
                               merge_indices))  # The list() is important here! You must do all your array accesses BEFORE altering the array!
             # for merge_idx in tqdm(merge_indices, desc="RANDOMLY PRUNING GRAPH"):
@@ -638,7 +641,7 @@ def main_deleteRandomMerges_Monolingual():
         # Generate all random indices BEFORE doing the experiments. This way, there are no race conditions due to
         # threads calling the pseudo-RNG in unpredictable order. Now the code stays reproducible.
         rng = npr.default_rng(seed=0)
-        amount_of_merges = len(BTE(BteInitConfig()).merge_graph.merges)
+        amount_of_merges = len(BTE(BTEConfig()).merge_graph.merges)
         all_index_lists = [tuple(rng.choice(amount_of_merges, size=int(amount_of_merges * p/100), replace=False))
                            for p in DELETION_PERCENTAGES
                            for _ in range(SAMPLES if p != 0 else 1)]
@@ -692,7 +695,7 @@ def main_deleteLastMerges_Monolingual():
     """
     graph = LineGraph(name=f"delete-last-types_{Pℛ𝒪𝒥ℰ𝒞𝒯.config.langTag()}", caching=CacheMode.IF_MISSING)
     if graph.needs_computation:
-        bte = BTE(BteInitConfig(), quiet=True, autorun_modes=False)
+        bte = BTE(BTEConfig(), quiet=True, autorun_modes=False)
         initial_merges = len(bte.merge_graph.merges)
         results = []
 
@@ -741,7 +744,7 @@ def main_deleteLastLeaves_Monolingual():
 
     g1 = LineGraph("leaf-percentages", caching=CacheMode.IF_MISSING)
     if g1.needs_computation:
-        bte = BTE(BteInitConfig(), quiet=True)
+        bte = BTE(BTEConfig(), quiet=True)
         amount_of_merges = len(bte.merge_graph.merges)
 
         for p in PERCENTAGES:
@@ -781,7 +784,7 @@ def main_deleteLastLeaves_Monolingual():
     if g2.needs_computation:
         for p in DELETION_PERCENTAGES:
             # Re-initialise a new BTE each time because I'm scared of re-using one (leaf status changes with knockout)
-            bte = BTE(BteInitConfig(), quiet=True)
+            bte = BTE(BTEConfig(), quiet=True)
             amount_of_merges = len(bte.merge_graph.merges)
             to_knock_out = int(amount_of_merges * p/100)
             wprint(f"\tDeleting {to_knock_out} merges to get to {p}% deletion...")
@@ -869,20 +872,19 @@ def main_blameThreshold_Monolingual():
     g2 = LineGraph("blame-threshold-evaluation", caching=CacheMode.IF_MISSING)
     if g1.needs_computation or g2.needs_computation:
         # We can get a rating for ALL merges by requesting to return all merges with a blame above 0.
-        bte = BTE(BteInitConfig(knockout=RefMode.MORPHEMIC), autorun_modes=False, quiet=True)
-        all_merges = bte.getBadOldMerges(relative_blame_threshold=0)
+        bte = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC)), autorun_modes=False, quiet=True)
+        all_merges = bte._rankOldMergesForKnockout()
 
         # And now we just filter them out manually.
         for minimal_blame in RATIOS:
-            relevant_merges = [merge for ratio, _, merge in all_merges
-                               if ratio >= minimal_blame/100]
+            relevant_merges = [m.merge for m in all_merges if m.blame_ratio >= minimal_blame/100]
 
             if g1.needs_computation:
                 g1.add("BTE", minimal_blame, len(relevant_merges))
 
             if g2.needs_computation:
                 # Construct tokeniser
-                bte = BTE(BteInitConfig(knockout=RefMode.MORPHEMIC), autorun_modes=False, quiet=True)
+                bte = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC)), autorun_modes=False, quiet=True)
                 for merge in relevant_merges:
                     bte.merge_graph.knockout(merge.childType())
                 bte._syncWithGraph()

@@ -4,25 +4,25 @@ from enum import Enum
 from modest.interfaces.morphologies import MorphologyVisitor, FreeMorphSplit, MorphSplit
 
 
-class RefMode(str, Enum):  # The str parent allows JSON serialisation: https://stackoverflow.com/a/51976841/9352077
+class ReferenceMode(str, Enum):  # The str parent allows JSON serialisation: https://stackoverflow.com/a/51976841/9352077
     NONE      = 1
     MORPHEMIC = 2
-    LEXEMIC   = 3
+    ONLY_FREE_MORPHS = 3
 
-    @staticmethod
-    def toMethod(mode: "RefMode") -> MorphologyVisitor:
-        if mode == RefMode.LEXEMIC:
+    def toMethod(self) -> MorphologyVisitor:
+        if   self == ReferenceMode.ONLY_FREE_MORPHS:
             return FreeMorphSplit()
-        elif mode == RefMode.MORPHEMIC:
+        elif self == ReferenceMode.MORPHEMIC:
             return MorphSplit()
+        else:
+            raise NotImplementedError()
 
-    @staticmethod
-    def toLetter(mode: "RefMode") -> str:
-        if mode == RefMode.LEXEMIC:
+    def toLetter(self) -> str:
+        if   self == ReferenceMode.ONLY_FREE_MORPHS:
             return "l"
-        elif mode == RefMode.MORPHEMIC:
+        elif self == ReferenceMode.MORPHEMIC:
             return "m"
-        elif mode == RefMode.NONE:
+        elif self == ReferenceMode.NONE:
             return ""
         else:
             raise NotImplementedError()
@@ -62,33 +62,40 @@ class AnnealingTime(str, Enum):
     AFTER  = 2
     BOTH   = 3
 
-    @staticmethod
-    def toLetter(mode: "AnnealingTime") -> str:
-        if   mode == AnnealingTime.BEFORE:
+    def toLetter(self) -> str:
+        if   self == AnnealingTime.BEFORE:
             return "before"
-        elif mode == AnnealingTime.AFTER:
+        elif self == AnnealingTime.AFTER:
             return "after"
-        elif mode == AnnealingTime.BOTH:
+        elif self == AnnealingTime.BOTH:
             return "surround"
         else:
             raise NotImplementedError()
 
 
 @dataclasses.dataclass
-class BteInitConfig:
-    """
-    :param keep_long_merges: whether to skip knockout for merges with relatively long parts (because they likely
-                             form compounds; these need to be removed from the vocab, but by not doing so, you can
-                             measure their effect on intrinsic evaluation metrics).
-    """
-    knockout: RefMode = RefMode.NONE
-    anneal:   RefMode = RefMode.NONE
-    reify:  ReifyMode = ReifyMode.NONE
+class KnockoutConfig:
+    reference: ReferenceMode = ReferenceMode.NONE
+    limit: int = 1_000_000
+    relative_blame_minimum: float = 0.5
+    blame_tuples_once: bool = False  # When computing blame on a merge with more than 2 tokens, each instance can either be seen as one application (True) or as the amount of spaces that are concatenated by it (False). For example: if a merge (a,b,c,d) takes place, 'True' counts it as 1 application, whilst 'False' counts as 3 applications.
+
+
+@dataclasses.dataclass
+class AnnealingConfig:
+    reference: ReferenceMode = ReferenceMode.NONE
+    when: AnnealingTime = AnnealingTime.BEFORE  # Only matters when annealing is set to something other than None.
+    limit: int = 1_000_000
+    absolute_application_minimum: int = 25     # A merge has to be applied at least this many times to be worth adding.
+    relative_amenability_minimum: float = 0.5  # A merge has to be applied without issue at least with this ratio.
+
+
+@dataclasses.dataclass
+class BTEConfig:
+    knockout:   KnockoutConfig = dataclasses.field(default_factory=KnockoutConfig)
+    annealing: AnnealingConfig = dataclasses.field(default_factory=AnnealingConfig)
+    reify: ReifyMode = ReifyMode.NONE
     iterations: int = 1
 
-    blame_tuples_once: bool = False  # When computing blame on a merge with more than 2 tokens, each instance can either be seen as one application (True) or as the amount of spaces that are concatenated by it (False). For example: if a merge (a,b,c,d) takes place, 'True' counts it as 1 application, whilst 'False' counts as 3 applications.
-    when_to_anneal: AnnealingTime = AnnealingTime.BEFORE  # Only matters when annealing is set to something other than None.
-
     # Legacy arguments that are not really relevant anymore.
-    keep_long_merges: bool = False   # Shown in my thesis to not be the essence of knockout.
     weighted_training: bool = False  # Shown in the paper to not really matter.

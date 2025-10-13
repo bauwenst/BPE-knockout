@@ -1,7 +1,34 @@
-from typing import List, Set, Tuple, Dict
-from tktkt.util.printing import lprint
+from .core import *
 
-from .core import BTE, Merge
+
+class BTE_NoTrivialKnockout(BTE):
+    """
+    BTE without knocking out trivial merges, which are merges where all parts are quite long and thus the merges are
+    likely compounds. The reason these are trivial is that if you have a subword like 'lighthouse', it likely came from a merge
+
+        light house -> lighthouse
+
+    and because the word "lighthouse" would contain the one occurrence of this merge, BPE-knockout can just undo that last
+    merge to memorise the correct answer. But this is not so interesting, because this knockout affects no other words,
+    and furthermore, perhaps it isn't a bad thing for a language model to have separate subwords for light, house and
+    lighthouse.
+
+    So, to isolate how much of the performance is gained just from memorising these trivial examples, we don't knock
+    them out and then see how much performance gain still applies.
+
+    (I show in my thesis that knockout's performance gain is indeed more than this.)
+    """
+
+    def __init__(self, init_config: BTEConfig, starting_vocab: dict[str,int], starting_mergelist: MergeList, preprocessor: Preprocessor, long_part_threshold: int, holdout: Holdout=None):
+        super().__init__(init_config=init_config, starting_vocab=starting_vocab, starting_mergelist=starting_mergelist, preprocessor=preprocessor, holdout=holdout)
+        self._long_part_threshold = long_part_threshold
+
+    def _rankOldMergesForKnockout(self, blame_tuples_once: bool=False) -> List[MergeBlame]:
+        filtered_results = super()._rankOldMergesForKnockout(blame_tuples_once)
+        return [m for m in filtered_results if not m.merge.isTrivial(minimum=self._long_part_threshold)]
+
+    def getName(self):
+        return super().getName() + "_keeptrivial"
 
 
 class BPEngineer:

@@ -5,21 +5,22 @@ rules using its two parents. This involves two additional problems solved here:
     2. A way of deciding which types to knock out of the vocabulary. I came up with "blame ratio", see below.
 
 FIXME: Currently, there are really a lot of training methods in the tokeniser class. This is inappropriate.
+       And also, why would users want to have the morphological data available if you can just save the final tokeniser?
 
 TODO:
     - If you combine annealing and knockout, it could be an idea to have the first be based on a
       heuristic, and have the second iterate as many times as the first. I.e.: if knockout removes 100 merges, anneal
       then adds 100 merges, ending up with the same vocab size. (Or just limit annealing by a maximal vocab size.)
 """
-from typing import Dict, Tuple, Set, Any, Union
+from typing import Dict, Tuple, Set, Union
+from dataclasses import dataclass
 from collections import Counter
 from pathlib import Path
 
-import warnings
 import re
 import json
-import dataclasses
-
+import dacite
+import warnings
 from tqdm.auto import tqdm
 
 import tktkt  # To have access to tktkt.__version__
@@ -31,9 +32,7 @@ from tktkt.util.timing import datetimeDashed
 from tktkt.interfaces.tokeniser import TokeniserWithVocabDict
 from tktkt.interfaces.huggingface import TktktToHuggingFace
 from tktkt.wrappers.multiplexing import SuccessionalTokeniser
-from tktkt.preparation.boundaries import BoundaryMarker, BoundaryMarkerLocation
-from tktkt.factories.preprocessing import Preprocessor, BoundariesFromSpacesPretokeniser, RobertaSpaceMarker, \
-    TextMapper, AddWordBoundary, PseudoByteMapping
+from tktkt.factories.preprocessing import Preprocessor, BoundariesFromSpacesPretokeniser, RobertaSpaceMarker
 
 from .. import __version__
 from ..datahandlers.holdout import Holdout
@@ -46,7 +45,7 @@ MergeList   = List[MergeOnDisk]
 MergeAsTuple = Tuple[int, str, str]  # (priority, "a b c", "abc")
 
 
-@dataclasses.dataclass
+@dataclass
 class Merge:
     priority: int
     parts: List[str]
@@ -331,7 +330,36 @@ class MergeGraph:
         print("Parents and their spouses:", len(parental_spouses), parental_spouses)
 
 
-# TODO: Should just use the cursor system I have in TkTkT.
+@dataclass
+class MergeBlame:
+    merge: Merge
+    n_bad_applications: int
+    n_applications: int
+
+    @property
+    def blame_ratio(self) -> float:
+        return self.n_bad_applications / self.n_applications if self.n_applications != 0 else 0
+
+    def __lt__(self, other: "MergeBlame"):
+        return self.blame_ratio < other.blame_ratio
+
+
+@dataclass
+class MergeAmenability:
+    merge: str
+    n_good_potential_applications: int
+    n_potential_applications: int
+
+    @property
+    def amenability_ratio(self) -> float:
+        return self.n_good_potential_applications / self.n_potential_applications
+
+    def __lt__(self, other: "MergeAmenability"):
+        return self.n_good_potential_applications < other.n_good_potential_applications \
+            or             self.amenability_ratio < other.amenability_ratio
+
+
+# TODO: Should just use the cursor system I have in TkTkT. Might make blame computation much faster.
 SPLIT_MARKER = "|"
 SPLIT_MARKER_RE = re.compile(re.escape(SPLIT_MARKER))
 
@@ -341,11 +369,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
     Byte-tuple encoding (BTE): implementation of BPE that can deal with merges of more than 2 parts.
     """
 
-    KNOCKOUT_REL_THRESHOLD = 0.5
-    ANNEAL_ABS_THRESHOLD   = 25
-    LONGPART_THRESHOLD = 4
-
-    def __init__(self, init_config: BteInitConfig,
+    def __init__(self, init_config: BTEConfig,
                  starting_vocab: Dict[str,int]=None, starting_mergelist: MergeList=None, unk_type: str=None,
                  preprocessor: Preprocessor = None,
 
@@ -358,15 +382,11 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
         self._print = doPrint(not quiet, hesitate=True)
 
         # Training regime
-        if self._config.knockout == RefMode.NONE:
+        if self._config.knockout == ReferenceMode.NONE:
             if self._config.reify == ReifyMode.NONE:  # You're only here for vanilla BPE or perhaps annealing.
                 self._config.iterations = 0
             else:
                 raise ValueError(f"Cannot do reification ({self._config.reify}) without applying knockout first.")
-
-        self._knockout_segmentation = RefMode.toMethod(self._config.knockout)
-        self._anneal_segmentation   = RefMode.toMethod(self._config.anneal)
-        self._do_prune_trivials = not self._config.keep_long_merges
 
         if holdout is None:
             holdout = Holdout(1.0)  # 100% of data goes to training.
@@ -407,15 +427,14 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
         if not self._has_run:
             return "BTE"
         else:
-            do_prune  = self._knockout_segmentation is not None
-            do_anneal = self._anneal_segmentation is not None
+            do_prune  = self._config.knockout.reference != ReferenceMode.NONE
+            do_anneal = self._config.annealing.reference != ReferenceMode.NONE
             return "BTE" \
-                + ("-knockout-" + RefMode.toLetter(self._config.knockout)) * do_prune \
+                + ("-knockout-" + self._config.knockout.reference.toLetter()) * do_prune \
                 + ("-reify" * (self._config.reify != ReifyMode.NONE)) \
                 + (f"_{self._config.iterations}it" if self._config.iterations > 0 else "") \
-                + (f"_anneal-{RefMode.toLetter(self._config.anneal)}-{AnnealingTime.toLetter(self._config.when_to_anneal)}") * do_anneal \
-                + (f"_{int(100*self._holdout.threshold)}-{int(100-100*self._holdout.threshold)}-holdout" if self._holdout is not None else "") \
-                + "_keeptrivial" * self._config.keep_long_merges
+                + (f"_anneal-{self._config.annealing.reference.toLetter()}-{self._config.annealing.when.toLetter()}") * do_anneal \
+                + (f"_{int(100*self._holdout.threshold)}-{int(100-100*self._holdout.threshold)}-holdout" if self._holdout is not None else "")
 
     def _initialiseGraph(self, vocab: Dict[str, int], mergelist: MergeList, quiet: bool=True):
         self.merge_graph = MergeGraph(vocab, mergelist, quiet=quiet)
@@ -439,9 +458,9 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
 
     def _prune(self) -> List[Merge]:
         self._print("Knockout...")
-        merges_to_remove = [m for _,_,m in self.getBadOldMerges(relative_blame_threshold=BTE.KNOCKOUT_REL_THRESHOLD,
-                                                                blame_tuples_once=self._config.blame_tuples_once,
-                                                                except_if_all_parts_longer_than=BTE.LONGPART_THRESHOLD if not self._do_prune_trivials else 100)]
+        merges_to_remove = [m.merge for m in self._rankOldMergesForKnockout(blame_tuples_once=self._config.knockout.blame_tuples_once)
+                            if m.blame_ratio >= self._config.knockout.relative_blame_minimum]
+        merges_to_remove = merges_to_remove[:self._config.knockout.limit]
         self._removeMerges(merges_to_remove)
         return merges_to_remove  # For diagnostic purposes
 
@@ -458,13 +477,18 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
 
     def _anneal(self):
         self._print("Annealing...")
-        merges_to_add = [m for _,_,m in self.getGoodNewMerges(absolute_threshold=BTE.ANNEAL_ABS_THRESHOLD)]
+        merges_to_add = [m.merge for m in self._rankNewMergesForAnnealing()
+                         if m.amenability_ratio >= self._config.annealing.relative_amenability_minimum and m.n_good_potential_applications >= self._config.annealing.absolute_application_minimum]
+        merges_to_add = merges_to_add[:self._config.annealing.limit]
         self._addMerges(merges_to_add)
         return merges_to_add  # For diagnostic purposes
 
     def _addMerges(self, merges_to_add: Iterable[str]):
         for merge_string in tqdm(merges_to_add, desc="ANNEALING GRAPH", disable=not self._print.verbose):
-            self.merge_graph.addArc(merge_string)
+            try:
+                self.merge_graph.addArc(merge_string)
+            except:
+                warn(f"Failed to add arcs for {merge_string} to BPE graph. Probably a missing atom.")
         self._syncWithGraph()
 
     def _initialTokens(self, pretoken: str) -> Tokens:
@@ -612,21 +636,16 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
 
         return tokens, merge_ids
 
-    def getBadOldMerges(self, relative_blame_threshold: float=0.5, blame_tuples_once: bool=False,
-                        except_if_all_parts_longer_than: int=100) -> List[Tuple[float,int,Merge]]:
+    def _rankOldMergesForKnockout(self, blame_tuples_once: bool=False) -> List[MergeBlame]:
         """
         Compares BPE tokenisation to morphological tokenisation, and records the amount of times each BPE merge is used as
-        well as the amount of times each merge makes a split disappear that the morphological tokenisation mandates.
-
-        All merges with blame fraction above the given threshold are returned.
-        The second threshold excludes merges with really long parts. A low threshold means that many merges are not
-        returned, and since the results of this method are used for knockout, a low threshold implies less pruning.
-        You shouldn't want that unless you want to play around with metrics.
+        well as the amount of times each merge makes a split disappear that the morphological segmentation mandates.
 
         Can be repeated before and after knockout; there will always be merges to blame.
         """
         log = doPrint(Pℛ𝒪𝒥ℰ𝒞𝒯.debug_prints)
 
+        reference = self._config.knockout.reference.toMethod()
         weights = lexiconWeights() if self._config.weighted_training else dict()
 
         merge_lookup = {m.priority: m for m in self.merge_graph.merges}
@@ -639,7 +658,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
             # log(lemma)
 
             # Get morphological split
-            reference_segmentation = " ".join(self._knockout_segmentation(obj))
+            reference_segmentation = " ".join(reference(obj))
             reference_segmentation = self._preprocessAlreadySegmentedString(reference_segmentation)
 
             # Get BPE split and the ID of the merge that caused a space to disappear at each index.
@@ -678,34 +697,33 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
                 blame[merge_id] += weight
 
         # Calculate ratios
-        blame_ratios = dict()
-        for merge_id in blame.keys():
-            blame_ratios[merge_id] = blame[merge_id]/total[merge_id] \
-                                     if total[merge_id] != 0 else 0  # Protect against DBZ.
+        # blame_ratios = dict()
+        # for merge_id in blame.keys():
+        #     blame_ratios[merge_id] = blame[merge_id]/total[merge_id] \
+        #                              if total[merge_id] != 0 else 0  # Protect against DBZ.
+        # filtered_results = [MergeBlame(merge=merge_lookup[merge_id], n_bad_applications=blame[merge_id], n_applications=total[merge_id]) for merge_id, ratio in blame_ratios.items()
+        #                     if ratio >= relative_blame_threshold]
+        # filtered_results.sort(reverse=True)
 
-        # Filter
-        filtered_results = [(ratio, total[merge_id], merge_lookup[merge_id]) for merge_id, ratio in blame_ratios.items()
-                            if ratio >= relative_blame_threshold
-                            and not merge_lookup[merge_id].isTrivial(except_if_all_parts_longer_than)]
-        filtered_results.sort(reverse=True)
+        results = [MergeBlame(merge=merge_lookup[merge_id], n_bad_applications=blame[merge_id], n_applications=total[merge_id]) for merge_id in blame.keys()]
+        results.sort(reverse=True)
+        return results
 
-        return filtered_results
-
-    def getGoodNewMerges(self, absolute_threshold=25) -> List[Tuple[float,int,str]]:
+    def _rankNewMergesForAnnealing(self) -> List[MergeAmenability]:
         """
         Suggest merges which improve morphological splits if applied.
-        Note: this is the post-processing implementation.
 
-        Also note that this cannot fix false negatives, i.e. forgotten splits. For example,
+        Also note that this cannot fix false negatives, i.e. forgotten splits. That's what knockout is for. For example,
             adembuis
         is split as
             ade mb uis
         which has two false positives
             ade+mb and mb+uis
-        yet by merging those together, you don't get the correct split.
+        yet by doing either of those merges, you don't get the correct split.
         """
         log = doPrint(Pℛ𝒪𝒥ℰ𝒞𝒯.debug_prints)
 
+        reference = self._config.annealing.reference.toMethod()
         weights = lexiconWeights() if self._config.weighted_training else dict()
 
         do_fuse_spans = False  # Not sure how you would count "total" for this one, unless in a second pass when you already know all the merge spans.
@@ -718,7 +736,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
             log(lemma)
 
             # Get morphological split
-            reference_segmentation = " ".join(self._anneal_segmentation(obj))
+            reference_segmentation = " ".join(reference(obj))
             reference_segmentation = self._preprocessAlreadySegmentedString(reference_segmentation)
 
             # Get BPE split
@@ -785,8 +803,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
         # import pandas as pd
         # amenable = {k:v for k,v in amenable.items() if k in amenability_ratios}
         # print(pd.Series(amenable.values()).describe())
-        results = [(amenability_ratios[merge], total_count[merge], merge) for merge in amenability_ratios
-                   if amenability_count[merge] >= absolute_threshold]
+        results = [MergeAmenability(merge=merge, n_good_potential_applications=amenability_count[merge], n_potential_applications=total_count[merge]) for merge in amenability_ratios]
         results.sort(reverse=True)
         return results
 
@@ -850,7 +867,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
 
         # Doing annealing at the start might have some benefit when e.g. two leaf merges will be knocked out, but their
         # combination is a viable merge. In that case, annealing learns the merge, and knockout turns it into a quadruplet.
-        if self._config.when_to_anneal != AnnealingTime.AFTER and self._anneal_segmentation is not None:
+        if self._config.annealing.when != AnnealingTime.AFTER and self._config.annealing.reference != ReferenceMode.NONE:
             self._anneal()
             if evaluator:
                 evaluator.evaluate(self, self._holdout, [f"{0} it", "+anneal"])
@@ -906,7 +923,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
 
         # Unlike reification, annealing is a linguistically sound post-processing step. It needs no knockout after.
         # You could see it as "filling in the gaps" when you have vocabulary capacity left to e.g. consolidate oversegmented word stems.
-        if self._config.when_to_anneal != AnnealingTime.BEFORE and self._anneal_segmentation is not None:
+        if self._config.annealing.when != AnnealingTime.BEFORE and self._config.annealing.reference != ReferenceMode.NONE:
             self._anneal()
             if evaluator:
                 evaluator.evaluate(self, self._holdout, [f"{iteration + 1} it", "+anneal"])
@@ -1080,14 +1097,16 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
             tokeniser_data = tkz_as_dict["tokeniser"]
 
         # Convert enums from string to object
-        metadata["knockout"]  = RefMode(metadata["knockout"])
-        metadata["anneal"]    = RefMode(metadata["anneal"])
+        metadata["knockout"]["reference"] = ReferenceMode(metadata["knockout"]["reference"])
+        metadata["annealing"]["reference"] = ReferenceMode(metadata["annealing"]["reference"])
+        metadata["annealing"]["when"] = AnnealingTime(metadata["annealing"]["when"])
+        metadata["reify"] = ReifyMode(metadata["reify"])
 
         # At this point, all data have been read properly and we can start using them.
         if metadata["custom-preprocessor"] and preprocessor is None:  # All other configurations are allowed: in particular, you can overwrite the default preprocessor if you want.
             raise ValueError("Tokeniser was saved when it had a custom preprocessor, but it was loaded without giving any preprocessor.")
 
-        bte = BTE(init_config=dataclassFromDictionary(BteInitConfig, metadata),  # Extract all relevant fields from the metadata dictionary to build the init config.
+        bte = BTE(init_config=dacite.from_dict(BTEConfig, metadata),  # Extract all relevant fields from the metadata dictionary to build the init config.
                   preprocessor=preprocessor,
                   starting_vocab=tokeniser_data["types"],
                   starting_mergelist=tokeniser_data["merges"],
@@ -1177,9 +1196,3 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
         Special types are detected automatically. That won't work for all vocabs, but it works for what we need.
         """
         return TktktToHuggingFace(BTE.from_pretrained_tktkt(checkpoint, preprocessor))
-
-
-def dataclassFromDictionary(cls, args: Dict[str, Any]):  # https://stackoverflow.com/a/72164665/9352077
-    field_names = {f.name for f in dataclasses.fields(cls) if f.init}
-    args = {k: v for k,v in args.items() if k in field_names}
-    return cls(**args)
