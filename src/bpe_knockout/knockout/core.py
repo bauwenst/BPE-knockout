@@ -5,12 +5,11 @@ rules using its two parents. This involves two additional problems solved here:
     2. A way of deciding which types to knock out of the vocabulary. I came up with "blame ratio", see below.
 
 FIXME: Currently, there are really a lot of training methods in the tokeniser class. This is inappropriate.
-       And also, why would users want to have the morphological data available if you can just save the final tokeniser?
+       We should transition to a vocabulariser-based and deserialiser-based approach, because it's just stupid
+       to be postprocessing tokenisers over and over when you could do it once and then save.
 
-TODO:
-    - If you combine annealing and knockout, it could be an idea to have the first be based on a
-      heuristic, and have the second iterate as many times as the first. I.e.: if knockout removes 100 merges, anneal
-      then adds 100 merges, ending up with the same vocab size. (Or just limit annealing by a maximal vocab size.)
+TODO: Because you're already requesting tokenisations and morphological segmentations during blame/amenability anyway,
+      you might as well use those to compute a Re, Pr, F1 for free. It would cut the time for doing a diagnostic run in half.
 """
 from typing import Dict, Tuple, Set, Union
 from dataclasses import dataclass
@@ -25,7 +24,7 @@ from tqdm.auto import tqdm
 
 import tktkt  # To have access to tktkt.__version__
 from tktkt.util.types import Tokens
-from tktkt.util.iterables import cumsum
+from tktkt.util.iterables import cumsum, sunion
 from tktkt.util.strings import indicesToTokens
 from tktkt.util.printing import *
 from tktkt.util.timing import datetimeDashed
@@ -127,14 +126,20 @@ class MergeGraph:
         self.merges_of[type_to_add]   = []
         self.id_range.add(suggested_id)
 
-    def addArc(self, merge_to_add: MergeOnDisk) -> Merge:
+    def addArc(self, merge_to_add: MergeOnDisk, add_missing_atoms: bool=False) -> Merge:
         """
         Adds arcs to the merge graph, and the resulting type if necessary.
         Also returns the constructed merge object for diagnostic purposes.
 
         :param merge_to_add: tupled or space-separated merge, e.g. "ab cd e".
         """
-        parts = self._parseRawMerge(merge_to_add)
+        parts = self._parseRawMerge(merge_to_add, check_vocab=not add_missing_atoms)
+        if add_missing_atoms:
+            for part in parts:
+                if part not in self.vocab:
+                    if len(part) > 1:
+                        warn(f"Adding atom '{part}' with more than 1 character to the vocabulary.")
+                    self.addVertex(part)
 
         new_merge = Merge(self.next_merge, parts)
         new_type = new_merge.childType()
@@ -281,9 +286,9 @@ class MergeGraph:
 
         return types_to_delete
 
-    def _parseRawMerge(self, merge_on_disk: MergeOnDisk) -> List[str]:
+    def _parseRawMerge(self, merge_on_disk: MergeOnDisk, check_vocab: bool=True) -> List[str]:
         parts = merge_on_disk.split(" ") if isinstance(merge_on_disk, str) else list(merge_on_disk)
-        if not all([p in self.vocab for p in parts]):
+        if check_vocab and not all([p in self.vocab for p in parts]):
             raise ValueError(f"The merge '{merge_on_disk}' contains types not in the vocab yet.")
         if any([p == "" for p in parts]):
             raise ValueError(f"The merge '{merge_on_disk}' seems to have double spaces.")
@@ -340,7 +345,7 @@ class MergeBlame:
     def blame_ratio(self) -> float:
         return self.n_bad_applications / self.n_applications if self.n_applications != 0 else 0
 
-    def __lt__(self, other: "MergeBlame"):
+    def __lt__(self, other: "MergeBlame"):  # You are worse (i.e. less fit for knockout) when you don't violate boundaries as much.
         return self.blame_ratio < other.blame_ratio
 
 
@@ -354,9 +359,14 @@ class MergeAmenability:
     def amenability_ratio(self) -> float:
         return self.n_good_potential_applications / self.n_potential_applications
 
-    def __lt__(self, other: "MergeAmenability"):
-        return self.n_good_potential_applications < other.n_good_potential_applications \
-            or             self.amenability_ratio < other.amenability_ratio
+    def __lt__(self, other: "MergeAmenability"):  # You are worse if you are useful in fewer contexts, or if you are useful in the same amount of contexts, when those contexts are a smaller part of all the contexts you appear in.
+        return (self.n_good_potential_applications, self.amenability_ratio) < (other.n_good_potential_applications, other.amenability_ratio)
+
+
+class ExecutionPolicy(str, Enum):
+    IMMEDIATE = 1
+    POSTPONED = 2
+    FINISHED  = 3
 
 
 # TODO: Should just use the cursor system I have in TkTkT. Might make blame computation much faster.
@@ -373,12 +383,12 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
                  starting_vocab: Dict[str,int]=None, starting_mergelist: MergeList=None, unk_type: str=None,
                  preprocessor: Preprocessor = None,
 
-                 autorun_modes=True, holdout: Holdout=None, quiet=False):
+                 execution_policy: ExecutionPolicy=ExecutionPolicy.IMMEDIATE, holdout: Holdout=None, quiet=False):
         """
-        :param autorun_modes: whether to actually run the given modes, or only set their segmentation function.
+        :param execution_policy: whether to actually run the config or to postpone it for diagnostics.
         """
         self._config = init_config
-        self._has_run = False
+        self._has_run = execution_policy == ExecutionPolicy.FINISHED
         self._print = doPrint(not quiet, hesitate=True)
 
         # Training regime
@@ -412,7 +422,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
         super().__init__(preprocessor=preprocessor, vocab=self.merge_graph.vocab, unk_type=unk_type)
 
         # Run constrction
-        if autorun_modes:
+        if execution_policy == ExecutionPolicy.IMMEDIATE:
             self.runModes()
 
     def runModes(self):
@@ -460,7 +470,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
         self._print("Knockout...")
         merges_to_remove = [m.merge for m in self._rankOldMergesForKnockout(blame_tuples_once=self._config.knockout.blame_tuples_once)
                             if m.blame_ratio >= self._config.knockout.relative_blame_minimum]
-        merges_to_remove = merges_to_remove[:self._config.knockout.limit]
+        merges_to_remove = merges_to_remove[:max(0, self.getVocabSize() - self._config.knockout.min_vocab_size)]
         self._removeMerges(merges_to_remove)
         return merges_to_remove  # For diagnostic purposes
 
@@ -479,14 +489,17 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
         self._print("Annealing...")
         merges_to_add = [m.merge for m in self._rankNewMergesForAnnealing()
                          if m.amenability_ratio >= self._config.annealing.relative_amenability_minimum and m.n_good_potential_applications >= self._config.annealing.absolute_application_minimum]
-        merges_to_add = merges_to_add[:self._config.annealing.limit]
-        self._addMerges(merges_to_add)
+        merges_to_add = merges_to_add[:max(0, self._config.annealing.max_vocab_size - self.getVocabSize())]
+        n_missing_atoms = len(sunion({part for part in merge.split(" ") if not self.hasType(part)} for merge in merges_to_add))
+        if n_missing_atoms:
+            merges_to_add = merges_to_add[:-n_missing_atoms]  # The hope is that those missing atoms were not in these trimmed merges.
+        self._addMerges(merges_to_add, add_missing_atoms=True)
         return merges_to_add  # For diagnostic purposes
 
-    def _addMerges(self, merges_to_add: Iterable[str]):
+    def _addMerges(self, merges_to_add: Iterable[str], add_missing_atoms: bool=False):
         for merge_string in tqdm(merges_to_add, desc="ANNEALING GRAPH", disable=not self._print.verbose):
             try:
-                self.merge_graph.addArc(merge_string)
+                self.merge_graph.addArc(merge_string, add_missing_atoms=add_missing_atoms)
             except:
                 warn(f"Failed to add arcs for {merge_string} to BPE graph. Probably a missing atom.")
         self._syncWithGraph()
@@ -712,6 +725,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
     def _rankNewMergesForAnnealing(self) -> List[MergeAmenability]:
         """
         Suggest merges which improve morphological splits if applied.
+        If these involve tokens (characters) that are not in the vocabulary, those will also be added.
 
         Also note that this cannot fix false negatives, i.e. forgotten splits. That's what knockout is for. For example,
             adembuis
@@ -1097,7 +1111,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
             tokeniser_data = tkz_as_dict["tokeniser"]
 
         # Convert enums from string to object
-        metadata["knockout"]["reference"] = ReferenceMode(metadata["knockout"]["reference"])
+        metadata["knockout"]["reference"]  = ReferenceMode(metadata["knockout"]["reference"])
         metadata["annealing"]["reference"] = ReferenceMode(metadata["annealing"]["reference"])
         metadata["annealing"]["when"] = AnnealingTime(metadata["annealing"]["when"])
         metadata["reify"] = ReifyMode(metadata["reify"])
@@ -1111,9 +1125,8 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
                   starting_vocab=tokeniser_data["types"],
                   starting_mergelist=tokeniser_data["merges"],
                   holdout=Holdout(train_fraction=metadata["holdout"], seed=metadata["seed"]),
-                  autorun_modes=False,  # Always false because either it already ran or didn't yet and then it didn't have auto-run clearly.
+                  execution_policy=ExecutionPolicy.FINISHED if metadata["has-run"] else ExecutionPolicy.POSTPONED,  # It's never auto-execution because if that was the user's original config, has_run would've been true.
                   quiet=True)
-        bte._has_run = metadata["has-run"]
         return bte
 
     def save(self, folder: Path) -> Path:

@@ -19,7 +19,7 @@ class ReferenceMode(str, Enum):  # The str parent allows JSON serialisation: htt
 
     def toLetter(self) -> str:
         if   self == ReferenceMode.ONLY_FREE_MORPHS:
-            return "l"
+            return "f"
         elif self == ReferenceMode.MORPHEMIC:
             return "m"
         elif self == ReferenceMode.NONE:
@@ -76,7 +76,7 @@ class AnnealingTime(str, Enum):
 @dataclasses.dataclass
 class KnockoutConfig:
     reference: ReferenceMode = ReferenceMode.NONE
-    limit: int = 1_000_000
+    min_vocab_size: int = 0
     relative_blame_minimum: float = 0.5
     blame_tuples_once: bool = False  # When computing blame on a merge with more than 2 tokens, each instance can either be seen as one application (True) or as the amount of spaces that are concatenated by it (False). For example: if a merge (a,b,c,d) takes place, 'True' counts it as 1 application, whilst 'False' counts as 3 applications.
 
@@ -85,9 +85,9 @@ class KnockoutConfig:
 class AnnealingConfig:
     reference: ReferenceMode = ReferenceMode.NONE
     when: AnnealingTime = AnnealingTime.BEFORE  # Only matters when annealing is set to something other than None.
-    limit: int = 1_000_000
-    absolute_application_minimum: int = 25     # A merge has to be applied at least this many times to be worth adding.
-    relative_amenability_minimum: float = 0.5  # A merge has to be applied without issue at least with this ratio.
+    max_vocab_size: int = 1_000_000
+    absolute_application_minimum: int = 2       # A merge has to be applied without issue at least this many times to be worth adding.
+    relative_amenability_minimum: float = 0.80  # A merge has to be applied without issue at least with this ratio.
 
 
 @dataclasses.dataclass

@@ -15,7 +15,7 @@ from tktkt.models.huggingface.wrapper import HuggingFaceTokeniser
 robbert_tokenizer = HuggingFaceTokeniser(rt, for_single_words=True)
 
 from bpe_knockout.auxiliary.bytemapping import *
-from bpe_knockout.knockout.core import BTE, BTEConfig, ReferenceMode
+from bpe_knockout.knockout.core import BTE, BTEConfig, ReferenceMode, ExecutionPolicy
 from tktkt.util.timing import timeit
 from tktkt.interfaces.tokeniser import prepare_tokenise_decode
 from fiject import LineGraph, CacheMode
@@ -221,8 +221,8 @@ def compareWithAndWithoutByteRemapping():
     # bte2 = BTE(BteInitConfig(starting_from_bytechars=True))
     # assert_tokenisers_equal(bte1, bte2)
 
-    bte1 = BTE(BTEConfig(bytebased=ByteBasedMode.NONE, knockout=ReferenceMode.MORPHEMIC), autorun_modes=False)
-    bte2 = BTE(BTEConfig(bytebased=ByteBasedMode.VOCAB_TO_CHARS, knockout=ReferenceMode.MORPHEMIC), autorun_modes=False)
+    bte1 = BTE(BTEConfig(bytebased=ByteBasedMode.NONE, knockout=ReferenceMode.MORPHEMIC), execution_policy=ExecutionPolicy.POSTPONED)
+    bte2 = BTE(BTEConfig(bytebased=ByteBasedMode.VOCAB_TO_CHARS, knockout=ReferenceMode.MORPHEMIC), execution_policy=ExecutionPolicy.POSTPONED)
     lst1 = bte1._rankOldMergesForKnockout()
     lst2 = bte2._rankOldMergesForKnockout()
 
@@ -242,8 +242,8 @@ def compareWithAndWithoutByteRemapping():
     print([(tup[2], merges2[tup[2]]) for tup in set2 - set1 if tup[2] not in merges1])
     # [(34143, ['ĠintuÃ¯t', 'ief']), (9788, ['Ġcategorie', 'Ã«n']), (28659, ['ĠcoÃ¶per', 'atie']), (18251, ['ĠcoÃ¶rdin', 'atie']), (6389, ['Ġbe', 'Ã¯n']), (29264, ['ĠoriÃ«nt', 'eren']), (37584, ['oriÃ«nt', 'atie']), (19968, ['ĠcoÃ¶rdin', 'ator']), (31653, ['u', 'Ã¯']), (18454, ['Ġtwee', 'Ã«n']), (14289, ['o', 'Ã¯']), (24415, ['iÃ«nt', 'ie']), (15937, ['Ġcalorie', 'Ã«n']), (12642, ['Ã©', 's']), (14332, ['Ġre', 'Ã«']), (6921, ['Ġbe', 'Ã«']), (39001, ['ĠdiÃ«t', 'ist']), (17767, ['ĠefficiÃ«nt', 'ie']), (4272, ['ic', 'i']), (31636, ['ĠhygiÃ«n', 'isch']), (4373, ['Ġidee', 'Ã«n']), (28683, ['Ġre', 'Ã¯n']), (17651, ['Ġco', 'Ã¶per']), (31699, ['Ã¶per', 'atie']), (17875, ['g', 'i']), (6383, ['Ġge', 'Ã«']), (21821, ['ĠoriÃ«nt', 'atie']), (8963, ['iÃ«r', 's']), (29118, ['Ġdrie', 'Ã«n'])]
 
-    bte1 = BTE(BTEConfig(bytebased=ByteBasedMode.NONE, knockout=ReferenceMode.MORPHEMIC), autorun_modes=True)
-    bte2 = BTE(BTEConfig(bytebased=ByteBasedMode.VOCAB_TO_CHARS, knockout=ReferenceMode.MORPHEMIC), autorun_modes=True)
+    bte1 = BTE(BTEConfig(bytebased=ByteBasedMode.NONE, knockout=ReferenceMode.MORPHEMIC), execution_policy=ExecutionPolicy.IMMEDIATE)
+    bte2 = BTE(BTEConfig(bytebased=ByteBasedMode.VOCAB_TO_CHARS, knockout=ReferenceMode.MORPHEMIC), execution_policy=ExecutionPolicy.IMMEDIATE)
     assert_tokenisers_equal(bte1, bte2)
     # There are 632 different tokenisations, of which only 6 are not related to accents:
     #                        [' mag', 'gi'] =/= [' mag', 'g', 'i']

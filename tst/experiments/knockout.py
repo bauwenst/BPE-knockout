@@ -60,7 +60,7 @@ def assert_tokenisers_equal(tokeniser1=robbert_tokenizer, tokeniser2=untrained_b
 
 
 def print_knockout():
-    bte = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.ONLY_FREE_MORPHS)), autorun_modes=False)
+    bte = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.ONLY_FREE_MORPHS)), execution_policy=ExecutionPolicy.POSTPONED)
 
     summaries = bte._rankOldMergesForKnockout()
     table = PrintTable()
@@ -86,7 +86,7 @@ def visualise():
 
 
 def test_save_and_load():
-    bte = BTE(init_config=BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC)), autorun_modes=True)
+    bte = BTE(init_config=BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC)), execution_policy=ExecutionPolicy.IMMEDIATE)
     print(bte.getVocabSize())
     out_path = bte.save(PATH_DATA_TEMP)
 
@@ -165,7 +165,7 @@ def test_iterative():
 
             # Do reification
             bte = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC), reify=ReifyMode.FIX_AND_LINK_AND_MAKE, iterations=MAX_ITERATIONS),
-                      autorun_modes=False, holdout=holdout)
+                      execution_policy=ExecutionPolicy.POSTPONED, holdout=holdout)
             bte._iterative(iterations=MAX_ITERATIONS, evaluator=ForIntermediateTests())
 
     commitEvaluationTable(table)
@@ -319,7 +319,7 @@ def main_knockedMerges_Multilingual():
                 lengths = MultiHistogram(f"knockout-lengths_{ReferenceMode.toLetter(mode)}-mode_{language_object.to_tag()}", caching=CacheMode.IF_MISSING)
 
                 if ids.needs_computation or lengths.needs_computation:
-                    bte = BTE(BTEConfig(knockout=KnockoutConfig(reference=mode)), autorun_modes=False)
+                    bte = BTE(BTEConfig(knockout=KnockoutConfig(reference=mode)), execution_policy=ExecutionPolicy.POSTPONED)
                     blamed_merges = bte._rankOldMergesForKnockout()
                     for _,_, merge in blamed_merges:
                         if ids.needs_computation:
@@ -376,7 +376,7 @@ def main_effectiveDropoutRate_Multilingual():
     if table.needs_computation:
         for language in getAllConfigs():
             with KnockoutDataConfiguration(language):
-                bte = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC)), autorun_modes=False)
+                bte = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC)), execution_policy=ExecutionPolicy.POSTPONED)
 
                 total_merges               = 0
                 total_dropped_merges       = 0
@@ -695,7 +695,7 @@ def main_deleteLastMerges_Monolingual():
     """
     graph = LineGraph(name=f"delete-last-types_{Pℛ𝒪𝒥ℰ𝒞𝒯.config.langTag()}", caching=CacheMode.IF_MISSING)
     if graph.needs_computation:
-        bte = BTE(BTEConfig(), quiet=True, autorun_modes=False)
+        bte = BTE(BTEConfig(), quiet=True, execution_policy=ExecutionPolicy.POSTPONED)
         initial_merges = len(bte.merge_graph.merges)
         results = []
 
@@ -872,7 +872,7 @@ def main_blameThreshold_Monolingual():
     g2 = LineGraph("blame-threshold-evaluation", caching=CacheMode.IF_MISSING)
     if g1.needs_computation or g2.needs_computation:
         # We can get a rating for ALL merges by requesting to return all merges with a blame above 0.
-        bte = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC)), autorun_modes=False, quiet=True)
+        bte = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC)), execution_policy=ExecutionPolicy.POSTPONED, quiet=True)
         all_merges = bte._rankOldMergesForKnockout()
 
         # And now we just filter them out manually.
@@ -884,7 +884,7 @@ def main_blameThreshold_Monolingual():
 
             if g2.needs_computation:
                 # Construct tokeniser
-                bte = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC)), autorun_modes=False, quiet=True)
+                bte = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC)), execution_policy=ExecutionPolicy.POSTPONED, quiet=True)
                 for merge in relevant_merges:
                     bte.merge_graph.knockout(merge.childType())
                 bte._syncWithGraph()
