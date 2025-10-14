@@ -11,7 +11,7 @@ FIXME: Currently, there are really a lot of training methods in the tokeniser cl
 TODO: Because you're already requesting tokenisations and morphological segmentations during blame/amenability anyway,
       you might as well use those to compute a Re, Pr, F1 for free. It would cut the time for doing a diagnostic run in half.
 """
-from typing import Dict, Tuple, Set, Union
+from typing import Dict, Tuple, Set, Union, Any
 from dataclasses import dataclass
 from collections import Counter
 from pathlib import Path
@@ -383,7 +383,8 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
                  starting_vocab: Dict[str,int]=None, starting_mergelist: MergeList=None, unk_type: str=None,
                  preprocessor: Preprocessor = None,
 
-                 execution_policy: ExecutionPolicy=ExecutionPolicy.IMMEDIATE, holdout: Holdout=None, quiet=False):
+                 execution_policy: ExecutionPolicy=ExecutionPolicy.IMMEDIATE, holdout: Holdout=None, quiet: bool=False,
+                 iteration_evaluator: Evaluator=None):
         """
         :param execution_policy: whether to actually run the config or to postpone it for diagnostics.
         """
@@ -401,6 +402,10 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
         if holdout is None:
             holdout = Holdout(1.0)  # 100% of data goes to training.
         self._holdout = holdout
+
+        # Eval
+        self._evaluator = iteration_evaluator
+        self._diagnostics = []
 
         # Graph
         self._print("Instantiating", self.getName(), "...")
@@ -430,7 +435,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
             warnings.warn("Cannot run BTE construction because it was already done in the past.")
             return
 
-        self._iterative(self._config.iterations)
+        self._iterative(self._config.iterations, evaluator=self._evaluator)
         self._has_run = True
 
     def getName(self):
@@ -466,12 +471,21 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
             head = tup[1][1:-1].split(" ")[0]
             self.merges_starting_with[head].append(tup)  # If this raises a KeyError, something is definitely wrong (merge strings don't match type strings).
 
-    def _prune(self) -> List[Merge]:
+    def _prune(self) -> List[MergeBlame]:
         self._print("Knockout...")
-        merges_to_remove = [m.merge for m in self._rankOldMergesForKnockout(blame_tuples_once=self._config.knockout.blame_tuples_once)
+        merges_to_remove = [m for m in self._rankOldMergesForKnockout(blame_tuples_once=self._config.knockout.blame_tuples_once)
                             if m.blame_ratio >= self._config.knockout.relative_blame_minimum]
+        n_eligible = len(merges_to_remove)
         merges_to_remove = merges_to_remove[:max(0, self.getVocabSize() - self._config.knockout.min_vocab_size)]
-        self._removeMerges(merges_to_remove)
+        self._removeMerges([m.merge for m in merges_to_remove])
+        self._diagnostics.append({
+            "type": "knockout",
+            "eligible": n_eligible,
+            "max_offences": max((merge.n_bad_applications for merge in merges_to_remove), default=0),
+            "max_blame":    max((merge.blame_ratio for merge in merges_to_remove), default=0),
+            "min_blame":    min((merge.blame_ratio for merge in merges_to_remove), default=0),
+            "vocab_size": self.getVocabSize()
+        })
         return merges_to_remove  # For diagnostic purposes
 
     def _removeMerges(self, merges_to_remove: Iterable[Merge]):
@@ -485,15 +499,40 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
                 self.merge_graph.knockout(merge.childType())
         self._syncWithGraph()
 
-    def _anneal(self):
+    def _anneal(self) -> list[MergeAmenability]:
         self._print("Annealing...")
-        merges_to_add = [m.merge for m in self._rankNewMergesForAnnealing()
+        merges_to_add = [m for m in self._rankNewMergesForAnnealing()
                          if m.amenability_ratio >= self._config.annealing.relative_amenability_minimum and m.n_good_potential_applications >= self._config.annealing.absolute_application_minimum]
-        merges_to_add = merges_to_add[:max(0, self._config.annealing.max_vocab_size - self.getVocabSize())]
-        n_missing_atoms = len(sunion({part for part in merge.split(" ") if not self.hasType(part)} for merge in merges_to_add))
-        if n_missing_atoms:
-            merges_to_add = merges_to_add[:-n_missing_atoms]  # The hope is that those missing atoms were not in these trimmed merges.
-        self._addMerges(merges_to_add, add_missing_atoms=True)
+        n_eligible = len(merges_to_add)
+
+        # Logic to stay within the given vocab size.
+        n_max_added = max(0, self._config.annealing.max_vocab_size - self.getVocabSize())
+        merges_to_add = merges_to_add[:n_max_added]
+        n_can_be_added = n_max_added - len(merges_to_add)
+
+        # Separate check for missing atoms
+        missing_atoms = set()
+        i = 0
+        while i < len(merges_to_add):
+            m = merges_to_add[i]
+            for part in m.merge.split(" "):
+                if part not in missing_atoms and not self.hasType(part):
+                    missing_atoms.add(part)
+                    if n_can_be_added > 0:
+                        n_can_be_added -= 1
+                    else:
+                        merges_to_add.pop()
+            i += 1
+        self._addMerges([m.merge for m in merges_to_add], add_missing_atoms=True)
+        self._diagnostics.append({
+            "type": "anneal",
+            "eligible": n_eligible,
+            "max_good_applications": max((merge.n_good_potential_applications for merge in merges_to_add), default=0),
+            "min_good_applications": min((merge.n_potential_applications for merge in merges_to_add), default=0),
+            "max_applications": max((merge.n_potential_applications for merge in merges_to_add), default=0),
+            "atoms_added": len(missing_atoms),
+            "vocab_size": self.getVocabSize()
+        })
         return merges_to_add  # For diagnostic purposes
 
     def _addMerges(self, merges_to_add: Iterable[str], add_missing_atoms: bool=False):
@@ -821,7 +860,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
         results.sort(reverse=True)
         return results
 
-    def _iterative(self, iterations: int=10, evaluator: Evaluator=None):
+    def _iterative(self, iterations: int, evaluator: Evaluator=None):
         """
         Iterative knockout, with attempts to turn tuple merges back into binary merges (reification) in between.
         This method brings together the three main operations this class performs on BPE graphs:
@@ -876,6 +915,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
         Do note that other merges are affected by any reordering, but we will assume this isn't detrimental as long as we don't disable them.
         To test if a merge has been fully disabled, a simple check is to see if the subword as a string can still be merged.
         """
+        self._diagnostics.append({"type": "baseline", "vocab_size": self.getVocabSize()})
         if evaluator:
             evaluator.evaluate(self, self._holdout, [f"{0} it", "base"])
 
@@ -923,7 +963,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
 
             if not removed_merges and not novel_merges:
                 self._print("Early stop: tokeniser fully converged (no more deletions, no more additions).")
-                self._config.iterations = iteration - 1  # The iteration where you discover that you are identical to previous iteration does not count.
+                self._diagnostics.append({"type": "convergence", "iterations": iteration - 1, "vocab_size": self.getVocabSize()})  # The iteration where you discover that you are identical to previous iteration does not count.
                 break
 
             if evaluator and novel_merges:
@@ -956,11 +996,13 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
             return set()
 
         # Setup
-        log = doPrint(Pℛ𝒪𝒥ℰ𝒞𝒯.debug_prints)
         if all_disqualified_merges is None:
             all_disqualified_merges = set()
         sorted_merges = sorted(self.merge_graph.merges)
         new_merges    = set()  # Union of (1) triplets that were repaired into different triplets, (2) new binary merges that were applied in at least one triplet, and (3) old binary merges that were applied in at least one other triplet.
+
+        log = doPrint(Pℛ𝒪𝒥ℰ𝒞𝒯.debug_prints)
+        diagnostics: dict[str,Any] = {"type": "reify"}
 
         # Part 1: Find triplets which diverge from the actual tokenisation, and fix them.
         for m in sorted_merges:
@@ -984,6 +1026,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
             if limited_tokens != m.parts:
                 # self._print(f"Found divergent triplet: expected {m.parts} but got {limited_tokens}")
                 new_merges.add(self.merge_graph.rewire(typ, limited_tokens))
+        diagnostics["triplets_repaired"] = len(new_merges)
 
         if not self._config.reify.does_link():
             return new_merges
@@ -998,7 +1041,9 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
                 new_binary_merge = p1 + " " + p2
                 if new_binary_merge not in all_disqualified_merges:  # Aha, this is a valid merge to try!
                     suggested_merge_strings.setdefault(new_binary_merge, set()).add(m)  # Using a set because the same submerge can appear multiple times in one triplet.
+        diagnostics["found_merges"] = len(suggested_merge_strings)
 
+        # ...and try to apply them.
         # Implementation of case 2 and a weak version of case 1.
         #   - Check if submerge doesn't already exist.
         #       - If no: execute case 2 (make the merge with slightly lower priority than the lowest triplet it appears in).
@@ -1006,6 +1051,8 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
         #           - If yes, replace it in the triplet. Not because the triplet results in a different token with or without it, but rather because right now it is preventing the triplet from being applied at all.
         #           - If not, don't do anything (the triplet stays a triplet like vanilla BPE-knockout, and will steal a fraction of all pairs that would go to the merge).
         # Pairs are sorted by how many triplets they appear in.
+        diagnostics["applied_merges"] = 0
+        diagnostics["created_merges"] = 0
         for merge_string, triplets_this_appears_in in tqdm(sorted(suggested_merge_strings.items(), key=lambda t: len(t[1]), reverse=True), desc="REIFYING SUGGESTIONS", disable=not self._print.verbose):
             parts = merge_string.split()
             subtype = "".join(parts)
@@ -1030,6 +1077,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
 
             # Link or make the new merge.
             if subtype in self.merge_graph.vocab:  # Link if it's the right pair of tokens. Else do nothing.
+                type_is_new = False
                 submerge = self.merge_graph.merges_of[subtype][0]
                 if submerge.parts == parts:
                     log(f"Reified merge '{merge_string}' exists.")
@@ -1037,6 +1085,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
                     log(f"Reified merge '{merge_string}' doesn't exist, but its result is already merged as '{' '.join(submerge.parts)}'. It hence cannot be created.")
                     continue
             else:  # Make new type.
+                type_is_new = True
                 if self._config.reify.is_backwards_compatible():
                     continue
 
@@ -1086,8 +1135,16 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
 
             if merge_had_effect:
                 new_merges.add(submerge)
+                if type_is_new:
+                    diagnostics["created_merges"] += 1
+                else:
+                    diagnostics["applied_merges"] += 1
 
         self._syncWithGraph()
+
+        # Diagnostics
+        diagnostics["vocab_size"] = self.getVocabSize()
+        self._diagnostics.append(diagnostics)
         return new_merges
 
     def _preprocessAlreadySegmentedString(self, segmentation: str) -> str:
@@ -1147,6 +1204,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
                 "bpe_knockout": __version__,
                 "tktkt": tktkt.__version__
             },
+            "name": self.getName(),
             "init-metadata": dataclasses.asdict(self._config) | \
                 {
                     "holdout": self._holdout.threshold,
@@ -1161,6 +1219,20 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
         }
 
         out_path = folder / time.strftime(f"tokenizer_BTE_{datetimeDashed()}.json")
+        with open(out_path, "w", encoding="utf-8") as handle:
+            json.dump(serialised, handle, indent=4, ensure_ascii=False)
+        return out_path
+
+    def saveIterationDiagnostics(self, folder: Path) -> Path:
+        serialised = {
+            "versions": {
+                "bpe_knockout": __version__,
+                "tktkt": tktkt.__version__
+            },
+            "name": self.getName(),
+            "iterations": self._diagnostics
+        }
+        out_path = folder / time.strftime(f"diagnostics_BTE_{datetimeDashed()}.json")
         with open(out_path, "w", encoding="utf-8") as handle:
             json.dump(serialised, handle, indent=4, ensure_ascii=False)
         return out_path
