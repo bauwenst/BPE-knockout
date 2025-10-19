@@ -24,7 +24,7 @@ from tqdm.auto import tqdm
 
 import tktkt  # To have access to tktkt.__version__
 from tktkt.util.types import Tokens
-from tktkt.util.iterables import cumsum, sunion
+from tktkt.util.iterables import cumsum
 from tktkt.util.strings import indicesToTokens
 from tktkt.util.printing import *
 from tktkt.util.timing import datetimeDashed
@@ -704,7 +704,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
         blame        = {m.priority: 0 for m in self.merge_graph.merges}
         total        = {m.priority: 0 for m in self.merge_graph.merges}
 
-        for obj in self._holdout(morphologyGenerator(verbose=self._print.verbose), train=True):
+        for obj in self._holdout(morphologyGenerator(), train=True):
             lemma = obj.word
             weight = weights.get(lemma, 1)
             # log(lemma)
@@ -783,7 +783,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
         amenability_count = Counter()
         total_count       = Counter()
 
-        for obj in self._holdout(morphologyGenerator(verbose=self._print.verbose), train=True):
+        for obj in self._holdout(morphologyGenerator(), train=True):
             lemma = obj.word
             weight = weights.get(lemma, 1)
             log(lemma)
@@ -952,7 +952,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
             if self._config.reify in {ReifyMode.NONE, ReifyMode.NONE_CASCADE}:
                 continue
 
-            all_disqualified_merges.update(" ".join(m.parts) for m in removed_merges)
+            all_disqualified_merges.update(" ".join(m.merge.parts) for m in removed_merges)
             novel_merges = self._reify(all_disqualified_merges)
             needs_final_knockout = len(novel_merges) > 0
             self._print(f"Repaired or reified {len(novel_merges)} merges.")

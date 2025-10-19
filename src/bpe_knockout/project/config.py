@@ -17,7 +17,9 @@ import langcodes
 from langcodes import Language
 from abc import abstractmethod, ABC
 
-from modest.datasets.webcelex import CelexDataset
+from modest.languages.dutch import Dutch_Celex
+from modest.languages.german import German_Celex
+from modest.languages.english import English_Celex
 from modest.interfaces.datasets import ModestDataset
 from modest.interfaces.morphologies import WordDecompositionWithFreeSegmentation
 
@@ -69,7 +71,7 @@ class ProjectConfig(ABC):
             raise RuntimeError("Cannot impute morphologies because no path was given.")
 
         if not self.morphologies._rerouted:
-            self.morphologies._get()
+            self.morphologies._files()
 
     def imputeTokeniser(self):
         # TODO: These should probably go somewhere else.
@@ -122,7 +124,7 @@ def setupDutch() -> ProjectConfig:
     return ProjectConfig(
         language_name="Dutch",
         lemma_counts=OscarWordFile(PATH_DATA_COMPRESSED / "words_oscar-nl.txt"),
-        morphologies=CelexDataset("Dutch").rerouted(PATH_MORPHOLOGY / "celex_morphology_nl.txt"),
+        morphologies=Dutch_Celex(legacy=True),
         base_tokeniser=SennrichTokeniserPath(PATH_MODELBASE / "bpe-40k_oscar-nl-clean"),
         reweighter=LINEAR_WEIGHTER
     )
@@ -132,7 +134,7 @@ def setupGerman() -> ProjectConfig:
     return ProjectConfig(
         language_name="German",
         lemma_counts=OscarWordFile(PATH_DATA_COMPRESSED / "words_oscar-de.txt"),
-        morphologies=CelexDataset("German").rerouted(PATH_MORPHOLOGY / "celex_morphology_de.txt"),
+        morphologies=German_Celex(legacy=True),
         base_tokeniser=SennrichTokeniserPath(PATH_MODELBASE / "bpe-40k_oscar-de-clean"),
         reweighter=LINEAR_WEIGHTER
     )
@@ -142,7 +144,7 @@ def setupEnglish() -> ProjectConfig:
     return ProjectConfig(
         language_name="English",
         lemma_counts=OscarWordFile(PATH_DATA_COMPRESSED / "words_oscar-en.txt"),
-        morphologies=CelexDataset("English").rerouted(PATH_MORPHOLOGY / "celex_morphology_en.txt"),
+        morphologies=English_Celex(legacy=True),
         base_tokeniser=SennrichTokeniserPath(PATH_MODELBASE / "bpe-40k_oscar-en-clean"),
         reweighter=LINEAR_WEIGHTER
     )
@@ -157,7 +159,6 @@ class Project:
 
     debug_prints: bool=False
     verbosity: bool=False
-    do_old_iterator: bool=False  # Whether to use the original morphological iterator used for the OpenReview submission.
 
 Pℛ𝒪𝒥ℰ𝒞𝒯 = Project(setupDutch())
 # All files access this object for paths. Because it is an object, its fields can be changed by one
@@ -199,15 +200,14 @@ def defaultTokeniserFiles() -> BpeTokeniserPath:
     return Pℛ𝒪𝒥ℰ𝒞𝒯.config.base_tokeniser
 
 
-def morphologyGenerator(**kwargs) -> Iterable[WordDecompositionWithFreeSegmentation]:
+def morphologyGenerator() -> Iterable[WordDecompositionWithFreeSegmentation]:
     """
     Alias for LemmaMorphology.generator that automatically uses the project's file path for morphologies.
     Without this, you would need to repeat the below statement everywhere you iterate over morphologies.
     """
     Pℛ𝒪𝒥ℰ𝒞𝒯.config.imputeMorphologies()
 
-    kwargs["legacy"] = Pℛ𝒪𝒥ℰ𝒞𝒯.do_old_iterator
-    return Pℛ𝒪𝒥ℰ𝒞𝒯.config.morphologies.generate(**kwargs)  # https://discuss.python.org/t/difference-between-return-generator-vs-yield-from-generator/2997
+    return Pℛ𝒪𝒥ℰ𝒞𝒯.config.morphologies.generate()  # https://discuss.python.org/t/difference-between-return-generator-vs-yield-from-generator/2997
 
 
 def lexiconWeights(override_reweighter: Callable[[float],float]=None) -> Dict[str, float]:

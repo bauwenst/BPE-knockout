@@ -528,9 +528,7 @@ def main_intrinsicMultilingual():
 
 @timeit
 def main_intrinsicHoldout_Monolingual():
-    was_legacy = Pℛ𝒪𝒥ℰ𝒞𝒯.do_old_iterator
-    Pℛ𝒪𝒥ℰ𝒞𝒯.do_old_iterator = True
-
+    # Use the legacy CELEX dataset in the project config to reproduce the paper results.
     table = Table(f"bte-intrinsic-holdout_{Pℛ𝒪𝒥ℰ𝒞𝒯.config.langTag()}", caching=CacheMode.IF_MISSING)
     if table.needs_computation:
         HOLDOUTS = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
@@ -545,7 +543,6 @@ def main_intrinsicHoldout_Monolingual():
                                  row_prefix=["BPE-knockout"], row_names=[f"{int(f*100)}-{100-int(f*100)}"])
 
     commitEvaluationTable(table)
-    Pℛ𝒪𝒥ℰ𝒞𝒯.do_old_iterator = was_legacy
 
 
 @timeit
