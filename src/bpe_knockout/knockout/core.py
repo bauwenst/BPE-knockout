@@ -303,37 +303,6 @@ class MergeGraph:
     def inAlphabet(self, typ: str) -> bool:
         return len(self.merges_of[typ]) == 0
 
-    def printSurroundingGraph(self, t: str):
-        """
-        Print the vertices (types) that emanate from the given type, and its siblings (i.e. types emanating from its
-        parents), along with the relevant edges (merges).
-        """
-        involved_merges = self.merges_with[t]
-
-        children = [m.childType() for m in involved_merges]
-        spouses = set()
-        for child in children:
-            spouses.update(self.merges_of[child][0].parts)
-        if children:
-            spouses.remove(t)
-
-        parent_merge = self.merges_of[t][0]
-        parents = parent_merge.parts
-
-        siblings = set()
-        parental_spouses = set()
-        for parent in parents:
-            children_of_parent = self.merges_with[parent]
-            for child_merge in children_of_parent:
-                parental_spouses.update(child_merge.parts)
-                siblings.add(child_merge.childType())
-        siblings.remove(t)
-
-        print("Things it makes:", len(children), children)
-        print("Things it combines with:", len(spouses), spouses)
-        print("Things its parents produce:", len(siblings), siblings)
-        print("Parents and their spouses:", len(parental_spouses), parental_spouses)
-
 
 @dataclass
 class MergeBlame:
@@ -368,6 +337,8 @@ class ExecutionPolicy(str, Enum):
     POSTPONED = 2
     FINISHED  = 3
 
+
+EPS = 0.001
 
 # TODO: Should just use the cursor system I have in TkTkT. Might make blame computation much faster.
 SPLIT_MARKER = "|"
@@ -449,7 +420,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
                 + ("-reify" * (self._config.reify != ReifyMode.NONE)) \
                 + (f"_{self._config.iterations}it" if self._config.iterations > 0 else "") \
                 + (f"_anneal-{self._config.annealing.reference.toLetter()}-{self._config.annealing.when.toLetter()}") * do_anneal \
-                + (f"_{int(100*self._holdout.threshold)}-{int(100-100*self._holdout.threshold)}-holdout" if self._holdout is not None else "")
+                + (f"_{int(100*self._holdout.threshold)}-{int(100-100*self._holdout.threshold)}-holdout" if self._holdout is not None and self._holdout.threshold != 1.0 else "")
 
     def _initialiseGraph(self, vocab: Dict[str, int], mergelist: MergeList, quiet: bool=True):
         self.merge_graph = MergeGraph(vocab, mergelist, quiet=quiet)
@@ -1102,7 +1073,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
                 #           - Then ab+cd is chosen as a submerge with priority 2.5, making the triplet a binary merge abcd+e with priority 3.
                 #           - Then merge a+b with priority 0 is knocked out and you get a triplet merge a+b+cd with priority 2.5.
                 #           - AND NOW, merge b+cd is a submerge whose priority is based on that 2.5.
-                submerge.priority = lowest_triplet.priority - 0.05
+                submerge.priority = lowest_triplet.priority - EPS
 
             # In the triplets that are currently blocked by the existence of the submerge (a problem which vanilla BPE-knockout even has), replace the relevant parts by the submerge result.
             merge_had_effect = False  # "was loop not empty"; this can only stay false for merges that (1) already existed and (2) are VERY late.
@@ -1199,12 +1170,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
             warnings.warn("While saving, it was discovered that the set of types without a merge plus the set of types formed by the merge list DO NOT make up the vocabulary. This is weird!")
 
         # Serialise
-        serialised = {
-            "versions": {
-                "bpe_knockout": __version__,
-                "tktkt": tktkt.__version__
-            },
-            "name": self.getName(),
+        serialised = self._getMetadata() | {
             "init-metadata": dataclasses.asdict(self._config) | \
                 {
                     "holdout": self._holdout.threshold,
@@ -1224,18 +1190,23 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
         return out_path
 
     def saveIterationDiagnostics(self, folder: Path) -> Path:
-        serialised = {
-            "versions": {
-                "bpe_knockout": __version__,
-                "tktkt": tktkt.__version__
-            },
-            "name": self.getName(),
-            "iterations": self._diagnostics
-        }
+        serialised = self._getMetadata() | {"iterations": self._diagnostics}
         out_path = folder / time.strftime(f"diagnostics_BTE_{datetimeDashed()}.json")
         with open(out_path, "w", encoding="utf-8") as handle:
             json.dump(serialised, handle, indent=4, ensure_ascii=False)
         return out_path
+
+    def _getMetadata(self) -> dict:
+        return {
+            "versions": {
+                "bpe_knockout": __version__,
+                "tktkt": tktkt.__version__
+            },
+            "identifiers": {
+                "tokeniser": self.getName(),
+                "dataset": Pℛ𝒪𝒥ℰ𝒞𝒯.config.morphologies.identifier() if Pℛ𝒪𝒥ℰ𝒞𝒯.config.morphologies is not None else "",
+            }
+        }
 
     @staticmethod
     def from_pretrained_tktkt(checkpoint: Union[str, Path], preprocessor: Preprocessor=None) -> "BTE":

@@ -151,6 +151,37 @@ class BPEngineer:
             )
         )
 
+    def printSurroundingGraph(self, t: str):
+        """
+        Print the vertices (types) that emanate from the given type, and its siblings (i.e. types emanating from its
+        parents), along with the relevant edges (merges).
+        """
+        involved_merges = self.bte.merge_graph.merges_with[t]
+
+        children = [m.childType() for m in involved_merges]
+        spouses = set()
+        for child in children:
+            spouses.update(self.bte.merge_graph.merges_of[child][0].parts)
+        if children:
+            spouses.remove(t)
+
+        parent_merge = self.bte.merge_graph.merges_of[t][0]
+        parents = parent_merge.parts
+
+        siblings = set()
+        parental_spouses = set()
+        for parent in parents:
+            children_of_parent = self.bte.merge_graph.merges_with[parent]
+            for child_merge in children_of_parent:
+                parental_spouses.update(child_merge.parts)
+                siblings.add(child_merge.childType())
+        siblings.remove(t)
+
+        print("Things it makes:", len(children), children)
+        print("Things it combines with:", len(spouses), spouses)
+        print("Things its parents produce:", len(siblings), siblings)
+        print("Parents and their spouses:", len(parental_spouses), parental_spouses)
+
     def buildTransitionGraph(self, pretoken: str):
         def bufferToBits(buffer: str):
             bits = []
