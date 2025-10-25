@@ -24,7 +24,7 @@ from tqdm.auto import tqdm
 
 import tktkt  # To have access to tktkt.__version__
 from tktkt.util.types import Tokens
-from tktkt.util.iterables import cumsum
+from tktkt.util.iterables import cumsum, count
 from tktkt.util.strings import indicesToTokens
 from tktkt.util.printing import *
 from tktkt.util.timing import datetimeDashed
@@ -44,10 +44,20 @@ MergeList   = List[MergeOnDisk]
 MergeAsTuple = Tuple[int, str, str]  # (priority, "a b c", "abc")
 
 
+class MergeExplanation(Enum):
+    PREEXISTING     = 1
+    KNOCKOUT        = 2
+    ANNEALED        = 3
+    REPAIRED        = 4
+    REIFIED         = 5
+    ALREADY_REIFIED = 6
+
+
 @dataclass
 class Merge:
     priority: int
     parts: List[str]
+    explanation: MergeExplanation
 
     def __lt__(self, other):
         return self.priority < other.priority
@@ -141,7 +151,7 @@ class MergeGraph:
                         warn(f"Adding atom '{part}' with more than 1 character to the vocabulary.")
                     self.addVertex(part)
 
-        new_merge = Merge(self.next_merge, parts)
+        new_merge = Merge(self.next_merge, parts, explanation=MergeExplanation.PREEXISTING)
         new_type = new_merge.childType()
 
         if new_type not in self.vocab:
@@ -170,6 +180,7 @@ class MergeGraph:
                 .replace("  ", " ")
                 .strip()
             )
+            m.explanation = MergeExplanation.KNOCKOUT
 
         # Cut the type out of the graph.
         self.cascade(type_to_delete, cleanup=False)
@@ -448,18 +459,19 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
                             if m.blame_ratio >= self._config.knockout.relative_blame_minimum]
         n_eligible = len(merges_to_remove)
         merges_to_remove = merges_to_remove[:max(0, self.getVocabSize() - self._config.knockout.min_vocab_size)]
-        self._removeMerges([m.merge for m in merges_to_remove])
+        self._removeKnockoutMerges([m.merge for m in merges_to_remove])
         self._diagnostics.append({
             "type": "knockout",
             "eligible": n_eligible,
             "max_offences": max((merge.n_bad_applications for merge in merges_to_remove), default=0),
             "max_blame":    max((merge.blame_ratio for merge in merges_to_remove), default=0),
             "min_blame":    min((merge.blame_ratio for merge in merges_to_remove), default=0),
-            "vocab_size": self.getVocabSize()
+            "vocab_size": self.getVocabSize(),
+            "explanations": {e.name: count(filter(lambda m: m.merge.explanation == e, merges_to_remove)) for e in MergeExplanation}
         })
         return merges_to_remove  # For diagnostic purposes
 
-    def _removeMerges(self, merges_to_remove: Iterable[Merge]):
+    def _removeKnockoutMerges(self, merges_to_remove: Iterable[Merge]):
         for merge in tqdm(merges_to_remove, desc="PRUNING GRAPH", disable=not self._print.verbose):
             if self._config.reify == ReifyMode.NONE_CASCADE:
                 try:  # Cascading removes many types, so chances are that one type removes another type to be removed.
@@ -494,7 +506,9 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
                     else:
                         merges_to_add.pop()
             i += 1
-        self._addMerges([m.merge for m in merges_to_add], add_missing_atoms=True)
+
+        # Actually do the addition
+        self._addAnnealingMerges([m.merge for m in merges_to_add], add_missing_atoms=True)
         self._diagnostics.append({
             "type": "anneal",
             "eligible": n_eligible,
@@ -506,10 +520,11 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
         })
         return merges_to_add  # For diagnostic purposes
 
-    def _addMerges(self, merges_to_add: Iterable[str], add_missing_atoms: bool=False):
+    def _addAnnealingMerges(self, merges_to_add: Iterable[str], add_missing_atoms: bool=False):
         for merge_string in tqdm(merges_to_add, desc="ANNEALING GRAPH", disable=not self._print.verbose):
             try:
-                self.merge_graph.addArc(merge_string, add_missing_atoms=add_missing_atoms)
+                m = self.merge_graph.addArc(merge_string, add_missing_atoms=add_missing_atoms)
+                m.explanation = MergeExplanation.ANNEALED
             except:
                 warn(f"Failed to add arcs for {merge_string} to BPE graph. Probably a missing atom.")
         self._syncWithGraph()
@@ -886,6 +901,9 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
         Do note that other merges are affected by any reordering, but we will assume this isn't detrimental as long as we don't disable them.
         To test if a merge has been fully disabled, a simple check is to see if the subword as a string can still be merged.
         """
+        if iterations > 0 and self._config.knockout.reference == ReferenceMode.NONE:
+            raise ValueError(f"Requested {pluralise(iterations, 'iteration')} without knockout configured.")
+
         self._diagnostics.append({"type": "baseline", "vocab_size": self.getVocabSize()})
         if evaluator:
             evaluator.evaluate(self, self._holdout, [f"{0} it", "base"])
@@ -898,8 +916,8 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
                 evaluator.evaluate(self, self._holdout, [f"{0} it", "+anneal"])
 
         # Stopping conditions
-        END_IF_NO_MORE_DELETIONS = False  # If False, it's possible to just be reifying merges recursively (you reify, do no knockout, then reify again). Note that it's possible to have no knockout in one iteration, but do knockout in the next after adding some novel merges.
-        END_IF_NO_MORE_ADDITIONS = False  # If True, will cause early stopping when there are no more non-disqualified merges to be suggested, or those that were suggested all need to be created whereas the config demands backwards-compatibility, or if it wasn't, they exist above their triplet.
+        END_IF_NO_MORE_DELETIONS = self._config.reify.does_nothing()  # If False, it's possible to just be reifying merges recursively (you reify, do no knockout, then reify again). Note that it's possible to have no knockout in one iteration, but do knockout in the next after adding some novel merges.
+        END_IF_NO_MORE_ADDITIONS = False  # If False, can do multiple rounds of knockout without any reification. If True, will cause early stopping when there are no more non-disqualified merges to be suggested, or those that were suggested all need to be created whereas the config demands backwards-compatibility, or if it wasn't, they exist above their triplet.
         DO_KNOCKOUT_IF_NOT_ENDED_ON_IT = True  # Recommendable because the latest additions might be morphologically bad.
         needs_final_knockout = DO_KNOCKOUT_IF_NOT_ENDED_ON_IT and iterations > 0
 
@@ -920,7 +938,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
                 evaluator.evaluate(self, self._holdout, [f"{iteration} it", "+knockout"])
 
             # --- REIFICATION PHASE ---
-            if self._config.reify in {ReifyMode.NONE, ReifyMode.NONE_CASCADE}:
+            if self._config.reify.does_nothing():
                 continue
 
             all_disqualified_merges.update(" ".join(m.merge.parts) for m in removed_merges)
@@ -996,7 +1014,9 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
             # If the tokens are not as dictated by the merge that is supposed to concatenate them, it needs fixing.
             if limited_tokens != m.parts:
                 # self._print(f"Found divergent triplet: expected {m.parts} but got {limited_tokens}")
-                new_merges.add(self.merge_graph.rewire(typ, limited_tokens))
+                m = self.merge_graph.rewire(typ, limited_tokens)
+                m.explanation = MergeExplanation.REPAIRED
+                new_merges.add(m)
         diagnostics["triplets_repaired"] = len(new_merges)
 
         if not self._config.reify.does_link():
@@ -1107,8 +1127,10 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
             if merge_had_effect:
                 new_merges.add(submerge)
                 if type_is_new:
+                    submerge.explanation = MergeExplanation.REIFIED
                     diagnostics["created_merges"] += 1
                 else:
+                    submerge.explanation = MergeExplanation.ALREADY_REIFIED
                     diagnostics["applied_merges"] += 1
 
         self._syncWithGraph()

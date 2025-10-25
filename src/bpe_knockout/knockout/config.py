@@ -46,6 +46,9 @@ class ReifyMode(str, Enum):
 
     NONE_CASCADE = 7  # Alters BPE-knockout to cascade its merges rather than rewiring them into tuple merges. No fixing, linking, or making can thus be done.
 
+    def does_nothing(self):
+        return self in {ReifyMode.NONE, ReifyMode.NONE_CASCADE}
+
     def does_fix(self):
         return self in {ReifyMode.FIX, ReifyMode.FIX_AND_LINK, ReifyMode.FIX_AND_LINK_AND_MAKE}
 
