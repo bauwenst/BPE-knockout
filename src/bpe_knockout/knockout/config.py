@@ -89,7 +89,7 @@ class AnnealingConfig:
     reference: ReferenceMode = ReferenceMode.NONE
     when: AnnealingTime = AnnealingTime.BEFORE  # Only matters when annealing is set to something other than None.
     max_vocab_size: int = 1_000_000
-    absolute_application_minimum: int = 2       # A merge has to be applied without issue at least this many times to be worth adding.
+    absolute_application_minimum: int = 3       # A merge has to be applied without issue at least this many times to be worth adding.
     relative_amenability_minimum: float = 0.80  # A merge has to be applied without issue at least with this ratio.
 
 

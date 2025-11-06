@@ -1,4 +1,4 @@
-__version__ = "2025.10.02"
+__version__ = "2025.11.01"
 
 from .knockout.config import BTEConfig, KnockoutConfig, AnnealingConfig, ReferenceMode, ReifyMode, AnnealingTime
 from .knockout.core import BTE, BTEConfig, ReferenceMode, ReifyMode, ExecutionPolicy

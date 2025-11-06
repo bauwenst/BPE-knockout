@@ -5,7 +5,6 @@ from tst.preamble import *
 from tst.tokenisation.robbert_tokenizer import robbert_tokenizer, getMergeList_RobBERT
 
 import math
-import scipy
 
 from tktkt.interfaces.tokeniser import Tokeniser, prepare_tokenise_decode
 from tktkt.util.timing import timeit
@@ -309,6 +308,7 @@ def main_knockedMerges_Multilingual():
     Histogram of the IDs of the knocked-out merges
     + Histogram of the length of each left and right type.
     """
+    import scipy
     import langcodes
 
     for language in getAllConfigs():  # Kinda sucks that you need to build the entire config to just call .needs_computation...

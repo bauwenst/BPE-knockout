@@ -33,7 +33,7 @@ from tqdm.auto import tqdm
 
 from tktkt.interfaces.preparation import Preprocessor
 from tktkt.preparation.boundaries import BoundaryMarker
-from tktkt.factories.preprocessing import SennrichSpaceMarker, IdentityMapper, PretokeniserSequence, AddWordBoundary, HyphenMode, PunctuationPretokeniser, WhitespacePretokeniser
+from tktkt.factories.preprocessing import SennrichSpaceMarker, IdentityMapper, PretokeniserSequence, AddWordBoundary, HyphenMode, IsolatePunctuation, OnWhitespace
 
 from .heap import HeapWithInverseIndex
 
@@ -44,10 +44,10 @@ DEFAULT_PREPROCESSOR = Preprocessor(  # [Bauwens] This is a minimal preprocessor
     IdentityMapper(),
     IdentityMapper(),
     PretokeniserSequence([
-        PunctuationPretokeniser(HyphenMode.EXCLUDED, protect_apostrophes_without_spaces=False),
-        WhitespacePretokeniser(destructive=True),
+        IsolatePunctuation(HyphenMode.EXCLUDED, protect_apostrophes_without_spaces=False),
+        OnWhitespace(destructive=True),
         AddWordBoundary(SennrichSpaceMarker),
-        PunctuationPretokeniser(HyphenMode.ONLY),
+        IsolatePunctuation(HyphenMode.ONLY),
     ])
 )
 
@@ -85,7 +85,7 @@ class VocabCounter:
             return
 
         # [Bauwens] Proper treatment of boundary markers.
-        pretoken_as_tuple = tuple(self.marker.intoCharacters(pretoken))
+        pretoken_as_tuple = tuple(self.marker.atomise(pretoken))
 
         # The original code
         index = self.forward_index.get(pretoken_as_tuple)

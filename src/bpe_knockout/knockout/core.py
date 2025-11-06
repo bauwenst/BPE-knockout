@@ -541,7 +541,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
                because these units will interact during tokenisation. The units are usually characters, but they don't
                have to be; Sennrich's repo shows this with an attached end-of-word, e.g. "word" -> "w o r d</w>".
         """
-        return self._boundary_marker.intoCharacters(pretoken.replace(" ", ""))
+        return self._boundary_marker.atomise(pretoken.replace(" ", ""))
 
     def _finalTokens(self, tokens: Tokens) -> Tokens:
         """

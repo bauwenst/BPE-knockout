@@ -27,7 +27,6 @@ from modest.interfaces.morphologies import WordDecompositionWithFreeSegmentation
 from ..project.paths import *
 from ..auxiliary.tokenizer_interface import BpeTokeniserPath, SennrichTokeniserPath
 from ..datahandlers.wordfiles import loadAndWeightLexicon
-from ..datahandlers.bpetrainer import BPETrainer
 
 
 class ImputablePath(ABC):
@@ -74,6 +73,8 @@ class ProjectConfig(ABC):
             self.morphologies._files()
 
     def imputeTokeniser(self):
+        from ..datahandlers.bpetrainer import BPETrainer
+
         # TODO: These should probably go somewhere else.
         VOCAB_SIZE = 40_000
         BYTE_BASED = True
