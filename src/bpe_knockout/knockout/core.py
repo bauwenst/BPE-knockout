@@ -30,6 +30,7 @@ from tktkt.util.printing import *
 from tktkt.util.timing import datetimeDashed
 from tktkt.interfaces.tokeniser import TokeniserWithVocabDict
 from tktkt.interfaces.huggingface import TktktToHuggingFace
+from tktkt.interfaces.identifiers import WithSpecials
 from tktkt.wrappers.multiplexing import SuccessionalTokeniser
 from tktkt.factories.preprocessing import Preprocessor, BoundariesFromSpacesPretokeniser, RobertaSpaceMarker
 
@@ -356,13 +357,13 @@ SPLIT_MARKER = "|"
 SPLIT_MARKER_RE = re.compile(re.escape(SPLIT_MARKER))
 
 
-class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
+class BTE(TokeniserWithVocabDict[WithSpecials], SuccessionalTokeniser):
     """
     Byte-tuple encoding (BTE): implementation of BPE that can deal with merges of more than 2 parts.
     """
 
     def __init__(self, init_config: BTEConfig,
-                 starting_vocab: Dict[str,int]=None, starting_mergelist: MergeList=None, unk_type: str=None,
+                 starting_vocab: Dict[str,int]=None, starting_mergelist: MergeList=None,
                  preprocessor: Preprocessor = None,
 
                  execution_policy: ExecutionPolicy=ExecutionPolicy.IMMEDIATE, holdout: Holdout=None, quiet: bool=False,
@@ -406,7 +407,7 @@ class BTE(TokeniserWithVocabDict, SuccessionalTokeniser):
         else:
             self._default_preprocessor = False
         self._boundary_marker = preprocessor.getBoundaryMarker()
-        super().__init__(preprocessor=preprocessor, vocab=self.merge_graph.vocab, unk_type=unk_type)
+        super().__init__(preprocessor=preprocessor, vocab=self.merge_graph.vocab)
 
         # Run constrction
         if execution_policy == ExecutionPolicy.IMMEDIATE:
