@@ -9,17 +9,15 @@ of project files, and be imported itself by most project files.
 It itself cannot run anything. Imputation should only be done by calling its
 functions.
 """
-from dataclasses import dataclass
+from abc import abstractmethod, ABC
 from typing import Callable, Optional, Iterable, Dict
+from langcodes import Language
+from dataclasses import dataclass
+
 import json
 import math
 import langcodes
-from langcodes import Language
-from abc import abstractmethod, ABC
 
-from modest.languages.dutch import Dutch_Celex
-from modest.languages.german import German_Celex
-from modest.languages.english import English_Celex
 from modest.interfaces.datasets import ModestDataset
 from modest.interfaces.morphologies import WordDecompositionWithFreeSegmentation
 
@@ -46,7 +44,7 @@ LINEAR_WEIGHTER  = lambda f: f
 ZIPFIAN_WEIGHTER = lambda f: 1 + math.log10(f)
 
 @dataclass
-class ProjectConfig(ABC):
+class ProjectConfig:
     # Name of the tested language, e.g. "English". Should exist, so that its standardised language code can be looked up.
     language_name: str
     # MoDeST dataset that contains morphological segmentations, both bound and free.
@@ -121,39 +119,6 @@ class OscarWordFile(ImputablePath):
 #########################################################################################
 
 
-def setupDutch() -> ProjectConfig:
-    return ProjectConfig(
-        language_name="Dutch",
-        lemma_counts=OscarWordFile(PATH_DATA_COMPRESSED / "words_oscar-nl.txt"),
-        morphologies=Dutch_Celex(legacy=True),
-        base_tokeniser=SennrichTokeniserPath(PATH_MODELBASE / "bpe-40k_oscar-nl-clean"),
-        reweighter=LINEAR_WEIGHTER
-    )
-
-
-def setupGerman() -> ProjectConfig:
-    return ProjectConfig(
-        language_name="German",
-        lemma_counts=OscarWordFile(PATH_DATA_COMPRESSED / "words_oscar-de.txt"),
-        morphologies=German_Celex(legacy=True),
-        base_tokeniser=SennrichTokeniserPath(PATH_MODELBASE / "bpe-40k_oscar-de-clean"),
-        reweighter=LINEAR_WEIGHTER
-    )
-
-
-def setupEnglish() -> ProjectConfig:
-    return ProjectConfig(
-        language_name="English",
-        lemma_counts=OscarWordFile(PATH_DATA_COMPRESSED / "words_oscar-en.txt"),
-        morphologies=English_Celex(legacy=True),
-        base_tokeniser=SennrichTokeniserPath(PATH_MODELBASE / "bpe-40k_oscar-en-clean"),
-        reweighter=LINEAR_WEIGHTER
-    )
-
-
-#########################################################################################
-
-
 @dataclass
 class Project:
     config: ProjectConfig=None
@@ -161,7 +126,7 @@ class Project:
     debug_prints: bool=False
     verbosity: bool=False
 
-Pℛ𝒪𝒥ℰ𝒞𝒯 = Project(setupDutch())
+Pℛ𝒪𝒥ℰ𝒞𝒯 = Project(None)
 # All files access this object for paths. Because it is an object, its fields can be changed by one
 # file (main.py) and those changes are available to all files. Hence, you call something like
 #       PROJECT.config = setupDutch()

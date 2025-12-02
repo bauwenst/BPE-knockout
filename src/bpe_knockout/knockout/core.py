@@ -20,19 +20,19 @@ import re
 import json
 import dacite
 import warnings
+
 from tqdm.auto import tqdm
 
 import tktkt  # To have access to tktkt.__version__
-from tktkt.util.types import Tokens
 from tktkt.util.iterables import cumsum, count
 from tktkt.util.strings import indicesToTokens
 from tktkt.util.printing import *
 from tktkt.util.timing import datetimeDashed
-from tktkt.interfaces.tokeniser import TokeniserWithVocabDict
-from tktkt.interfaces.huggingface import TktktToHuggingFace
-from tktkt.interfaces.identifiers import WithSpecials
+from tktkt.interfaces.tokeniser import *
+from tktkt.interfaces.identifiers import UnidentifiedVocab
 from tktkt.wrappers.multiplexing import SuccessionalTokeniser
 from tktkt.factories.preprocessing import Preprocessor, BoundariesFromSpacesPretokeniser, RobertaSpaceMarker
+from tktkt.interfaces.huggingface import TktktToHuggingFace
 
 from .. import __version__
 from ..datahandlers.holdout import Holdout
@@ -94,48 +94,39 @@ class MergeGraph:
     Handles the relationships between BPE types and merges.
 
     Has 4 data structures:
-        - self.vocab: dictionary from type string to ID. Comes from RobBERT.
+        - self.vocab: the vertices representing the types in the vocabulary.
         - self.merges: list of merges in order, as objects, each storing their priority and the list of their merged types.
         - self.merges_with: dictionary from type to a list of references to merge objects whose list contains that type.
         - self.merges_of: dictionary from type to the list of references to merge objects whose parts concatenate to form that type.
                           In vanilla BPE or BPE with just knockout, this list always has length 1 due to original functional sin.
     """
 
-    def __init__(self, vocab: Dict[str,int], raw_merges: MergeList, quiet=True):
-        self.next_type  = 0  # == 1 + max(self.vocab.values()), not always len(self.vocab) due to knockout.
+    def __init__(self, vocab: Vocab, raw_merges: MergeList, quiet=True):
         self.next_merge = 0  # == 1 + max([m.priority for m in self.merges]), not always len(self.merges) due to knockout.
-        self.id_range = set()
 
         # Initialise graph
         self.merges: List[Merge] = []
-        self.vocab:       Dict[str, int]         = dict()
+        self.vocab: Vocab = vocab
         self.merges_with: Dict[str, List[Merge]] = dict()
         self.merges_of:   Dict[str, List[Merge]] = dict()  # Note: in deterministic BPE vocabularisers, only one merge is learnt per type. And in deterministic BPE tokenisers, only one merge is ever used to form each type. Thus, in all practical scenarios, this list contains only one object (but it could contain more for BPE-dropout, in theory).
 
         # Fill graph
-        for raw_type, type_id in tqdm(vocab.items(), desc="ADDING VERTICES", disable=quiet):
-            self.addVertex(raw_type, suggested_id=type_id)
+        for raw_type in tqdm(vocab, desc="ADDING VERTICES", disable=quiet):
+            self.addVertex(raw_type)
 
         for raw_merge in tqdm(raw_merges, desc="LINKING VERTICES", disable=quiet):
             self.addArc(raw_merge)
 
-    def addVertex(self, type_to_add: str, suggested_id: int=-1):
-        if type_to_add in self.vocab:
-            raise ValueError(f"The type '{type_to_add}' is already in the merge graph.")
+    def addVertex(self, type_to_add: str):
         if " " in type_to_add:
             raise ValueError(f"The type '{type_to_add}' contains a space. This is illegal.")
 
-        # Bad suggestions are replaced by the ID that is 1 bigger than the biggest ID so far (NOT the smallest unused).
-        if suggested_id < 0 or suggested_id in self.id_range:
-            suggested_id = self.next_type
-            self.next_type += 1
-        else:
-            self.next_type = max(self.next_type, suggested_id+1)
-
-        self.vocab[type_to_add]       = suggested_id
-        self.merges_with[type_to_add] = []
-        self.merges_of[type_to_add]   = []
-        self.id_range.add(suggested_id)
+        if type_to_add not in self.vocab:
+            self.vocab.add(type_to_add)
+        if type_to_add not in self.merges_with:
+            self.merges_with[type_to_add] = []
+        if type_to_add not in self.merges_of:
+            self.merges_of[type_to_add]   = []
 
     def addArc(self, merge_to_add: MergeOnDisk, add_missing_atoms: bool=False) -> Merge:
         """
@@ -185,49 +176,6 @@ class MergeGraph:
 
         # Cut the type out of the graph.
         self.cascade(type_to_delete, cleanup=False)
-
-    def knockoutOld(self, type_to_delete: str):
-        """
-        Remove the given type from the vocabulary, and remap all the merges it is involved in appropriately.
-        Note: will cause merges to appear with more than 2 parts.
-        """
-        if type_to_delete not in self.vocab:
-            return
-
-        replacements = self.merges_of[type_to_delete]
-        if not replacements:  # Belongs to the alphabet (wasn't formed by a merge)
-            return
-        replacement = replacements[0]  # TODO: Not sure how to decide the replacement in case you have a merge graph without OFS.
-
-        # Remove from vocab.
-        removed_id = self.vocab.pop(type_to_delete)
-        self.id_range.remove(removed_id) # sets do not have a .pop(item) method.
-
-        # Remove the merge(s, if OFS doesn't hold) that created this type.
-        deleted_merges_of = self.merges_of.pop(type_to_delete)
-        for deleted_merge in deleted_merges_of:
-            self.merges.remove(deleted_merge)    # Remove the merge itself from the set of merges.
-            for t in set(deleted_merge.parts):   # Make the merge's parts forget they were part of it. NOTE: must be a set, otherwise merges like a+a try to make the same type forget it twice!
-                self.merges_with[t].remove(deleted_merge)
-
-        # Remove all merges emanating from this type, and instead make its children involved.
-        replacement_types = replacement.parts
-        affected_merges = self.merges_with.pop(type_to_delete)
-        for merge_to_edit in affected_merges:
-            # In the affected merge, replace the deleted type by its parts.
-            new_parts = []
-            for part in merge_to_edit.parts:
-                if part == type_to_delete:
-                    new_parts.extend(replacement_types)
-                    # No "break" statement here because a type can appear multiple times in one merge.
-                else:
-                    new_parts.append(part)
-            merge_to_edit.parts = new_parts
-
-            # Now make the replacement types aware that they are part of this merge.
-            for t in replacement_types:
-                if merge_to_edit not in self.merges_with[t]:
-                    self.merges_with[t].append(merge_to_edit)
 
     def rewire(self, type_to_rewire: str, new_merge: MergeOnDisk) -> Merge:
         if type_to_rewire not in self.vocab:
@@ -285,8 +233,7 @@ class MergeGraph:
 
         for type_to_delete in types_to_delete:
             # Remove from vocab.
-            removed_id = self.vocab.pop(type_to_delete)
-            self.id_range.remove(removed_id)
+            self.vocab.pop(type_to_delete)
 
             # Remove the merge that made this.
             for m in self.merges_of[type_to_delete]:
@@ -357,21 +304,29 @@ SPLIT_MARKER = "|"
 SPLIT_MARKER_RE = re.compile(re.escape(SPLIT_MARKER))
 
 
-class BTE(TokeniserWithVocabDict[WithSpecials], SuccessionalTokeniser):
+class BTE(TokeniserWithVocabulary[WithSpecials], SuccessionalTokeniser):
     """
     Byte-tuple encoding (BTE): implementation of BPE that can deal with merges of more than 2 parts.
     """
 
     def __init__(self, init_config: BTEConfig,
-                 starting_vocab: Dict[str,int]=None, starting_mergelist: MergeList=None,
-                 preprocessor: Preprocessor = None,
+                 starting_vocab: Vocab[WithSpecials], starting_mergelist: MergeList,
+                 preprocessor: Preprocessor=None,
 
                  execution_policy: ExecutionPolicy=ExecutionPolicy.IMMEDIATE, holdout: Holdout=None, quiet: bool=False,
                  iteration_evaluator: Evaluator=None):
         """
         :param execution_policy: whether to actually run the config or to postpone it for diagnostics.
         """
+        if preprocessor is None:  # TODO: This should perhaps be deprecated one day. It is a bad default preprocessor; it is just the one that was used in BPE-knockout's original work.
+            preprocessor = Preprocessor(splitter=BoundariesFromSpacesPretokeniser(marker=RobertaSpaceMarker, byte_based=True))
+            self._default_preprocessor = True
+        else:
+            self._default_preprocessor = False
+        super().__init__(preprocessor=preprocessor, vocab=starting_vocab)
+
         self._config = init_config
+        self._boundary_marker = preprocessor.getBoundaryMarker()
         self._has_run = execution_policy == ExecutionPolicy.FINISHED
         self._print = doPrint(not quiet, hesitate=True)
 
@@ -394,22 +349,16 @@ class BTE(TokeniserWithVocabDict[WithSpecials], SuccessionalTokeniser):
         self._print("Instantiating", self.getName(), "...")
         self.merge_graph: MergeGraph                       = None
         self.merges_starting_with: Dict[str, MergeAsTuple] = None  # Will be synchronised with the graph
-        if starting_vocab is None or starting_mergelist is None:
-            vocab_and_merges = defaultTokeniserFiles()
-            starting_vocab     = vocab_and_merges.loadVocabulary()
-            starting_mergelist = vocab_and_merges.loadMerges()
+
+        # if starting_vocab is None or starting_mergelist is None:
+        #     vocab_and_merges = defaultTokeniserFiles()
+        #     starting_vocab     = vocab_and_merges.loadVocabulary()
+        #     starting_mergelist = vocab_and_merges.loadMerges()
+
         self._initialiseGraph(starting_vocab, starting_mergelist, quiet=quiet)
+        assert self.merge_graph.vocab == self.vocab == starting_vocab
 
-        # Finish by completing the TkTkT interface.
-        if preprocessor is None:  # TODO: This should perhaps be deprecated one day. It is a bad default preprocessor; it is just the one that was used in BPE-knockout's original work.
-            preprocessor = Preprocessor(splitter=BoundariesFromSpacesPretokeniser(marker=RobertaSpaceMarker, byte_based=True))
-            self._default_preprocessor = True
-        else:
-            self._default_preprocessor = False
-        self._boundary_marker = preprocessor.getBoundaryMarker()
-        super().__init__(preprocessor=preprocessor, vocab=self.merge_graph.vocab)
-
-        # Run constrction
+        # Run construction
         if execution_policy == ExecutionPolicy.IMMEDIATE:
             self.runModes()
 
@@ -434,7 +383,7 @@ class BTE(TokeniserWithVocabDict[WithSpecials], SuccessionalTokeniser):
                 + (f"_anneal-{self._config.annealing.reference.toLetter()}-{self._config.annealing.when.toLetter()}") * do_anneal \
                 + (f"_{int(100*self._holdout.threshold)}-{int(100-100*self._holdout.threshold)}-holdout" if self._holdout is not None and self._holdout.threshold != 1.0 else "")
 
-    def _initialiseGraph(self, vocab: Dict[str, int], mergelist: MergeList, quiet: bool=True):
+    def _initialiseGraph(self, vocab: Vocab, mergelist: MergeList, quiet: bool=True):
         self.merge_graph = MergeGraph(vocab, mergelist, quiet=quiet)
         self._syncWithGraph()
 
@@ -443,8 +392,9 @@ class BTE(TokeniserWithVocabDict[WithSpecials], SuccessionalTokeniser):
         Synchronise the class's caching structures with the merge graph, which is the actual knowledge representation of
         the tokeniser's functionality.
         """
-        # Synchronise ID lookup
-        self.reverse_vocab = {v:k for k,v in self.merge_graph.vocab.items()}
+        # First, let the merge graph's edits take effect on the identifiers.
+        self.merge_graph.vocab.settle()
+        assert self.merge_graph.vocab == self.vocab
 
         # Synchronise merge strings
         padded_merge_rules = self.merge_graph.getPaddedMerges()  # There's no use storing these in one big set/list aside from merges_starting_with, since they're tuples and hence don't have a reference.
@@ -454,12 +404,12 @@ class BTE(TokeniserWithVocabDict[WithSpecials], SuccessionalTokeniser):
             head = tup[1][1:-1].split(" ")[0]
             self.merges_starting_with[head].append(tup)  # If this raises a KeyError, something is definitely wrong (merge strings don't match type strings).
 
-    def _prune(self) -> List[MergeBlame]:
+    def _knockout(self) -> List[MergeBlame]:
         self._print("Knockout...")
         merges_to_remove = [m for m in self._rankOldMergesForKnockout(blame_tuples_once=self._config.knockout.blame_tuples_once)
                             if m.blame_ratio >= self._config.knockout.relative_blame_minimum]
         n_eligible = len(merges_to_remove)
-        merges_to_remove = merges_to_remove[:max(0, self.getVocabSize() - self._config.knockout.min_vocab_size)]
+        merges_to_remove = merges_to_remove[:max(0, len(self.merge_graph.vocab) - self._config.knockout.min_vocab_size)]
         self._removeKnockoutMerges([m.merge for m in merges_to_remove])
         self._diagnostics.append({
             "type": "knockout",
@@ -467,7 +417,7 @@ class BTE(TokeniserWithVocabDict[WithSpecials], SuccessionalTokeniser):
             "max_offences": max((merge.n_bad_applications for merge in merges_to_remove), default=0),
             "max_blame":    max((merge.blame_ratio for merge in merges_to_remove), default=0),
             "min_blame":    min((merge.blame_ratio for merge in merges_to_remove), default=0),
-            "vocab_size": self.getVocabSize(),
+            "vocab_size": len(self.merge_graph.vocab),
             "explanations": {e.name: count(filter(lambda m: m.merge.explanation == e, merges_to_remove)) for e in MergeExplanation}
         })
         return merges_to_remove  # For diagnostic purposes
@@ -490,7 +440,7 @@ class BTE(TokeniserWithVocabDict[WithSpecials], SuccessionalTokeniser):
         n_eligible = len(merges_to_add)
 
         # Logic to stay within the given vocab size.
-        n_max_added = max(0, self._config.annealing.max_vocab_size - self.getVocabSize())
+        n_max_added = max(0, self._config.annealing.max_vocab_size - len(self.merge_graph.vocab))
         merges_to_add = merges_to_add[:n_max_added]
         n_can_be_added = n_max_added - len(merges_to_add)
 
@@ -517,7 +467,7 @@ class BTE(TokeniserWithVocabDict[WithSpecials], SuccessionalTokeniser):
             "min_good_applications": min((merge.n_potential_applications for merge in merges_to_add), default=0),
             "max_applications": max((merge.n_potential_applications for merge in merges_to_add), default=0),
             "atoms_added": len(missing_atoms),
-            "vocab_size": self.getVocabSize()
+            "vocab_size": len(self.merge_graph.vocab)
         })
         return merges_to_add  # For diagnostic purposes
 
@@ -851,9 +801,9 @@ class BTE(TokeniserWithVocabDict[WithSpecials], SuccessionalTokeniser):
         """
         Iterative knockout, with attempts to turn tuple merges back into binary merges (reification) in between.
         This method brings together the three main operations this class performs on BPE graphs:
-            - Knockout    (._prune)  to remove types and put a higher-order merge in place;
-            - Reification (._reify)  to turn higher-order merges into multiple binary merges;
-            - Annealing   (._anneal) to add merges that would form a token that fills an obvious gap in the vocabulary.
+            - Knockout    (._knockout) to remove types and put a higher-order merge in place;
+            - Reification (._reify)    to turn higher-order merges into multiple binary merges;
+            - Annealing   (._anneal)   to add merges that would form a token that fills an obvious gap in the vocabulary.
         ---
         There are subtle problems this implementation addresses, to do with the many-to-many properties of this task:
             - Nested knockout: it is actually the case that some types are knocked out whose own types were knocked out too.
@@ -905,7 +855,7 @@ class BTE(TokeniserWithVocabDict[WithSpecials], SuccessionalTokeniser):
         if iterations > 0 and self._config.knockout.reference == ReferenceMode.NONE:
             raise ValueError(f"Requested {pluralise(iterations, 'iteration')} without knockout configured.")
 
-        self._diagnostics.append({"type": "baseline", "vocab_size": self.getVocabSize()})
+        self._diagnostics.append({"type": "baseline", "vocab_size": len(self.merge_graph.vocab)})
         if evaluator:
             evaluator.evaluate(self, self._holdout, [f"{0} it", "base"])
 
@@ -927,7 +877,7 @@ class BTE(TokeniserWithVocabDict[WithSpecials], SuccessionalTokeniser):
             self._print(f"\n=== ITERATION {iteration} ===")
 
             # --- KNOCKOUT PHASE ---
-            removed_merges = self._prune()
+            removed_merges = self._knockout()
             needs_final_knockout = False
             self._print(f"Knocked out {len(removed_merges)} merges.")
 
@@ -953,7 +903,7 @@ class BTE(TokeniserWithVocabDict[WithSpecials], SuccessionalTokeniser):
 
             if not removed_merges and not novel_merges:
                 self._print("Early stop: tokeniser fully converged (no more deletions, no more additions).")
-                self._diagnostics.append({"type": "convergence", "iterations": iteration - 1, "vocab_size": self.getVocabSize()})  # The iteration where you discover that you are identical to previous iteration does not count.
+                self._diagnostics.append({"type": "convergence", "iterations": iteration - 1, "vocab_size": len(self.merge_graph.vocab)})  # The iteration where you discover that you are identical to previous iteration does not count.
                 break
 
             if evaluator and novel_merges:
@@ -961,7 +911,7 @@ class BTE(TokeniserWithVocabDict[WithSpecials], SuccessionalTokeniser):
 
         if needs_final_knockout and DO_KNOCKOUT_IF_NOT_ENDED_ON_IT:
             self._print("\n=== FINAL PRUNE ===")
-            self._prune()
+            self._knockout()
             if evaluator:
                 evaluator.evaluate(self, self._holdout, [f"{iteration + 1} it", "+knockout"])
 
@@ -1137,7 +1087,7 @@ class BTE(TokeniserWithVocabDict[WithSpecials], SuccessionalTokeniser):
         self._syncWithGraph()
 
         # Diagnostics
-        diagnostics["vocab_size"] = self.getVocabSize()
+        diagnostics["vocab_size"] = len(self.merge_graph.vocab)
         self._diagnostics.append(diagnostics)
         return new_merges
 
