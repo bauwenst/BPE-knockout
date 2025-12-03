@@ -1,10 +1,7 @@
+from tst.preamble import *
 import itertools
 from typing import List
 import re
-
-from tst.preamble import *
-from bpe_knockout.auxiliary.tokenizer_interface import SennrichTokeniserPath
-
 
 TEXCHARS = re.compile(r"([&#$%{}_^\\])")
 
@@ -68,8 +65,8 @@ if __name__ == "__main__":
     # l2 = l1.copy() + ["f", "g"]
     # npr.shuffle(l2)
     # matchListElements(l1, l2)
-    from bpe_knockout.project.paths import PATH_DATA_TEMP, PATH_MODELBASE
-    from bpe_knockout.auxiliary.tokenizer_interface import HuggingFaceTokeniserPath, SennrichTokeniserPath
+    from bpe_knockout.util.project import PATH_DATA_TEMP, PATH_MODELBASE
+    from bpe_knockout.util.tokenizer_interface import HuggingFaceTokeniserPath, SennrichTokeniserPath
     l1 = HuggingFaceTokeniserPath(PATH_DATA_TEMP / "robbert_2020.json").loadMerges()
     l2 = SennrichTokeniserPath(PATH_MODELBASE / "bpe-oscar-nl-clean").loadMerges()
     matchListElements(l1, l2, max_length=500)

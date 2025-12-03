@@ -1,17 +1,19 @@
-from typing import List, Dict, Tuple
+from typing import List, Tuple
 from pathlib import Path
-from abc import abstractmethod, ABC
-import json
 import requests
 
-from tktkt.interfaces.tokeniser import Tokeniser
 from transformers import AutoTokenizer, RobertaTokenizerFast, PreTrainedTokenizerFast
 from huggingface_hub import hf_hub_download
 
-from ..datahandlers.holdout import Holdout
-from ..project.paths import *
+from bpe_knockout.util.project.config import *
+
+from tktkt.paths import TkTkTPaths
 
 DEFAULT_TOKENISER_STEM = "tokenizer"
+
+
+def makeDownloadPath() -> Path:
+    return TkTkTPaths.pathToCheckpoints("downloads")
 
 
 def AutoTokenizer_from_pretrained(path_or_name: str) -> PreTrainedTokenizerFast:
@@ -24,17 +26,6 @@ def AutoTokenizer_from_pretrained(path_or_name: str) -> PreTrainedTokenizerFast:
         return PreTrainedTokenizerFast(tokenizer_file=path.as_posix())
     else:  # Get it from the hub (or from the HF_CACHE, presumably).
         return AutoTokenizer.from_pretrained(path_or_name)
-
-
-class Evaluator(ABC):
-    """
-    Interface for evaluating a tokeniser.
-    Can be used as an optional argument in tokeniser source code without having to import a testing/visualisation framework in your source.
-    """
-
-    @abstractmethod
-    def evaluate(self, tokeniser: Tokeniser, holdout: Holdout, experiment_names: List[str]):
-        pass
 
 
 class BpeTokeniserPath(ABC):
@@ -111,9 +102,9 @@ class SennrichTokeniserPath(BpeTokeniserPath):
 
         return RobertaTokenizerFast(vocab_file=vocab.as_posix(), merges_file=merges.as_posix())  # Will apply byte-based pretokeniser.
 
-    @staticmethod
-    def fromName(name: str) -> BpeTokeniserPath:
-        return SennrichTokeniserPath(PATH_MODELBASE / name)
+    # @staticmethod
+    # def fromName(name: str) -> BpeTokeniserPath:
+    #     return SennrichTokeniserPath(PATH_MODELBASE / name)
 
 
 class HuggingFaceTokeniserPath(BpeTokeniserPath):
@@ -147,6 +138,7 @@ class HuggingFaceTokeniserPath(BpeTokeniserPath):
         HuggingFace tokeniser with the given name.
         (The reason you can't do this in getAsDict() is because the name isn't known there, only the path.)
         """
+        PATH_DATA_TEMP = makeDownloadPath()
         if use_hf_cache:
             try:
                 cache = Path(hf_hub_download(repo_id=name, filename="tokenizer.json"))
@@ -202,12 +194,15 @@ class HuggingFaceTokeniserPath(BpeTokeniserPath):
         return HuggingFaceTokeniserPath.fromName(name)
 
 
-def fetchAndCacheDict(url: str, stem: str, cache_folder: Path=PATH_DATA_TEMP) -> dict:
+def fetchAndCacheDict(url: str, stem: str, cache_folder: Path=None) -> dict:
     """
     Download something with json syntax from the internet,
     store it locally, and return it as a dictionary.
     If it already exists locally, it is not downloaded again, to protect against outages.
     """
+    if cache_folder is None:
+        cache_folder = makeDownloadPath()
+
     path = cache_folder / (stem + ".json")
     if path.exists():
         with open(path, "r", encoding="utf-8") as handle:

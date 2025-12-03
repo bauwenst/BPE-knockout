@@ -1,23 +1,22 @@
 """
 FIXME: Every occurrence of intrinsicEvaluation should be replaced by TkTkT's morphological evaluation pipeline.
 """
-from tst.preamble import *
 from tst.tokenisation.robbert_tokenizer import robbert_tokenizer, getMergeList_RobBERT
+from tst.configs import setupEnglish, setupDutch, setupGerman
 
 import math
 
-from tktkt.interfaces.tokeniser import Tokeniser, prepare_tokenise_decode
+from tktkt.interfaces.tokeniser import prepare_tokenise_decode
 from tktkt.util.timing import timeit
 from tktkt.evaluation.morphological import ConfusionMatrix, compareSplits_cursors
 from tktkt.models.huggingface.wrapper import HuggingFaceTokeniser
 from tktkt.factories.evaluation import evaluateTokeniserOnMorphology
 
 from fiject import *  # Fiject project found at https://github.com/bauwenst/fiject
-from fiject.visuals.tables import ColumnStyle, Table, DeltaMode
+from fiject.visuals.tables import ColumnStyle, Table
 
-from bpe_knockout.knockout.core import *
-from bpe_knockout.project.config import *
-from bpe_knockout.datahandlers.wordfiles import ACCENTS
+from bpe_knockout.model.vocabulariser import *
+from bpe_knockout.util.datahandlers.wordfiles import ACCENTS
 
 
 print("Loading tests...")
@@ -86,11 +85,11 @@ def visualise():
 
 def test_save_and_load():
     bte = BTE(init_config=BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC)), execution_policy=ExecutionPolicy.IMMEDIATE)
-    print(bte.getVocabSize())
+    print(bte.vocab.size())
     out_path = bte.save(PATH_DATA_TEMP)
 
     bte = BTE.load(out_path)
-    print(bte.getVocabSize())
+    print(bte.vocab.size())
 
 
 def time_iterators():
@@ -547,7 +546,7 @@ def main_intrinsicHoldout_Monolingual():
 
 @timeit
 def main_intrinsicWeightedTraining_Monolingual():
-    from bpe_knockout.knockout.inspection import BTE_NoTrivialKnockout
+    from bpe_knockout.model.inspection import BTE_NoTrivialKnockout
 
     table = Table(f"bte-intrinsic-weightedtraining_{Pℛ𝒪𝒥ℰ𝒞𝒯.config.langTag()}", caching=CacheMode.IF_MISSING)
     if table.needs_computation:

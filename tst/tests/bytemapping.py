@@ -14,8 +14,8 @@ from tst.tokenisation.robbert_tokenizer import robbert_tokenizer as rt
 from tktkt.models.huggingface.wrapper import HuggingFaceTokeniser
 robbert_tokenizer = HuggingFaceTokeniser(rt, for_single_words=True)
 
-from bpe_knockout.auxiliary.bytemapping import *
-from bpe_knockout.knockout.core import BTE, BTEConfig, ReferenceMode, ExecutionPolicy
+from bpe_knockout.util.bytemapping import *
+from bpe_knockout.model.vocabulariser import BTE, BTEConfig, ReferenceMode, ExecutionPolicy
 from tktkt.util.timing import timeit
 from tktkt.interfaces.tokeniser import prepare_tokenise_decode
 from fiject import LineGraph, CacheMode
@@ -184,8 +184,7 @@ def testMapping():
 
 
 def convertMerges():
-    from bpe_knockout.project.paths import PATH_DATA_TEMP
-    from bpe_knockout.auxiliary.tokenizer_interface import HuggingFaceTokeniserPath
+    from bpe_knockout.util.tokenizer_interface import HuggingFaceTokeniserPath
     robbert = HuggingFaceTokeniserPath(PATH_DATA_TEMP / "robbert_2020.json")
 
     changed = 0

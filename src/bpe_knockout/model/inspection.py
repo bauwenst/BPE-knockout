@@ -1,4 +1,4 @@
-from .core import *
+from .vocabulariser import *
 
 
 class BTE_NoTrivialKnockout(BTE):
@@ -19,7 +19,7 @@ class BTE_NoTrivialKnockout(BTE):
     (I show in my thesis that knockout's performance gain is indeed more than this.)
     """
 
-    def __init__(self, init_config: BTEConfig, starting_vocab: dict[str,int], starting_mergelist: MergeList, preprocessor: Preprocessor, long_part_threshold: int, holdout: Holdout=None):
+    def __init__(self, init_config: BTEConfig, starting_vocab: Vocab, starting_mergelist: MergeList, preprocessor: Preprocessor, long_part_threshold: int, holdout: Holdout=None):
         super().__init__(init_config=init_config, starting_vocab=starting_vocab, starting_mergelist=starting_mergelist, preprocessor=preprocessor, holdout=holdout)
         self._long_part_threshold = long_part_threshold
 

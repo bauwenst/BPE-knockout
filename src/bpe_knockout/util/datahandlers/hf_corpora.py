@@ -1,8 +1,12 @@
 from datasets import load_dataset, Dataset, IterableDataset
+from tktkt.util.types import NamedIterable
 from torch.utils.data import DataLoader
 from tokenizers import Regex
 import tokenizers.normalizers as tn
 import tokenizers.pre_tokenizers as tp
+
+from tktkt.models.word.vocabularisation import CountWords
+from tktkt.factories.preprocessing import TraditionalPreprocessor
 
 from .wordfiles import *
 from .unicode import punctuation_regex_str
@@ -13,11 +17,11 @@ def logger(msg: str):
 
 
 def generateDataloader_Oscar(langtag: str, sentence_preprocessor: Callable[[str],str],
-                             size_limit: int=None, shuffle: bool=False) -> Tuple[DataLoader, int]:
+                             size_limit: int=None, shuffle: bool=False, streamed: bool=True) -> Tuple[DataLoader, int]:
     """
     Note that the DataLoader is an iteraBLE, not an iteraTOR. It can be iterated over multiple times.
     """
-    if langtag != "en":
+    if not streamed and langtag != "en":
         logger("Loading dataset... (takes about 5 minutes for NL and 10 minutes for DE)")
         data: Dataset = load_dataset(path="oscar", name="unshuffled_deduplicated_" + langtag, split="train")
         logger("Finished loading.")
@@ -44,7 +48,7 @@ def generateDataloader_Oscar(langtag: str, sentence_preprocessor: Callable[[str]
 
     else:  # OSCAR-en is literally used by HuggingFace as example of dataset that is too gigantic to download (1.2 TiB...) https://huggingface.co/docs/datasets/stream
         logger(f"Streaming OSCAR {langtag}.")
-        data: IterableDataset = load_dataset(path='oscar', name="unshuffled_deduplicated_en",
+        data: IterableDataset = load_dataset(path='oscar-corpus/oscar', name="unshuffled_deduplicated_en",
                                              split='train', streaming=True)
         size = data.info.splits["train"].num_examples  # bruh who invented this interface
         if size_limit is not None and size > size_limit:
@@ -63,17 +67,19 @@ def generateDataloader_Oscar(langtag: str, sentence_preprocessor: Callable[[str]
     return DataLoader(data, shuffle=False, collate_fn=dictionaryProcessor), size
 
 
-def dataloaderToCounts(dataloader: DataLoader, output_stem: str, progress_bar_total: int=None):
-    out_path = PATH_DATA_COMPRESSED / (output_stem + ".txt")
-    if not out_path.exists():
-        out_path = iterableToWordsFile(dataloader, out_path,
-                                       cache_every=1_000_000, progress_bar_total=progress_bar_total)
-    else:
-        print(f"Found existing words file at {out_path.as_posix()}. If you want to regenerate it, delete it first.")
-
-    out_path = cleanWordFile(out_path)
-    out_path = trimWordFile(out_path, minimum=10)
-    return out_path
+def dataloaderToCounts(dataloader: DataLoader, output_stem: str):
+    counter = CountWords(
+        word_extractor=TraditionalPreprocessor(),
+        frequency_minimum=10,
+        sort_before_write=True,
+        cache_config=CountWords.CacheConfig(
+            checkpoint_every_examples=1_000_000,
+            flush_if_keys_exceed=1_000_000,
+            drop_if_multiple_exceeded=3,
+            delete_cache_after=True
+        )
+    )
+    return counter.vocabulariseFromStringIterable(NamedIterable(dataloader, name=output_stem))
 
 
 def punctuationPretokeniserExceptHyphens():

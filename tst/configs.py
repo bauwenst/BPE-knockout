@@ -5,7 +5,9 @@ from modest.languages.german import German_MorphyNet_Inflections, German_MorphyN
 from modest.languages.english import English_MorphyNet_Inflections, English_MorphyNet_Derivations
 from modest.transformations.combine import ChainedModestDatasets
 
-from bpe_knockout.project.config import *
+from bpe_knockout.util.project.config import ProjectConfig, OscarWordFile, LINEAR_WEIGHTER
+from bpe_knockout.util.project.paths import PATH_MODELBASE, PATH_DATA_COMPRESSED
+from bpe_knockout.util.tokenizer_interface import SennrichTokeniserPath
 
 
 def setupDutch() -> ProjectConfig:

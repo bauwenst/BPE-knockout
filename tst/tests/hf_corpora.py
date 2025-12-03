@@ -1,4 +1,4 @@
-from bpe_knockout.datahandlers.hf_corpora import *
+from bpe_knockout.util.datahandlers.hf_corpora import *
 
 pretokeniser = tp.Whitespace()  # Combines WhitespaceSplit and Punctuation
 normalizer   = tn.NFKC()  # There are 4 NFs. The ones with a K turn weird letters to their ASCII form. The ones with a D turn accents into "modifying characters" (which you need for StripAccent), e.g. in the two-character example "ä", while C composes them into one character again.

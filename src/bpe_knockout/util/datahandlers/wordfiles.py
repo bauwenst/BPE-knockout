@@ -1,57 +1,15 @@
-from typing import Iterable, TextIO, List, Tuple, Optional, Callable, Dict
+from typing import TextIO, Tuple, Optional, Callable, Dict
 from collections import Counter
+from pathlib import Path
 
-import re
-import time
 import gc
 from tqdm.auto import tqdm
 
-from ..project.paths import *
 from .unicode import *
 from tktkt.util.timing import *
 from tktkt.util.printing import *
 
-
-def iterableToWordsFile(line_iterable: Iterable[str], output_file: Path,
-                        cache_every: int=1_000_000, progress_bar_total: int=None):
-    """
-    Compresses the given string iterable to an output file, with the result
-    containing every unique word exactly once in the format
-        word1 count1
-        word2 count2
-        word3 count3
-        ...
-
-    Simplified from get_vocab() at https://github.com/rsennrich/subword-nmt/blob/master/subword_nmt/learn_bpe.py.
-    """
-    CACHE_FOLDER = PATH_DATA_TEMP / time.strftime("wordcounts-%Y%m%d-%H%M%S")
-    CACHE_FOLDER.mkdir(exist_ok=False)
-
-    total_counter = Counter()
-    caches = []
-    for idx,line in tqdm(enumerate(line_iterable), total=progress_bar_total, smoothing=0.05):
-        # Counting
-        for word in line.split():  # No strip needed: note that .strip() without arguments will delete ALL WHITESPACE (i.e. any sequence length of space, tab, newline, carriage...). Those newlines would break word files.
-            total_counter[word] += 1
-
-        # Caching
-        if (idx+1) % cache_every == 0:
-            cache_path = CACHE_FOLDER / f"{len(caches)+1}.txt"
-            saveWordsFile(total_counter, cache_path)
-            caches.append(cache_path)
-            total_counter = Counter()
-
-    # For safety, cache the current incomplete counter
-    if total_counter:
-        cache_path = CACHE_FOLDER / f"{len(caches) + 1}.txt"
-        saveWordsFile(total_counter, cache_path)
-        caches.append(cache_path)
-
-    # Merge and delete caches
-    mergeWordFiles(caches, output_file, delete_afterwards=True, trim_hapax_every=5)
-    CACHE_FOLDER.rmdir()
-
-    return output_file
+from ..tokenizer_interface import makeDownloadPath
 
 
 def iterateTxt(open_file_handle: TextIO, verbose=False):
@@ -446,7 +404,7 @@ def intersectLexiconCounts(all_lemmata_wordfile: Path,
     if all_lemmata_wordfile is None:  # Impossible to identify which cache file it would be.
         return None
 
-    cache_path = PATH_DATA_TEMP / f"{all_lemmata_wordfile.stem} ⊗ {subset_name}.txt"  # Path depends on the two files it intersects, otherwise it would be used even if you switched languages.
+    cache_path = makeDownloadPath() / f"{all_lemmata_wordfile.stem} ⊗ {subset_name}.txt"  # Path depends on the two files it intersects, otherwise it would be used even if you switched languages.
     if not cache_path.exists():
         if not all_lemmata_wordfile.exists():  # Impossible to fill the cache.
             return None

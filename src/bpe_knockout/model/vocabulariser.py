@@ -11,6 +11,7 @@ FIXME: Currently, there are really a lot of training methods in the tokeniser cl
 TODO: Because you're already requesting tokenisations and morphological segmentations during blame/amenability anyway,
       you might as well use those to compute a Re, Pr, F1 for free. It would cut the time for doing a diagnostic run in half.
 """
+from abc import ABC, abstractmethod
 from typing import Dict, Tuple, Set, Union, Any
 from dataclasses import dataclass
 from collections import Counter
@@ -29,15 +30,14 @@ from tktkt.util.strings import indicesToTokens
 from tktkt.util.printing import *
 from tktkt.util.timing import datetimeDashed
 from tktkt.interfaces.tokeniser import *
-from tktkt.interfaces.identifiers import UnidentifiedVocab
 from tktkt.wrappers.multiplexing import SuccessionalTokeniser
 from tktkt.factories.preprocessing import Preprocessor, BoundariesFromSpacesPretokeniser, RobertaSpaceMarker
 from tktkt.interfaces.huggingface import TktktToHuggingFace
 
 from .. import __version__
-from ..datahandlers.holdout import Holdout
-from ..project.config import Pℛ𝒪𝒥ℰ𝒞𝒯, lexiconWeights, morphologyGenerator, defaultTokeniserFiles
-from ..auxiliary.tokenizer_interface import Evaluator, fetchAndCacheDict, DEFAULT_TOKENISER_STEM, PATH_DATA_TEMP
+from ..util.datahandlers.holdout import Holdout
+from ..util.project.config import Pℛ𝒪𝒥ℰ𝒞𝒯, lexiconWeights, morphologyGenerator, defaultTokeniserFiles
+from ..util.tokenizer_interface import fetchAndCacheDict, DEFAULT_TOKENISER_STEM, makeDownloadPath
 from .config import *
 
 MergeOnDisk = Union[str, List[str], Tuple[str,...]]  # "a b c" or ("a", "b", "c") with implicit priority.
@@ -295,6 +295,17 @@ class ExecutionPolicy(str, Enum):
     IMMEDIATE = 1
     POSTPONED = 2
     FINISHED  = 3
+
+
+class Evaluator(ABC):
+    """
+    Interface for evaluating a tokeniser.
+    Can be used as an optional argument in tokeniser source code without having to import a testing/visualisation framework in your source.
+    """
+
+    @abstractmethod
+    def evaluate(self, tokeniser: Tokeniser, holdout: Holdout, experiment_names: List[str]):
+        pass
 
 
 EPS = 0.001
@@ -1202,7 +1213,7 @@ class BTE(TokeniserWithVocabulary[WithSpecials], SuccessionalTokeniser):
             else:
                 path = pathified
         else:  # Comes from a remote location. Could've been cached already though.
-            path = PATH_DATA_TEMP / checkpoint.replace("/", "--") / f"{DEFAULT_TOKENISER_STEM}.json"
+            path = makeDownloadPath() / checkpoint.replace("/", "--") / f"{DEFAULT_TOKENISER_STEM}.json"
             if not path.exists():
                 # TODO: I wonder how this function fails, actually.
                 fetchAndCacheDict(f"https://huggingface.co/{checkpoint}/raw/main/tokenizer.json",

@@ -1,12 +1,12 @@
-import json
 from typing import Dict
+from pathlib import Path
 
+import json
 from tokenizers import Tokenizer, models, normalizers, pre_tokenizers, trainers, decoders
 
-from ..project.paths import *
-from ..auxiliary.tokenizer_interface import SennrichTokeniserPath, HuggingFaceTokeniserPath
+from bpe_knockout.util.tokenizer_interface import SennrichTokeniserPath, HuggingFaceTokeniserPath
 from ..datahandlers.wordfiles import wordfileToBpeCorpus
-from .._lib.sbpe.learn_bpe import learn_bpe
+from bpe_knockout._lib.sbpe.learn_bpe import learn_bpe
 
 from transformers import SpecialTokensMixin
 PAD = "<pad>"

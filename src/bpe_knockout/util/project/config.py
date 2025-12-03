@@ -13,6 +13,7 @@ from abc import abstractmethod, ABC
 from typing import Callable, Optional, Iterable, Dict
 from langcodes import Language
 from dataclasses import dataclass
+from pathlib import Path
 
 import json
 import math
@@ -22,9 +23,8 @@ from modest.interfaces.datasets import ModestDataset
 from modest.interfaces.morphologies import WordDecompositionWithFreeSegmentation
 
 # None of the below files import the config.
-from ..project.paths import *
-from ..auxiliary.tokenizer_interface import BpeTokeniserPath, SennrichTokeniserPath
-from ..datahandlers.wordfiles import loadAndWeightLexicon
+from bpe_knockout.util.tokenizer_interface import BpeTokeniserPath, SennrichTokeniserPath
+from bpe_knockout.util.datahandlers.wordfiles import loadAndWeightLexicon
 
 
 class ImputablePath(ABC):
@@ -112,7 +112,7 @@ class OscarWordFile(ImputablePath):
         dataloader, size = generateDataloader_Oscar(langtag=language.to_tag(),
                                                     sentence_preprocessor=punctuationPretokeniserExceptHyphens(),
                                                     size_limit=30_000_000)
-        counts = dataloaderToCounts(dataloader, self.path.stem, size)  # Takes about 28h30m (English), 4h30m (Dutch), ...
+        counts = dataloaderToCounts(dataloader, self.path.stem)  # Takes about 28h30m (English), 4h30m (Dutch), ...
         counts.rename(self.path)
 
 
