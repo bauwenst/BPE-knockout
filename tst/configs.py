@@ -7,7 +7,7 @@ from modest.transformations.combine import ChainedModestDatasets
 
 from bpe_knockout.util.project.config import ProjectConfig, OscarWordFile, LINEAR_WEIGHTER
 from bpe_knockout.util.project.paths import PATH_MODELBASE, PATH_DATA_COMPRESSED
-from bpe_knockout.util.tokenizer_interface import SennrichTokeniserPath
+from bpe_knockout.util.storage import SennrichTokeniserPath
 
 
 def setupDutch() -> ProjectConfig:

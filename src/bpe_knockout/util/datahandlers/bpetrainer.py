@@ -4,7 +4,7 @@ from pathlib import Path
 import json
 from tokenizers import Tokenizer, models, normalizers, pre_tokenizers, trainers, decoders
 
-from bpe_knockout.util.tokenizer_interface import SennrichTokeniserPath, HuggingFaceTokeniserPath
+from bpe_knockout.util.storage import SennrichTokeniserPath, HuggingFaceTokeniserPath
 from ..datahandlers.wordfiles import wordfileToBpeCorpus
 from bpe_knockout._lib.sbpe.learn_bpe import learn_bpe
 

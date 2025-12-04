@@ -20,7 +20,11 @@ class Holdout:
         self.threshold = train_fraction
         self.seed = seed
 
-    def __call__(self, iterator: Iterable[T], train=False, test=False) -> Iterable[T]:
+    def __call__(self, iterator: Iterable[T], train: bool=False, test: bool=False) -> Iterable[T]:
+        if self.threshold == 0.0 or self.threshold == 1.0:  # In these degenerate cases, just have the whole dataset available.
+            train = True
+            test = True
+
         self.it = iterator
         self.rng = npr.default_rng(seed=self.seed)
 

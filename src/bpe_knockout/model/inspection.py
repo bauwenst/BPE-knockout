@@ -1,7 +1,7 @@
 from .vocabulariser import *
 
 
-class BTE_NoTrivialKnockout(BTE):
+class BPEKnockoutVocabulariser_NoTrivialKnockout(BPEKnockoutVocabulariser):
     """
     BTE without knocking out trivial merges, which are merges where all parts are quite long and thus the merges are
     likely compounds. The reason these are trivial is that if you have a subword like 'lighthouse', it likely came from a merge
@@ -18,17 +18,18 @@ class BTE_NoTrivialKnockout(BTE):
 
     (I show in my thesis that knockout's performance gain is indeed more than this.)
     """
-
-    def __init__(self, init_config: BTEConfig, starting_vocab: Vocab, starting_mergelist: MergeList, preprocessor: Preprocessor, long_part_threshold: int, holdout: Holdout=None):
-        super().__init__(init_config=init_config, starting_vocab=starting_vocab, starting_mergelist=starting_mergelist, preprocessor=preprocessor, holdout=holdout)
+    def __init__(self, initial_tokeniser: BPE_Deserialiser, config: BTEConfig, long_part_threshold: int, holdout: Holdout, iteration_evaluator: IntermediateEvaluator, quiet: bool=True):
+        super().__init__(initial_tokeniser=initial_tokeniser, config=config, holdout=holdout, iteration_evaluator=iteration_evaluator, quiet=quiet)
         self._long_part_threshold = long_part_threshold
 
-    def _rankOldMergesForKnockout(self, blame_tuples_once: bool=False) -> List[MergeBlame]:
-        filtered_results = super()._rankOldMergesForKnockout(blame_tuples_once)
+    def _rankOldMergesForKnockout(self, tk: BTE, reference: ModestDataset, blame_tuples_once: bool=False) -> list[MergeBlame]:
+        filtered_results = super()._rankOldMergesForKnockout(tk, reference, blame_tuples_once)
         return [m for m in filtered_results if not m.merge.isTrivial(minimum=self._long_part_threshold)]
 
-    def getName(self):
-        return super().getName() + "_keeptrivial"
+    def _getMetadata(self, tk: BTE, reference: ModestDataset) -> dict:
+        d = super()._getMetadata(tk, reference)
+        d["identifiers"]["tokeniser"] += "_keeptrivial"
+        return d
 
 
 class BPEngineer:
@@ -54,7 +55,7 @@ class BPEngineer:
         multimerge_types = []
         for typ, merges in self.bte.merge_graph.merges_of.items():
             if len(merges) > 1:
-                self.bte._print(f"Found type with multiple merges: '{typ}' formed by {' and '.join(['<' + '+'.join(merge.parts) + '>' for merge in merges])}")
+                # self.bte._print(f"Found type with multiple merges: '{typ}' formed by {' and '.join(['<' + '+'.join(merge.parts) + '>' for merge in merges])}")
                 multimerge_types.append(typ)
         return multimerge_types
 
@@ -81,7 +82,7 @@ class BPEngineer:
         for typ in self.bte.merge_graph.vocab:
             tokens = self.bte.tokenise(typ)
             if len(tokens) > 1:
-                self.bte._print(f"Found disabled type: '{typ}' -> {tokens}")
+                # self.bte._print(f"Found disabled type: '{typ}' -> {tokens}")
                 unformable_types.append(typ)
         return unformable_types
 
@@ -201,8 +202,8 @@ class BPEngineer:
 
         starting_bitstring = state.bitstring
 
-        frontier: List[Tuple[str,BpeMergeState]] = [(buffer,state)]  # Buffers as in ._finalTokens, along with the reference where to store the children.
-        found: Dict[str, BpeMergeState]          = {state.bitstring: state}  # Bit strings that uniquely identify each segmentation that has been formed, without storing tokens. Saves up to 2x characters versus storing buffers.
+        frontier: list[tuple[str,BpeMergeState]] = [(buffer,state)]  # Buffers as in ._finalTokens, along with the reference where to store the children.
+        found: dict[str, BpeMergeState]          = {state.bitstring: state}  # Bit strings that uniquely identify each segmentation that has been formed, without storing tokens. Saves up to 2x characters versus storing buffers.
         while frontier:
             buffer, state = frontier.pop(0)
             types = buffer[1:-1].split(" ")

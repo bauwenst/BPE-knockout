@@ -1,5 +1,7 @@
-__version__ = "2025.12.01"
+__version__ = "2025.12.04"
 
 from .model.config import BTEConfig, KnockoutConfig, AnnealingConfig, ReferenceMode, ReifyMode, AnnealingTime
-from .model.vocabulariser import BTE, BTEConfig, ReferenceMode, ReifyMode, ExecutionPolicy
-from .util.project.config import Pℛ𝒪𝒥ℰ𝒞𝒯, morphologyGenerator, lexiconWeights, KnockoutDataConfiguration
+from .model.tokeniser import BTE
+from .model.vocabulariser import BPEKnockoutVocabulariser
+from .model.auto import AutoKnockout
+from .util.project.config import Pℛ𝒪𝒥ℰ𝒞𝒯, lexiconWeights, KnockoutDataConfiguration

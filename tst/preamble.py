@@ -2,10 +2,11 @@
 import os
 from pathlib import Path
 
-PATH_PACKAGE = Path(__file__).resolve().parent.parent
-PATH_SRC     = PATH_PACKAGE.parent
+PATH_PROJECT = Path(__file__).resolve().parent.parent
+PATH_SRC     = PATH_PROJECT / "src"
+PATH_PACKAGE = PATH_SRC / "bpe_knockout"
 
-IS_EDITABLE_INSTALL = PATH_SRC.name == "src"
+IS_EDITABLE_INSTALL = PATH_SRC.is_dir()
 PATH_CWD = Path(os.getcwd())
 
 # Paths to the data that are delivered with the package.
@@ -43,7 +44,4 @@ setFijectOutputFolder(PATH_EXPERIMENTS_OUT)
 
 # And TkTkT if you need it
 from tktkt import setTkTkToutputRoot
-from tktkt.paths import PathManager
 setTkTkToutputRoot(PATH_EXPERIMENTS_OUT)
-OutputPaths = PathManager("bpe-knockout")
-

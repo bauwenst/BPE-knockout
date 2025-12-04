@@ -1,4 +1,4 @@
-from bpe_knockout.util.tokenizer_interface import AutoTokenizer_from_pretrained, fetchAndCacheDict
+from bpe_knockout.util.storage import AutoTokenizer_from_pretrained, fetchAndCacheDict
 
 robbert_tokenizer = AutoTokenizer_from_pretrained("pdelobelle/robbert-v2-dutch-base")
 

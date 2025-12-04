@@ -17,7 +17,7 @@ def test_native():
     with KnockoutDataConfiguration(setupEnglish()):
         btek = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC)))
     print("Knockout |V|:", btek.getVocabSize())
-    path = btek.save(folder=OutputPaths.pathToModels() / "test-native-en")
+    path = btek.save(folder=TkTkTPaths.pathToModels() / "test-native-en")
 
     btek_loaded = BTE.load(path)
     print("Loaded |V|:", btek_loaded.getVocabSize())
@@ -45,7 +45,7 @@ def test_hf():
     print("|V|:", tktkt_knockout.getVocabSize())
 
     print("Saving...")
-    path = tktkt_knockout.save(folder=OutputPaths.pathToModels() / "test-roberta")
+    path = tktkt_knockout.save(folder=TkTkTPaths.pathToModels() / "test-roberta")
 
     print("Loading...")
     tktkt_knockout_loaded = BPEKnockout.load(path, preprocessor=HuggingFacePreprocessor(hf_base))

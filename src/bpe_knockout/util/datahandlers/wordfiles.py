@@ -9,7 +9,7 @@ from .unicode import *
 from tktkt.util.timing import *
 from tktkt.util.printing import *
 
-from ..tokenizer_interface import makeDownloadPath
+from ..storage import makeDownloadPath
 
 
 def iterateTxt(open_file_handle: TextIO, verbose=False):

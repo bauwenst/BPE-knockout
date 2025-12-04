@@ -23,7 +23,7 @@ from modest.interfaces.datasets import ModestDataset
 from modest.interfaces.morphologies import WordDecompositionWithFreeSegmentation
 
 # None of the below files import the config.
-from bpe_knockout.util.tokenizer_interface import BpeTokeniserPath, SennrichTokeniserPath
+from bpe_knockout.util.storage import BpeTokeniserPath, SennrichTokeniserPath
 from bpe_knockout.util.datahandlers.wordfiles import loadAndWeightLexicon
 
 

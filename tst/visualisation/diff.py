@@ -66,7 +66,7 @@ if __name__ == "__main__":
     # npr.shuffle(l2)
     # matchListElements(l1, l2)
     from bpe_knockout.util.project import PATH_DATA_TEMP, PATH_MODELBASE
-    from bpe_knockout.util.tokenizer_interface import HuggingFaceTokeniserPath, SennrichTokeniserPath
+    from bpe_knockout.util.storage import HuggingFaceTokeniserPath, SennrichTokeniserPath
     l1 = HuggingFaceTokeniserPath(PATH_DATA_TEMP / "robbert_2020.json").loadMerges()
     l2 = SennrichTokeniserPath(PATH_MODELBASE / "bpe-oscar-nl-clean").loadMerges()
     matchListElements(l1, l2, max_length=500)

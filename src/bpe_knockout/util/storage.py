@@ -1,11 +1,10 @@
-from typing import List, Tuple
+from abc import ABC, abstractmethod
 from pathlib import Path
-import requests
 
+import requests
+import json
 from transformers import AutoTokenizer, RobertaTokenizerFast, PreTrainedTokenizerFast
 from huggingface_hub import hf_hub_download
-
-from bpe_knockout.util.project.config import *
 
 from tktkt.paths import TkTkTPaths
 
@@ -28,7 +27,7 @@ def AutoTokenizer_from_pretrained(path_or_name: str) -> PreTrainedTokenizerFast:
         return AutoTokenizer.from_pretrained(path_or_name)
 
 
-class BpeTokeniserPath(ABC):
+class BpeTokeniserPath(ABC):  # TODO: This is superseded by TkTkT's better interface.
     """
     Interface for representing a BPE tokeniser on disk.
     """
@@ -49,11 +48,11 @@ class BpeTokeniserPath(ABC):
         pass
 
     @abstractmethod
-    def loadVocabulary(self) -> Dict[str,int]:
+    def loadVocabulary(self) -> dict[str,int]:
         pass
 
     @abstractmethod
-    def loadMerges(self) -> List[str]:
+    def loadMerges(self) -> list[str]:
         pass
 
     @abstractmethod
@@ -75,14 +74,14 @@ class SennrichTokeniserPath(BpeTokeniserPath):
         vocab, merges = self.getPaths()
         return vocab.exists() and merges.exists()
 
-    def getPaths(self) -> Tuple[Path, Path]:
+    def getPaths(self) -> tuple[Path, Path]:
         return self.path / "vocab.json", self.path / "merges.txt"
 
-    def loadVocabulary(self) -> Dict[str,int]:
+    def loadVocabulary(self) -> dict[str,int]:
         with open(self.getPaths()[0], "r", encoding="utf-8") as handle:
             return json.load(handle)
 
-    def loadMerges(self) -> List[str]:
+    def loadMerges(self) -> list[str]:
         with open(self.getPaths()[1], "r", encoding="utf-8") as handle:
             return [line.strip() for line in handle if not line.startswith("#version")]
 
@@ -118,15 +117,15 @@ class HuggingFaceTokeniserPath(BpeTokeniserPath):
     def exists(self) -> bool:
         return self.path.exists()
 
-    def getAsDict(self):
+    def getAsdict(self):
         with open(self.path, "r", encoding="utf-8") as handle:
             return json.load(handle)
 
-    def loadVocabulary(self) -> Dict[str,int]:
-        return self.getAsDict().get("model", dict()).get("vocab", dict())
+    def loadVocabulary(self) -> dict[str,int]:
+        return self.getAsdict().get("model", dict()).get("vocab", dict())
 
-    def loadMerges(self) -> List[str]:
-        return self.getAsDict().get("model", dict()).get("merges", [])
+    def loadMerges(self) -> list[str]:
+        return self.getAsdict().get("model", dict()).get("merges", [])
 
     def toFastBPE(self) -> RobertaTokenizerFast:
         return AutoTokenizer_from_pretrained(self.path.as_posix())
@@ -136,7 +135,7 @@ class HuggingFaceTokeniserPath(BpeTokeniserPath):
         """
         Automatically constructs the file path, and ALSO imputes the tokeniser file by getting it from the
         HuggingFace tokeniser with the given name.
-        (The reason you can't do this in getAsDict() is because the name isn't known there, only the path.)
+        (The reason you can't do this in getAsdict() is because the name isn't known there, only the path.)
         """
         PATH_DATA_TEMP = makeDownloadPath()
         if use_hf_cache:
@@ -155,7 +154,7 @@ class HuggingFaceTokeniserPath(BpeTokeniserPath):
             if not temp_cache.exists():
                 try:
                     Path(hf_hub_download(repo_id=name, filename="tokenizer.json", local_dir=temp_cache.path.parent))
-                    # fetchAndCacheDict(f"https://huggingface.co/{name}/raw/main/tokenizer.json",
+                    # fetchAndCachedict(f"https://huggingface.co/{name}/raw/main/tokenizer.json",
                     #                   cache_folder=cache.path.parent, stem=DEFAULT_TOKENISER_STEM)
                 except:  # Likely means that this is a GPT2 tokeniser where there was no tokenizer.json and instead there is only a vocab and merge file.
                     temp_cache = SennrichTokeniserPath(temp_cache.path.parent)

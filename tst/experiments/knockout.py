@@ -11,6 +11,7 @@ from tktkt.util.timing import timeit
 from tktkt.evaluation.morphological import ConfusionMatrix, compareSplits_cursors
 from tktkt.models.huggingface.wrapper import HuggingFaceTokeniser
 from tktkt.factories.evaluation import evaluateTokeniserOnMorphology
+from tktkt.factories.preprocessing import Preprocessor, BoundariesFromSpacesPretokeniser, RobertaSpaceMarker
 
 from fiject import *  # Fiject project found at https://github.com/bauwenst/fiject
 from fiject.visuals.tables import ColumnStyle, Table
@@ -20,7 +21,9 @@ from bpe_knockout.util.datahandlers.wordfiles import ACCENTS
 
 
 print("Loading tests...")
-untrained_bte = BTE(BTEConfig(), quiet=True)
+
+default_preprocessor = Preprocessor(splitter=BoundariesFromSpacesPretokeniser(marker=RobertaSpaceMarker, byte_based=True))
+untrained_bte = BTE(BTEConfig())
 # modes_to_test = [RefMode.MORPHEMIC, RefMode.LEXEMIC]  # Thesis, not paper.
 modes_to_test = [ReferenceMode.MORPHEMIC]
 def getAllConfigs():  # In a function to protect against imputation if these are never needed.
@@ -153,7 +156,7 @@ def test_iterative():
     if table.needs_computation:
         for holdout, prefix in HOLDOUTS:
             # Make the intermediate testing framework by capturing the table AND the holdout prefix.
-            class ForIntermediateTests(Evaluator):
+            class ForIntermediateTests(IntermediateEvaluator):
                 def evaluate(self, tokeniser: Tokeniser, holdout: Holdout, experiment_names: List[str]):
                     results = intrinsicEvaluation([tokeniser], do_whole_word=True,
                                                   reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=holdout)
