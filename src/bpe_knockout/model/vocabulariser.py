@@ -22,7 +22,7 @@ from tqdm.auto import tqdm
 from modest.interfaces.datasets import ModestDataset
 
 import tktkt  # To have access to tktkt.__version__
-from tktkt.util.iterables import cumsum, count
+from tktkt.util.iterables import cumsum, count, swapped
 from tktkt.util.strings import indicesToTokens
 from tktkt.util.printing import *
 from tktkt.util.timing import datetimeDashed
@@ -277,15 +277,16 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser):
                             if m.blame_ratio >= self._config.knockout.relative_blame_minimum]
         n_eligible = len(merges_to_remove)
         merges_to_remove = merges_to_remove[:max(0, len(tk.merge_graph.vocab) - self._config.knockout.min_vocab_size)]
+        explanations = {e.name: count(filter(lambda m: m.merge.explanation == e, merges_to_remove)) for e in MergeExplanation}  # Because applying knockout changes the MergeExplanation, you have to record diagnostics before actually doing knockout.
         self._removeKnockoutMerges(tk, [m.merge for m in merges_to_remove])
         self._diagnostics.append({
             "type": "knockout",
             "eligible": n_eligible,
             "max_offences": max((merge.n_bad_applications for merge in merges_to_remove), default=0),
-            "max_blame":    max((merge.blame_ratio for merge in merges_to_remove), default=0),
-            "min_blame":    min((merge.blame_ratio for merge in merges_to_remove), default=0),
+            "max_blame":    max((merge.blame_ratio        for merge in merges_to_remove), default=0),
+            "min_blame":    min((merge.blame_ratio        for merge in merges_to_remove), default=0),
             "vocab_size": len(tk.merge_graph.vocab),
-            "explanations": {e.name: count(filter(lambda m: m.merge.explanation == e, merges_to_remove)) for e in MergeExplanation}
+            "explanations": explanations
         })
         return merges_to_remove  # For diagnostic purposes
 
@@ -747,7 +748,7 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser):
         folder.mkdir(exist_ok=True)
 
         # Separate alphabet from merged types
-        alphabet   = {t: i for t,i in tk.vocab.items() if tk.merge_graph.inAlphabet(t)}
+        alphabet   = dict(swapped(enumerate(sorted(filter(lambda t: tk.merge_graph.inAlphabet(t), tk.vocab), key=lambda t: (len(t), t)))))
         composites = {m.childType(): m.priority for m in tk.merge_graph.merges}
         if set(tk.vocab.keys()) != set(alphabet.keys()) | set(composites.keys()):
             warnings.warn("While saving, it was discovered that the set of types without a merge plus the set of types formed by the merge list DO NOT make up the vocabulary. This is weird!")
@@ -759,7 +760,7 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser):
                 "seed": self._holdout.seed
             } | dataclasses.asdict(self._config),
             "tokeniser": {  # We do not save the IDs because that's handled by TkTkT.
-                "types": sorted(alphabet.keys(), key=alphabet.get) + sorted(composites.keys(), key=composites.get),  # Alphabet is sorted by ID, composites are sorted by merge priority (even if that means the IDs are out of order, which is the case for RoBERTa!).
+                "types": sorted(alphabet.keys(), key=alphabet.get) + sorted(composites.keys(), key=composites.get),  # Alphabet is sorted on length and then alphabetically, composites are sorted by merge priority (even if that means the IDs are out of order, which is the case for RoBERTa!).
                 "merges": [" ".join(merge.parts) for merge in sorted(tk.merge_graph.merges)]  # Sorted by priority; very important. Isn't necessarily the case in the graph by default.
             }
         }
