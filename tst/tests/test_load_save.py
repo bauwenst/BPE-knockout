@@ -2,10 +2,13 @@ from tst.preamble import *
 
 from bpe_knockout import *
 from tktkt.evaluation.compare import ExactMatches
+from tktkt.paths import TkTkTPaths
 
 
 def areEquivalentTokenisers(tk1, tk2):
-    metric = ExactMatches((" " + obj.word for obj in morphologyGenerator()), n_repeats=1)
+    from tst.configs import setupEnglish
+    project = setupEnglish()
+    metric = ExactMatches((" " + obj.word for obj in project.morphologies.generate()), n_repeats=1)
     ratio, _, _ = metric.compare(tk1, tk2)
     return ratio == 1.0
 
@@ -14,8 +17,9 @@ def test_native():
     """
     Test knockout+save+load (1) with the core BTE interface and (2) with the default English tokeniser.
     """
-    with KnockoutDataConfiguration(setupEnglish()):
-        btek = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC)))
+    from tst.configs import setupEnglish
+    project = setupEnglish()
+    btek = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC)))
     print("Knockout |V|:", btek.getVocabSize())
     path = btek.save(folder=TkTkTPaths.pathToModels() / "test-native-en")
 

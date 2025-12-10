@@ -8,9 +8,10 @@ def test_basic():
     Does knockout run and does it produce a vocabulary size of 35 525 for the default 40 000 Dutch tokeniser?
     Can you segment things with it?
     """
-    with KnockoutDataConfiguration(setupDutch()):
-        bte_knockout = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC)), quiet=False)
-        # print(bte_knockout.getBadOldMerges(relative_blame_threshold=0.5))
+    from tst.configs import setupDutch
+    project = setupDutch()
+    bte_knockout = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC)), quiet=False)
+    # print(bte_knockout.getBadOldMerges(relative_blame_threshold=0.5))
 
     print(bte_knockout.merge_graph.getRawMerges())
     print(bte_knockout.getVocabSize())
@@ -21,8 +22,9 @@ def test_iterative():
     """
     Does the iterative implementation work?
     """
-    with KnockoutDataConfiguration(setupDutch()):
-        bte_knockout = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC), reify=ReifyMode.FIX_AND_LINK_AND_MAKE, iterations=3), quiet=False)
+    from tst.configs import setupDutch
+    project = setupDutch()
+    bte_knockout = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC), reify=ReifyMode.FIX_AND_LINK_AND_MAKE, iterations=3), quiet=False)
 
     print(bte_knockout.getVocabSize())
     print(bte_knockout.prepareAndTokenise(" Deze bruidsjurk is zo mooi geconserveerd!"))

@@ -1,13 +1,11 @@
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
+from huggingface_hub import hf_hub_download
 
 from tktkt.interfaces.identifiers import AutoVocabSpecs, AutoVocab, repairAbsoluteSpecials, areNotAbsoluteSpecials
-from tktkt.models.bpe.vocabularisation import Merges
 from tktkt.models.huggingface.wrapper import HuggingFacePreprocessorForWords
-from tktkt.util.iterables import count
 
 from .vocabulariser import *
 from .tokeniser import *
-from ..util.storage import HuggingFaceTokeniserPath
 
 
 class AutoKnockout:
@@ -32,7 +30,7 @@ class AutoKnockout:
         def _buildVocabulary(self) -> Vocab[WithSpecials]:
             return self.vocab
 
-        def buildMerges(self) -> Merges:
+        def buildMerges(self) -> MergeList:
             return self.merges
 
         def preprocessorEffective(self) -> Preprocessor:
@@ -54,7 +52,7 @@ class AutoKnockout:
         return self.from_objects(
             preprocessor=HuggingFacePreprocessorForWords(tkz),
             vocab=AutoVocab.fromTokenizer(tkz, specials),
-            merges=HuggingFaceTokeniserPath.fromTokeniser(tkz).loadMerges(),
+            merges=AutoMerges.from_tokenizer(tkz),
             reference=reference
         )
 
@@ -82,3 +80,44 @@ class AutoKnockout:
             specials=specials,
             unk_id=unk_id
         )
+
+
+class AutoMerges:
+
+    @staticmethod
+    def from_pretrained(checkpoint: str) -> MergeList:
+        """
+        Automatically constructs the file path, and ALSO imputes the tokeniser file by getting it from the
+        HuggingFace tokeniser with the given name.
+        """
+        try:
+            cache = Path(hf_hub_download(repo_id=checkpoint, filename="tokenizer.json"))
+            uses_json = True
+        except:
+            try:
+                cache = Path(hf_hub_download(repo_id=checkpoint, filename="merges.txt"))
+                uses_json = False
+            except:
+                raise RuntimeError(f"Could not find (or access) the online tokeniser file for HuggingFace model '{checkpoint}'.")
+
+        if uses_json:
+            with open(cache, "r", encoding="utf-8") as handle:
+                merges = json.load(handle)["model"]["merges"]
+        else:
+            with open(cache, "r", encoding="utf-8") as handle:
+                merges = [line.strip() for line in handle if not line.startswith("#version")]
+
+        assert isinstance(merges, list)
+        return merges
+
+    @staticmethod
+    def from_tokenizer(tokenizer: PreTrainedTokenizerBase) -> MergeList:
+        """
+        Only works for HuggingFace models that were NOT loaded from a path, but just using a name
+        (the former have an empty name, that's why).
+        """
+        name = tokenizer.name_or_path
+        if not name:
+            raise ValueError("Model has no name!")
+
+        return AutoMerges.from_pretrained(name)

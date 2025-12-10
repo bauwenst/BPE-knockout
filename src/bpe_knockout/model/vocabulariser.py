@@ -221,10 +221,10 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser):
 
             # Get morphological split
             reference_segmentation = " ".join(segment(obj))
-            reference_segmentation = self._preprocessAlreadySegmentedString(tk, reference_segmentation)
+            reference_segmentation = BPEKnockoutVocabulariser._preprocessAlreadySegmentedString(tk, reference_segmentation)
 
             # Get BPE split and the ID of the merge that caused a space to disappear at each index.
-            tokens, merge_ids = self._prepareAndTokenise_diagnostic(tk, lemma)
+            tokens, merge_ids = BPEKnockoutVocabulariser._prepareAndTokenise_diagnostic(tk, lemma)
             bpe_segmentation = " ".join(tokens)
 
             # tokens, merge_ids = self._applyMerges_diagnostic(SOW + lemma)
@@ -379,7 +379,7 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser):
 
             # Get morphological split
             reference_segmentation = " ".join(segment(obj))
-            reference_segmentation = self._preprocessAlreadySegmentedString(tk, reference_segmentation)
+            reference_segmentation = BPEKnockoutVocabulariser._preprocessAlreadySegmentedString(tk, reference_segmentation)
 
             # Get BPE split
             tokens = tk.prepareAndTokenise(lemma)
@@ -483,7 +483,7 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser):
             # Find tokenisation up to the triplet.
             # Approach: use the full tokeniser to create some spaces, and add to those spaces the MERGES that happened AFTER the triplet.
             typ = m.childType()
-            actual_tokens, causes = self._tokenise_diagnostic(tk, typ)
+            actual_tokens, causes = BPEKnockoutVocabulariser._tokenise_diagnostic(tk, typ)
             token_lengths = list(cumsum(map(len, actual_tokens)))
             start_of_tokens = {0} \
                             | set(token_lengths[:-1]) \
@@ -622,7 +622,8 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser):
 
     ### TOKENISATION METHODS ###
 
-    def _preprocessAlreadySegmentedString(self, tk: BTE, segmentation: str) -> str:
+    @staticmethod
+    def _preprocessAlreadySegmentedString(tk: BTE, segmentation: str) -> str:
         # TODO: Even this method isn't completely watertight against all preprocessors.
         #       If a preprocessor separates different scripts by a boundary marker, some part of the BPE-knockout code will crash.
         space_preserver_decoded = "🂠"  # Cannot be punctuation or a number since some preprocessors treat that specially. Also can't really be a character in any language.
@@ -633,7 +634,8 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser):
         segmentation = segmentation.replace(space_preserver_encoded, " ")
         return segmentation
 
-    def _finalTokens_diagnostic(self, tk: BTE, sequence_of_nonspaces: Iterable[str]) -> tuple[list[str], dict[int, int]]:
+    @staticmethod
+    def _finalTokens_diagnostic(tk: BTE, sequence_of_nonspaces: Iterable[str]) -> tuple[list[str], dict[int, int]]:
         """
         Same as applyMerges, except it returns an extra result (which decreases performance for its computation):
         a map from character index to merge ID. Hence, by calling this version of the function, you can verify which
@@ -673,10 +675,12 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser):
 
         return buffer[1:-1].split(" "), mergepoint_to_mergeid
 
-    def _tokenise_diagnostic(self, tk: BTE, pretoken: str) -> tuple[list[str], dict[int, int]]:
-        return self._finalTokens_diagnostic(tk, tk._initialTokens(pretoken))
+    @staticmethod
+    def _tokenise_diagnostic(tk: BTE, pretoken: str) -> tuple[list[str], dict[int, int]]:
+        return BPEKnockoutVocabulariser._finalTokens_diagnostic(tk, tk._initialTokens(pretoken))
 
-    def _prepareAndTokenise_diagnostic(self, tk: BTE, text: str) -> tuple[list[str], dict[int,int]]:
+    @staticmethod
+    def _prepareAndTokenise_diagnostic(tk: BTE, text: str) -> tuple[list[str], dict[int,int]]:
         """
         Get BPE split and the ID of the merge that caused a space to disappear at each index.
          - You need to pass the lemma to _applyMerges_diagnostic. You cannot just prepend a SoW for this. Here's why:
@@ -711,7 +715,7 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser):
 
         offset = 0
         for pretoken in tk.preprocessor.do(text):
-            partial_tokens, partial_merge_ids = self._tokenise_diagnostic(tk, pretoken)  # TODO: Technically this treats multi-character start-of-word characters as one character, which will mismatch indices when using this diagnostic to interpret raw string indices. The fix is to increase the first partial_merge_ids by the length of the SoW.
+            partial_tokens, partial_merge_ids = BPEKnockoutVocabulariser._tokenise_diagnostic(tk, pretoken)  # TODO: Technically this treats multi-character start-of-word characters as one character, which will mismatch indices when using this diagnostic to interpret raw string indices. The fix is to increase the first partial_merge_ids by the length of the SoW.
 
             tokens.extend(partial_tokens)
             merge_ids.update({k + offset: v for k, v in partial_merge_ids.items()})

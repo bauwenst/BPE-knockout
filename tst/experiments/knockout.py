@@ -262,11 +262,10 @@ def main_morphsPerWord_Multilingual(include_monomorphemic=True):
     histo = MultiHistogram("languages-morph-per-word", caching=CacheMode.IF_MISSING)
     if histo.needs_computation:
         for language in getAllConfigs():
-            with KnockoutDataConfiguration(language):
-                for obj in morphologyGenerator():
-                    n = len(obj.segment())
-                    if include_monomorphemic or n != 1:
-                        histo.add(language.language_name, n)
+            for obj in language.morphologies.generate():
+                n = len(obj.segment())
+                if include_monomorphemic or n != 1:
+                    histo.add(language.language_name, n)
 
     print(histo.toDataframe().groupby(FIJECT_DEFAULTS.LEGEND_TITLE_CLASS).describe())
     histo.commit_histplot(center_ticks=True, relative_counts=True, x_lims=(0.5,6.5),
@@ -314,33 +313,33 @@ def main_knockedMerges_Multilingual():
     import langcodes
 
     for language in getAllConfigs():  # Kinda sucks that you need to build the entire config to just call .needs_computation...
-        with KnockoutDataConfiguration(language):
-            language_object = langcodes.find(language.language_name)
-            for mode in modes_to_test:
-                ids     =      Histogram(f"knockout-ids_{ReferenceMode.toLetter(mode)}-mode_{language_object.to_tag()}", caching=CacheMode.IF_MISSING)
-                lengths = MultiHistogram(f"knockout-lengths_{ReferenceMode.toLetter(mode)}-mode_{language_object.to_tag()}", caching=CacheMode.IF_MISSING)
+        language_object = langcodes.find(language.language_name)
+        for mode in modes_to_test:
+            ids     =      Histogram(f"knockout-ids_{ReferenceMode.toLetter(mode)}-mode_{language_object.to_tag()}", caching=CacheMode.IF_MISSING)
+            lengths = MultiHistogram(f"knockout-lengths_{ReferenceMode.toLetter(mode)}-mode_{language_object.to_tag()}", caching=CacheMode.IF_MISSING)
 
-                if ids.needs_computation or lengths.needs_computation:
-                    bte = BTE(BTEConfig(knockout=KnockoutConfig(reference=mode)), execution_policy=ExecutionPolicy.POSTPONED)
-                    blamed_merges = bte._rankOldMergesForKnockout()
-                    for _,_, merge in blamed_merges:
-                        if ids.needs_computation:
-                            ids.add(merge.priority)
+            if ids.needs_computation or lengths.needs_computation:
+                language.morphologies  # do something with this
+                bte = BTE(BTEConfig(knockout=KnockoutConfig(reference=mode)), execution_policy=ExecutionPolicy.POSTPONED)
+                blamed_merges = bte._rankOldMergesForKnockout()
+                for _,_, merge in blamed_merges:
+                    if ids.needs_computation:
+                        ids.add(merge.priority)
 
-                        if lengths.needs_computation:
-                            left, right = merge.parts
-                            lengths.add("left types", len(left))
-                            lengths.add("right types", len(right))
+                    if lengths.needs_computation:
+                        left, right = merge.parts
+                        lengths.add("left types", len(left))
+                        lengths.add("right types", len(right))
 
-                BINWIDTH = 100
-                ids.commit_histplot(binwidth=BINWIDTH, x_tickspacing=2500, x_label="Merge", y_label=f"Amount of knockouts in {BINWIDTH}-merge bin",
-                                    aspect_ratio=(7,2.5), fill_colour="black", border_colour=None, x_lims=(-750,40_750),
-                                    y_tickspacing=1, do_kde=False)
-                ids.commit_qqplot(random_variable=scipy.stats.uniform(loc=0,scale=40_000-0), tickspacing=5000)
-                print(ids.toDataframe().describe())
-                lengths.commit_histplot(binwidth=1, x_tickspacing=1, x_label="Type length", y_label="Amount of knockouts",
-                                        aspect_ratio=(4,2.75), border_colour=None,
-                                        y_tickspacing=100, do_kde=False, center_ticks=True, alpha=0.5, x_lims=(0,15))
+            BINWIDTH = 100
+            ids.commit_histplot(binwidth=BINWIDTH, x_tickspacing=2500, x_label="Merge", y_label=f"Amount of knockouts in {BINWIDTH}-merge bin",
+                                aspect_ratio=(7,2.5), fill_colour="black", border_colour=None, x_lims=(-750,40_750),
+                                y_tickspacing=1, do_kde=False)
+            ids.commit_qqplot(random_variable=scipy.stats.uniform(loc=0,scale=40_000-0), tickspacing=5000)
+            print(ids.toDataframe().describe())
+            lengths.commit_histplot(binwidth=1, x_tickspacing=1, x_label="Type length", y_label="Amount of knockouts",
+                                    aspect_ratio=(4,2.75), border_colour=None,
+                                    y_tickspacing=100, do_kde=False, center_ticks=True, alpha=0.5, x_lims=(0,15))
 
 # @timeit
 # def main_baseVocabStats():
@@ -377,28 +376,27 @@ def main_effectiveDropoutRate_Multilingual():
     table = Table("bte-effective-dropout", caching=CacheMode.IF_MISSING)
     if table.needs_computation:
         for language in getAllConfigs():
-            with KnockoutDataConfiguration(language):
-                bte = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC)), execution_policy=ExecutionPolicy.POSTPONED)
+            bte = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC)), execution_policy=ExecutionPolicy.POSTPONED)
 
-                total_merges               = 0
-                total_dropped_merges       = 0
-                total_applications         = 0
-                total_dropped_applications = 0
-                for merge in bte._rankOldMergesForKnockout():
-                    total_applications += merge.n_applications
-                    total_merges += 1
-                    if merge.blame_ratio >= bte._config.knockout.relative_blame_minimum:
-                        total_dropped_applications += merge.n_applications
-                        total_dropped_merges += 1
+            total_merges               = 0
+            total_dropped_merges       = 0
+            total_applications         = 0
+            total_dropped_applications = 0
+            for merge in bte._rankOldMergesForKnockout():
+                total_applications += merge.n_applications
+                total_merges += 1
+                if merge.blame_ratio >= bte._config.knockout.relative_blame_minimum:
+                    total_dropped_applications += merge.n_applications
+                    total_dropped_merges += 1
 
-                p_eff_app = total_dropped_applications / total_applications
-                p_eff_typ = total_dropped_merges / total_merges
-                print(language.language_name)
-                print(f"Merge dropout rate: {total_dropped_applications}/{total_applications} = {p_eff_app}")
-                print(f"Vocab dropout rate: {total_dropped_merges}/{total_merges} = {p_eff_typ}")
+            p_eff_app = total_dropped_applications / total_applications
+            p_eff_typ = total_dropped_merges / total_merges
+            print(language.language_name)
+            print(f"Merge dropout rate: {total_dropped_applications}/{total_applications} = {p_eff_app}")
+            print(f"Vocab dropout rate: {total_dropped_merges}/{total_merges} = {p_eff_typ}")
 
-                table.set(p_eff_app, [language.language_name.capitalize(), "BPE-knockout"], [r"$p_\text{eff,ret}$"])
-                table.set(p_eff_typ, [language.language_name.capitalize(), "BPE-knockout"], [r"$|\M^\dag|/|\M|$"])
+            table.set(p_eff_app, [language.language_name.capitalize(), "BPE-knockout"], [r"$p_\text{eff,ret}$"])
+            table.set(p_eff_typ, [language.language_name.capitalize(), "BPE-knockout"], [r"$|\M^\dag|/|\M|$"])
 
     table.commit(default_column_style=ColumnStyle(cell_function=lambda x: 100*x, digits=3, cell_suffix=r"\%"))
 
@@ -468,49 +466,48 @@ def main_intrinsicMultilingual():
         holdout = Holdout(HOLDOUT_SPLIT)
 
         for language in getAllConfigs():  # Will FIRST impute all data and THEN iterate.
-            with KnockoutDataConfiguration(language):
-                name_of_language = language.language_name.capitalize()
+            name_of_language = language.language_name.capitalize()
 
-                # --- BPE ---
-                vocab_and_merges = defaultTokeniserFiles()
-                bpe          = HuggingFaceTokeniser(vocab_and_merges.toFastBPE(), for_single_words=True)
-                bpe_dropout  = HuggingFaceTokeniser(vocab_and_merges.toFastBPE(), for_single_words=True)
-                bpe_dropout.backend.backend_tokenizer.model.dropout = DROPOUT_RATE
+            # --- BPE ---
+            vocab_and_merges = language.base_tokeniser
+            bpe          = HuggingFaceTokeniser(vocab_and_merges.toFastBPE(), for_single_words=True)
+            bpe_dropout  = HuggingFaceTokeniser(vocab_and_merges.toFastBPE(), for_single_words=True)
+            bpe_dropout.backend.backend_tokenizer.model.dropout = DROPOUT_RATE
 
-                results = intrinsicEvaluation([bpe], do_whole_word=True, verbose=True,
-                                              reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
-                addEvaluationToTable(table, results,
-                                     row_prefix=[name_of_language, "BPE"],
-                                     row_names=[ROW_NAME_BASE])
+            results = intrinsicEvaluation([bpe], do_whole_word=True, verbose=True,
+                                          reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
+            addEvaluationToTable(table, results,
+                                 row_prefix=[name_of_language, "BPE"],
+                                 row_names=[ROW_NAME_BASE])
 
-                results = intrinsicEvaluation([bpe_dropout]*DROPOUT_TESTS, do_whole_word=True, verbose=True,
-                                              reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
-                addEvaluationToTable(table, results, macro_average_all=True,
-                                     row_prefix=[name_of_language, "BPE"],
-                                     row_names=["dropout"])
+            results = intrinsicEvaluation([bpe_dropout]*DROPOUT_TESTS, do_whole_word=True, verbose=True,
+                                          reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
+            addEvaluationToTable(table, results, macro_average_all=True,
+                                 row_prefix=[name_of_language, "BPE"],
+                                 row_names=["dropout"])
 
-                # --- BPE-knockout ---
-                # for mode in modes_to_test:  # Technically the user should expect this for loop, but no user would realistically want to test multiple training modes across different languages.
-                mode = modes_to_test[0]
+            # --- BPE-knockout ---
+            # for mode in modes_to_test:  # Technically the user should expect this for loop, but no user would realistically want to test multiple training modes across different languages.
+            mode = modes_to_test[0]
 
-                bte_knockout          = BTE(BTEConfig(knockout=KnockoutConfig(reference=mode)))
-                bte_knockout_holdout  = BTE(BTEConfig(knockout=KnockoutConfig(reference=mode)), holdout=holdout)
-                # bte_knockout_keeplong = BTE(BteInitConfig(knockout=mode, keep_long_merges=True))
-                # bte_knockout_weighted = BTE(BteInitConfig(knockout=mode, weighted_training=True))
+            bte_knockout          = BTE(BTEConfig(knockout=KnockoutConfig(reference=mode)))
+            bte_knockout_holdout  = BTE(BTEConfig(knockout=KnockoutConfig(reference=mode)), holdout=holdout)
+            # bte_knockout_keeplong = BTE(BteInitConfig(knockout=mode, keep_long_merges=True))
+            # bte_knockout_weighted = BTE(BteInitConfig(knockout=mode, weighted_training=True))
 
-                # Using full test set
-                results = intrinsicEvaluation([bte_knockout], do_whole_word=True, verbose=True,  #, bte_knockout_keeplong, bte_knockout_weighted],
-                                                reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=None)
-                addEvaluationToTable(table, results,
-                                     row_prefix=[name_of_language, "BPE-knockout"],
-                                     row_names=[ROW_NAME_BASE, "keep long", "weighted"])
+            # Using full test set
+            results = intrinsicEvaluation([bte_knockout], do_whole_word=True, verbose=True,  #, bte_knockout_keeplong, bte_knockout_weighted],
+                                            reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=None)
+            addEvaluationToTable(table, results,
+                                 row_prefix=[name_of_language, "BPE-knockout"],
+                                 row_names=[ROW_NAME_BASE, "keep long", "weighted"])
 
-                # Using partial test set
-                results = intrinsicEvaluation([bte_knockout_holdout], do_whole_word=True, verbose=True,
-                                                reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=holdout)
-                addEvaluationToTable(table, results,
-                                     row_prefix=[name_of_language, "BPE-knockout"],
-                                     row_names=["holdout"])
+            # Using partial test set
+            results = intrinsicEvaluation([bte_knockout_holdout], do_whole_word=True, verbose=True,
+                                            reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=holdout)
+            addEvaluationToTable(table, results,
+                                 row_prefix=[name_of_language, "BPE-knockout"],
+                                 row_names=["holdout"])
 
     commitEvaluationTable(table)
 
@@ -828,32 +825,31 @@ def main_wholeWordCeiling_Multilingual():
     if table.needs_computation:
         for language in getAllConfigs():
             unique_morphs = set()
-            with KnockoutDataConfiguration(language):
-                weights = lexiconWeights(Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
-                cm   = ConfusionMatrix()
-                cm_w = ConfusionMatrix()
+            weights = lexiconWeights(Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
+            cm   = ConfusionMatrix()
+            cm_w = ConfusionMatrix()
 
-                for obj in morphologyGenerator():
-                    best_possible_segmentation = obj.segment()
-                    only_whole_words           = obj.segmentFree()
+            for obj in language.morphologies.generate():
+                best_possible_segmentation = obj.segment()
+                only_whole_words           = obj.segmentFree()
 
-                    tp, predicted, relevant, total = compareSplits_cursors(candidate=" ".join(best_possible_segmentation),
-                                                                           reference=" ".join(only_whole_words))
-                    amplification = weights.get(obj.word, 1)
-                    cm.add(  tp, predicted, relevant, total, 1)
-                    cm_w.add(tp, predicted, relevant, total, amplification)
+                tp, predicted, relevant, total = compareSplits_cursors(candidate=" ".join(best_possible_segmentation),
+                                                                       reference=" ".join(only_whole_words))
+                amplification = weights.get(obj.word, 1)
+                cm.add(  tp, predicted, relevant, total, 1)
+                cm_w.add(tp, predicted, relevant, total, amplification)
 
-                    unique_morphs.update(best_possible_segmentation)
+                unique_morphs.update(best_possible_segmentation)
 
-                print(language.language_name, "whole-word boundaries:")
-                print("\tUnweighted:")
-                cm.displayRePrF1(indent=2)
-                print("\tWeighted:")
-                cm_w.displayRePrF1(indent=2)
+            print(language.language_name, "whole-word boundaries:")
+            print("\tUnweighted:")
+            cm.displayRePrF1(indent=2)
+            print("\tWeighted:")
+            cm_w.displayRePrF1(indent=2)
 
-                addEvaluationToTable(table, [TokeniserEvaluation(name=language.language_name, vocabsize=len(unique_morphs),
-                                                                 cm_morph=ConfusionMatrix(), cm_morph_w=ConfusionMatrix(),
-                                                                 cm_lex=cm, cm_lex_w=cm_w)], row_prefix=[language.language_name, ""], row_names=["ideal"])
+            addEvaluationToTable(table, [TokeniserEvaluation(name=language.language_name, vocabsize=len(unique_morphs),
+                                                             cm_morph=ConfusionMatrix(), cm_morph_w=ConfusionMatrix(),
+                                                             cm_lex=cm, cm_lex_w=cm_w)], row_prefix=[language.language_name, ""], row_names=["ideal"])
 
     commitEvaluationTable(table)
 
