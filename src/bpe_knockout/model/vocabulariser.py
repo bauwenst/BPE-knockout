@@ -26,9 +26,9 @@ from tktkt.util.iterables import cumsum, count, swapped
 from tktkt.util.strings import indicesToTokens
 from tktkt.util.printing import *
 from tktkt.util.timing import datetimeDashed
-from tktkt.factories.deserialisation import BPE_Deserialiser
-from tktkt.interfaces.tokeniser import Tokeniser
-from tktkt.interfaces.vocabulariser import *
+from tktkt.factories.artifacts import BPE_Artifacts
+from tktkt.interfaces.tokenisers import Tokeniser
+from tktkt.interfaces.vocabularisers import *
 
 from .. import __version__
 from ..util.datahandlers.holdout import Holdout
@@ -86,7 +86,7 @@ SPLIT_MARKER_RE = re.compile(re.escape(SPLIT_MARKER))
 
 class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser):
 
-    def __init__(self, initial_tokeniser: BPE_Deserialiser, config: BTEConfig,
+    def __init__(self, initial_tokeniser: BPE_Artifacts, config: BTEConfig,
                  holdout: Holdout=None, iteration_evaluator: IntermediateEvaluator=None, quiet: bool=False):
         super().__init__(name="bpe-knockout")
         self._config = config

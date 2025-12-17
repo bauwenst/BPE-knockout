@@ -31,9 +31,9 @@ from typing import List, Iterable, TextIO
 from collections import defaultdict
 from tqdm.auto import tqdm
 
-from tktkt.interfaces.preparation import Preprocessor
+from tktkt.interfaces.preprocessors import Preprocessor
+from tktkt.factories.preprocessors import SennrichSpaceMarker, IdentityMapper, PretokeniserSequence, AddWordBoundary, HyphenMode, IsolatePunctuation, OnWhitespace
 from tktkt.preparation.boundaries import BoundaryMarker
-from tktkt.factories.preprocessing import SennrichSpaceMarker, IdentityMapper, PretokeniserSequence, AddWordBoundary, HyphenMode, IsolatePunctuation, OnWhitespace
 
 from .heap import HeapWithInverseIndex
 

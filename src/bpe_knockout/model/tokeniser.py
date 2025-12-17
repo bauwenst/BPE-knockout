@@ -2,11 +2,11 @@ from typing import Union
 from pathlib import Path
 
 from tktkt.util.printing import *
-from tktkt.interfaces.tokeniser import *
+from tktkt.interfaces.tokenisers import *
 from tktkt.wrappers.multiplexing import SuccessionalTokeniser
-from tktkt.factories.preprocessing import Preprocessor
+from tktkt.factories.preprocessors import Preprocessor
 from tktkt.interfaces.huggingface import TktktToHuggingFace
-from tktkt.interfaces.identifiers import NoSpecials
+from tktkt.interfaces.identifiers import NoSpecials, WithSpecials
 
 from ..util.storage import fetchAndCacheDict, DEFAULT_TOKENISER_STEM, makeDownloadPath
 from .config import *

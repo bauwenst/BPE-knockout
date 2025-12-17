@@ -6,12 +6,12 @@ from tst.configs import setupEnglish, setupDutch, setupGerman
 
 import math
 
-from tktkt.interfaces.tokeniser import prepare_tokenise_decode
+from tktkt.interfaces.tokenisers import prepare_tokenise_decode
 from tktkt.util.timing import timeit
 from tktkt.evaluation.morphological import ConfusionMatrix, compareSplits_cursors
 from tktkt.models.huggingface.wrapper import HuggingFaceTokeniser
-from tktkt.factories.evaluation import evaluateTokeniserOnMorphology
-from tktkt.factories.preprocessing import Preprocessor, BoundariesFromSpacesPretokeniser, RobertaSpaceMarker
+from tktkt.factories.evaluators import evaluateTokeniserOnMorphology
+from tktkt.factories.preprocessors import Preprocessor, BoundariesFromSpacesPretokeniser, RobertaSpaceMarker
 
 from fiject import *  # Fiject project found at https://github.com/bauwenst/fiject
 from fiject.visuals.tables import ColumnStyle, Table

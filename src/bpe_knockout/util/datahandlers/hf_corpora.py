@@ -6,7 +6,7 @@ import tokenizers.normalizers as tn
 import tokenizers.pre_tokenizers as tp
 
 from tktkt.models.word.vocabularisation import CountWords
-from tktkt.factories.preprocessing import TraditionalPreprocessor
+from tktkt.factories.preprocessors import TraditionalPreprocessor
 
 from .wordfiles import *
 from .unicode import punctuation_regex_str

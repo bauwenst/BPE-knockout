@@ -19,7 +19,7 @@ class AutoKnockout:
     a Vocabulariser has never been an object and always a Path.)
     """
 
-    class RuntimeArtifacts(BPE_Deserialiser[WithSpecials]):
+    class RuntimeArtifacts(BPE_Artifacts[WithSpecials]):
 
         def __init__(self, preprocessor: Preprocessor, vocab: Vocab[WithSpecials], merges: MergeList):
             super().__init__(specials=vocab.specials, unk_id=vocab.UNK)
@@ -66,7 +66,7 @@ class AutoKnockout:
             reference=reference
         )
 
-    def from_artifacts(self, artifacts: BPE_Deserialiser[WithSpecials], reference: ModestDataset) -> BTE[WithSpecials]:
+    def from_artifacts(self, artifacts: BPE_Artifacts[WithSpecials], reference: ModestDataset) -> BTE[WithSpecials]:
         checkpoint = BPEKnockoutVocabulariser(initial_tokeniser=artifacts, config=self.config).vocabulariseFromModest(reference=reference)
 
         specials, unk_id = artifacts._specials, artifacts._unk_id

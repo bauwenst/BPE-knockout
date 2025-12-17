@@ -15,9 +15,9 @@ from tktkt.models.huggingface.wrapper import HuggingFaceTokeniser
 robbert_tokenizer = HuggingFaceTokeniser(rt, for_single_words=True)
 
 from bpe_knockout.util.bytemapping import *
-from bpe_knockout.model.vocabulariser import BTE, BTEConfig, ReferenceMode, ExecutionPolicy
+from bpe_knockout.model.vocabulariser import BTE, BTEConfig, ReferenceMode
 from tktkt.util.timing import timeit
-from tktkt.interfaces.tokeniser import prepare_tokenise_decode
+from tktkt.interfaces.tokenisers import prepare_tokenise_decode
 from fiject import LineGraph, CacheMode
 
 
