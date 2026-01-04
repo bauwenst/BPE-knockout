@@ -1,7 +1,8 @@
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 from huggingface_hub import hf_hub_download
 
-from tktkt.interfaces.identifiers import AutoVocabSpecs, AutoVocab, repairAbsoluteSpecials, areNotAbsoluteSpecials
+from tktkt.interfaces.identifiers import AutoVocabSpecs, AutoVocab, repairAbsoluteSpecials, areNotAbsoluteSpecials, \
+    SpecialsExtended
 from tktkt.models.huggingface.wrapper import HuggingFacePreprocessorForWords
 
 from .vocabulariser import *
@@ -19,66 +20,41 @@ class AutoKnockout:
     a Vocabulariser has never been an object and always a Path.)
     """
 
-    class RuntimeArtifacts(BPE_Artifacts[WithSpecials]):
-
-        def __init__(self, preprocessor: Preprocessor, vocab: Vocab[WithSpecials], merges: MergeList):
-            super().__init__(specials=vocab.specials, unk_id=vocab.UNK)
-            self.preprocessor = preprocessor
-            self.vocab = vocab
-            self.merges = merges
-
-        def _buildVocabulary(self) -> Vocab[WithSpecials]:
-            return self.vocab
-
-        def buildMerges(self) -> MergeList:
-            return self.merges
-
-        def preprocessorEffective(self) -> Preprocessor:
-            return self.preprocessor
-
-        def preprocessorNative(self) -> Preprocessor:
-            return self.preprocessor
-
-        def _bakedSpecials(self) -> set[str]:  # Assume there are no baked-in specials. You can let AutoVocab filter them out, for example.
-            return set()
-
-    ####################################################################################################################
-
     def __init__(self, config: BTEConfig):
         self.config = config
 
-    def from_pretrained(self, checkpoint: str, specials: AutoVocabSpecs[WithSpecials], reference: ModestDataset) -> BTE[WithSpecials]:
+    def from_pretrained(self, checkpoint: str, original_specials: AutoVocabSpecs[WithSpecials], reference: ModestDataset) -> BTE[WithSpecials]:
         tkz: PreTrainedTokenizerBase = AutoTokenizer.from_pretrained(checkpoint)
         return self.from_objects(
             preprocessor=HuggingFacePreprocessorForWords(tkz),
-            vocab=AutoVocab.fromTokenizer(tkz, specials),
+            vocab=AutoVocab.fromTokenizer(tkz, original_specials),
             merges=AutoMerges.from_tokenizer(tkz),
             reference=reference
         )
 
     def from_objects(self, preprocessor: Preprocessor, vocab: Vocab[WithSpecials], merges: MergeList, reference: ModestDataset) -> BTE[WithSpecials]:
+        artifacts = CacheableBPEArtifacts(types=list(vocab), merges=merges)
+        artifacts.setPreprocessors(preprocessor)
         return self.from_artifacts(
-            artifacts=AutoKnockout.RuntimeArtifacts(
-                preprocessor=preprocessor,
-                vocab=vocab,
-                merges=merges
-            ),
+            artifacts=artifacts,
+            original_specials=SpecialsExtended(vocab.specials, vocab.UNK),
             reference=reference
         )
 
-    def from_artifacts(self, artifacts: BPE_Artifacts[WithSpecials], reference: ModestDataset) -> BTE[WithSpecials]:
-        checkpoint = BPEKnockoutVocabulariser(initial_tokeniser=artifacts, config=self.config).vocabulariseFromModest(reference=reference)
+    def from_artifacts(self, artifacts: BPEArtifacts, original_specials: SpecialsExtended[WithSpecials], reference: ModestDataset) -> BTE[WithSpecials]:
+        new_artifacts = BPEKnockoutVocabulariser(initial_tokeniser=artifacts, config=self.config).vocabulariseFromModest(reference=reference)
 
-        specials, unk_id = artifacts._specials, artifacts._unk_id
-        if not areNotAbsoluteSpecials(specials):  # not not absolute == absolute. These will need correction after knockout!
-            types, _, _ = BPEKnockoutVocabulariser._parseJson(checkpoint)
-            specials, unk_id = repairAbsoluteSpecials(count(types), specials, unk_id)
+        if not areNotAbsoluteSpecials(original_specials.specials):  # not not absolute == absolute. These will need correction after knockout!
+            types = new_artifacts.getVocabulary()
+            specials, unk_id = repairAbsoluteSpecials(count(types), original_specials.specials, original_specials.unk)
+        else:
+            specials, unk_id = original_specials.specials, original_specials.unk
 
-        return BTE.from_pretrained_tktkt(
-            checkpoint=checkpoint,
-            preprocessor=artifacts.preprocessorEffective(),
-            specials=specials,
-            unk_id=unk_id
+        return BTE(
+            new_artifacts.preprocessorEffective(),
+            vocab=new_artifacts.getVocabulary(SpecialsExtended(specials, unk_id)),
+            merges=new_artifacts.getMerges(),
+            metadata=self.config
         )
 
 

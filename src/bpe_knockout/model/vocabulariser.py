@@ -8,10 +8,10 @@ TODO: Because you're already requesting tokenisations and morphological segmenta
       you might as well use those to compute a Re, Pr, F1 for free. It would cut the time for doing a diagnostic run in half.
 """
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Self
 from collections import Counter
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 
 import re
 import json
@@ -25,8 +25,8 @@ import tktkt  # To have access to tktkt.__version__
 from tktkt.util.iterables import cumsum, count, swapped
 from tktkt.util.strings import indicesToTokens
 from tktkt.util.printing import *
-from tktkt.util.timing import datetimeDashed
-from tktkt.factories.artifacts import BPE_Artifacts
+from tktkt.models.bpe.vocabularisation import CacheableBPEArtifacts
+from tktkt.factories.artifacts import BPEArtifacts
 from tktkt.interfaces.tokenisers import Tokeniser
 from tktkt.interfaces.vocabularisers import *
 
@@ -77,6 +77,84 @@ class IntermediateEvaluator(ABC):
         pass
 
 
+@dataclass
+class KnockoutVersions:
+    bpe_knockout: str
+    tktkt: str
+
+
+@dataclass
+class KnockoutNames:
+    tokeniser: str
+    dataset: str
+
+
+@dataclass
+class KnockoutIdentification:
+    versions: KnockoutVersions
+    names: KnockoutNames
+
+
+@dataclass
+class KnockoutRandomisation:
+    holdout: float
+    seed: int
+
+
+@dataclass
+class KnockoutMetadata:
+    identification: KnockoutIdentification
+    randomisation: KnockoutRandomisation
+    config: BTEConfig
+    iterations: list[dict]
+
+
+class BPEKnockoutArtifacts(BPEArtifacts):
+    @abstractmethod
+    def getDiagnostics(self) -> KnockoutMetadata:
+        pass
+
+
+class CacheableBPEKnockoutArtifacts(CacheableBPEArtifacts, BPEKnockoutArtifacts):
+    def __init__(self, types: list[str], merges: list[tuple[str,...]], metadata: KnockoutMetadata):
+        super().__init__(types, merges)
+        self._metadata = metadata
+
+    def getDiagnostics(self) -> KnockoutMetadata:
+        return self._metadata
+
+    def store(self, cache_path: Path):
+        super().store(cache_path)
+
+        with open(cache_path / "metadata.json", "w", encoding="utf-8") as handle:
+            json.dump(asdict(self._metadata), handle)
+
+    @classmethod
+    def load(cls, cache_path: Path) -> Self:
+        bpe_artifacts = CacheableBPEArtifacts.load(cache_path)
+
+        with open(cache_path / "metadata.json", "r", encoding="utf-8") as handle:
+            metadata = json.load(handle)
+
+        # Config fields are special, the rest of the metadata is trivial.
+        config = metadata["config"]
+        config["knockout"]["reference"]  = ReferenceMode(config["knockout"]["reference"])
+        config["annealing"]["reference"] = ReferenceMode(config["annealing"]["reference"])
+        config["annealing"]["when"]      = AnnealingTime(config["annealing"]["when"])
+        config["reify"]                  = ReifyMode(config["reify"])
+        metadata["config"] = dacite.from_dict(BTEConfig, config)
+
+        return CacheableBPEKnockoutArtifacts(
+            types=bpe_artifacts._types,
+            merges=bpe_artifacts._merges,
+            metadata=dacite.from_dict(KnockoutMetadata, metadata)
+        )
+
+    @classmethod
+    def exists(cls, cache_path: Path) -> bool:
+        return super().exists(cache_path) and (cache_path / "metadata.json").exists()
+
+
 EPS = 0.001
 
 # TODO: Should just use the cursor system I have in TkTkT. Might make blame computation much faster.
@@ -84,11 +162,11 @@ SPLIT_MARKER = "|"
 SPLIT_MARKER_RE = re.compile(re.escape(SPLIT_MARKER))
 
 
-class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser):
+class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEKnockoutArtifacts]):
 
-    def __init__(self, initial_tokeniser: BPE_Artifacts, config: BTEConfig,
+    def __init__(self, initial_tokeniser: BPEArtifacts, config: BTEConfig,
                  holdout: Holdout=None, iteration_evaluator: IntermediateEvaluator=None, quiet: bool=False):
-        super().__init__(name="bpe-knockout")
+        super().__init__(preprocessor=initial_tokeniser.preprocessorEffective())
         self._config = config
         self._files = initial_tokeniser
         self._print = doPrint(not quiet, hesitate=True)
@@ -104,16 +182,21 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser):
         self._evaluator = iteration_evaluator
         self._diagnostics = []
 
-    def vocabulariseFromModest(self, reference: ModestDataset) -> Path:
-        folder = self._makeOutputFolder(reference.identifier())
+    def _identifier(self) -> str:
+        return "bpe-knockout"
+
+    def _cacheType(self):
+        return CacheableBPEKnockoutArtifacts
+
+    def _vocabulariseFromModest(self, reference: ModestDataset) -> CacheableBPEKnockoutArtifacts:
         tk = BTE(
             preprocessor=self._files.preprocessorEffective(),
-            vocab=self._files.buildVocabulary(),
-            merges=self._files.buildMerges(),
+            vocab=self._files.getVocabulary(),
+            merges=self._files.getMerges(),
             metadata=self._config
         )
         self._iterative(tk, reference, iterations=self._config.iterations, evaluator=self._evaluator)
-        return self._save(tk, reference, folder=folder)
+        return self._tokeniserToCache(tk, reference)
 
     def _iterative(self, tk: BTE, reference: ModestDataset, iterations: int, evaluator: IntermediateEvaluator=None):
         """
@@ -725,79 +808,32 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser):
 
     #################################################################################################################
 
-    ### STORAGE ###
-
-    @classmethod
-    def _parseJson(cls, json_path: Path) -> tuple[UnidentifiedVocab, MergeList, BTEConfig]:
-        """
-        Parses the saved file into the types, merges, and config metadata.
-        """
-        with open(json_path, "r", encoding="utf-8") as handle:
-            tkz_as_dict = json.load(handle)
-            metadata       = tkz_as_dict["hyperparameters"]
-            tokeniser_data = tkz_as_dict["tokeniser"]
-
-        # Convert metadata enums from string to object
-        metadata["knockout"]["reference"]  = ReferenceMode(metadata["knockout"]["reference"])
-        metadata["annealing"]["reference"] = ReferenceMode(metadata["annealing"]["reference"])
-        metadata["annealing"]["when"] = AnnealingTime(metadata["annealing"]["when"])
-        metadata["reify"] = ReifyMode(metadata["reify"])
-
-        return tokeniser_data["types"], tokeniser_data["merges"], dacite.from_dict(BTEConfig, metadata)
-
-    def _save(self, tk: BTE, reference: ModestDataset, folder: Path) -> Path:
-        # Folder setup
-        if not folder.parent.is_dir():
-            raise ValueError(f"Cannot find folder parent {folder.parent.as_posix()}")
-        folder.mkdir(exist_ok=True)
-
+    def _tokeniserToCache(self, tk: BTE, reference: ModestDataset) -> CacheableBPEKnockoutArtifacts:
         # Separate alphabet from merged types
         alphabet   = dict(swapped(enumerate(sorted(filter(lambda t: tk.merge_graph.inAlphabet(t), tk.vocab), key=lambda t: (len(t), t)))))
         composites = {m.childType(): m.priority for m in tk.merge_graph.merges}
         if set(tk.vocab.keys()) != set(alphabet.keys()) | set(composites.keys()):
             warnings.warn("While saving, it was discovered that the set of types without a merge plus the set of types formed by the merge list DO NOT make up the vocabulary. This is weird!")
 
-        # Serialise and save tokeniser
-        serialised = self._getMetadata(tk, reference) | {
-            "hyperparameters": {
-                "holdout": self._holdout.threshold,
-                "seed": self._holdout.seed
-            } | dataclasses.asdict(self._config),
-            "tokeniser": {  # We do not save the IDs because that's handled by TkTkT.
-                "types": sorted(alphabet.keys(), key=alphabet.get) + sorted(composites.keys(), key=composites.get),  # Alphabet is sorted on length and then alphabetically, composites are sorted by merge priority (even if that means the IDs are out of order, which is the case for RoBERTa!).
-                "merges": [" ".join(merge.parts) for merge in sorted(tk.merge_graph.merges)]  # Sorted by priority; very important. Isn't necessarily the case in the graph by default.
-            }
-        }
-        id = datetimeDashed()
-        out_path = folder / time.strftime(f"{id}_tokenizer.json")
-        with open(out_path, "w", encoding="utf-8") as handle:
-            json.dump(serialised, handle, indent=4, ensure_ascii=False)
-
-        # Also save diagnostics, but don't return path to them
-        self._saveIterationDiagnostics(tk, reference, folder, id)
-
-        return out_path
-
-    def _saveIterationDiagnostics(self, tk: BTE, reference: ModestDataset, folder: Path, id: str) -> Path:
-        serialised = self._getMetadata(tk, reference) | {"iterations": self._diagnostics}
-        out_path = folder / time.strftime(f"{id}_diagnostics.json")
-        with open(out_path, "w", encoding="utf-8") as handle:
-            json.dump(serialised, handle, indent=4, ensure_ascii=False)
-        return out_path
-
-    def _getMetadata(self, tk: BTE, reference: ModestDataset) -> dict:
-        return {
-            "versions": {
-                "bpe_knockout": __version__,
-                "tktkt": tktkt.__version__
-            },
-            "identifiers": {
-                "tokeniser": tk.getName(),
-                "dataset": reference.identifier() + (f"_{int(100*self._holdout.threshold)}-{int(100-100*self._holdout.threshold)}-holdout" if self._holdout is not None and self._holdout.threshold != 1.0 else "")
-            }
-        }
-
-    @classmethod
-    def _load(cls, file_or_folder: Path) -> UnidentifiedVocab:
-        types, _, _ = cls._parseJson(file_or_folder)
-        return types
+        return CacheableBPEKnockoutArtifacts(
+            types=sorted(alphabet.keys(), key=alphabet.get) + sorted(composites.keys(), key=composites.get),  # Alphabet is sorted on length and then alphabetically, composites are sorted by merge priority (even if that means the IDs are out of order, which is the case for RoBERTa!).
+            merges=[tuple(m.parts) for m in sorted(tk.merge_graph.merges)],  # Sorted by priority; very important. Isn't necessarily the case in the graph by default.
+            metadata=KnockoutMetadata(
+                identification=KnockoutIdentification(
+                    versions=KnockoutVersions(
+                        bpe_knockout=__version__,
+                        tktkt=tktkt.__version__
+                    ),
+                    names=KnockoutNames(
+                        tokeniser=tk.getName(),
+                        dataset=reference.identifier() + (f"_{int(100*self._holdout.threshold)}-{int(100-100*self._holdout.threshold)}-holdout" if self._holdout is not None and self._holdout.threshold != 1.0 else "")
+                    )
+                ),
+                randomisation=KnockoutRandomisation(
+                    holdout=self._holdout.threshold,
+                    seed=self._holdout.seed
+                ),
+                config=self._config,
+                iterations=self._diagnostics
+            )
+        )
