@@ -27,7 +27,7 @@ import re
 import sys
 import math
 
-from typing import List, Iterable, TextIO
+from typing import Iterable, TextIO
 from collections import defaultdict
 from tqdm.auto import tqdm
 
@@ -336,7 +336,7 @@ def adapt_num_symbols(num_symbols: int, vocab: VocabCounter, total_symbols: bool
     return new_num_symbols
 
 
-def learn_bpe(infiles: List[Iterable[str]], outfile: TextIO,
+def learn_bpe(infiles: list[Iterable[str]], outfile: TextIO,
               num_symbols_ori: int, total_symbols=False,
               probabilistic=False, frac_stopping=None, frac_stopping_average_n=100, min_frequency=2,
               is_dict=False, verbose=False,

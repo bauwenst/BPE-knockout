@@ -1,4 +1,3 @@
-from typing import Dict
 from pathlib import Path
 
 import json
@@ -55,7 +54,7 @@ class BPETrainer:
             json.dump(vocab, out_handle, ensure_ascii=False, indent=4)
 
     @staticmethod
-    def deduceVocabFromMerges(mergefile: Path, byte_based: bool) -> Dict[str, int]:
+    def deduceVocabFromMerges(mergefile: Path, byte_based: bool) -> dict[str, int]:
         # Summarise merges
         with open(mergefile, "r", encoding="utf-8") as in_handle:
             merges = [line.strip() for line in in_handle if line != "#version: 0.2\n"]

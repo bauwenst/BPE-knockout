@@ -1,15 +1,14 @@
-from typing import List
 from modest.algorithms.alignment import ViterbiNode
 
 
-def printTrellis(trellis: List[List[ViterbiNode]]):
+def printTrellis(trellis: list[list[ViterbiNode]]):
     for vertical_idx in range(len(trellis[0])):
         for horizontal_idx in range(len(trellis)):
             print(trellis[horizontal_idx][vertical_idx].best_count, end="\t")
         print()
 
 
-def viterbiLaTeX(trellis: List[List[ViterbiNode]], lemma: str, morphemes: str, trace: list):
+def viterbiLaTeX(trellis: list[list[ViterbiNode]], lemma: str, morphemes: str, trace: list):
     matrix_string = ""
     arrow_string  = ""
 

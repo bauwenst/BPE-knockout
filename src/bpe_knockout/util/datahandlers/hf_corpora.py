@@ -5,7 +5,7 @@ from tokenizers import Regex
 import tokenizers.normalizers as tn
 import tokenizers.pre_tokenizers as tp
 
-from tktkt.models.word.vocabularisation import CountWords
+from tktkt.models.word.vocabularisation import CountWords, CountingConfig
 from tktkt.factories.preprocessors import TraditionalPreprocessor
 
 from .wordfiles import *
@@ -17,7 +17,7 @@ def logger(msg: str):
 
 
 def generateDataloader_Oscar(langtag: str, sentence_preprocessor: Callable[[str],str],
-                             size_limit: int=None, shuffle: bool=False, streamed: bool=True) -> Tuple[DataLoader, int]:
+                             size_limit: int=None, shuffle: bool=False, streamed: bool=True) -> tuple[DataLoader, int]:
     """
     Note that the DataLoader is an iteraBLE, not an iteraTOR. It can be iterated over multiple times.
     """
@@ -72,11 +72,11 @@ def dataloaderToCounts(dataloader: DataLoader, output_stem: str):
         word_extractor=TraditionalPreprocessor(),
         frequency_minimum=10,
         sort_before_write=True,
-        cache_config=CountWords.CacheConfig(
+        config=CountingConfig(
             checkpoint_every_examples=1_000_000,
-            flush_if_keys_exceed=1_000_000,
+            shard_if_keys_exceed=1_000_000,
             drop_if_multiple_exceeded=3,
-            delete_cache_after=True
+            delete_shards_after=True
         )
     )
     return counter.vocabulariseFromStringIterable(NamedIterable(dataloader, name=output_stem))

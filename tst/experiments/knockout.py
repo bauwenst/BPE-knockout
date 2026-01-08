@@ -157,7 +157,7 @@ def test_iterative():
         for holdout, prefix in HOLDOUTS:
             # Make the intermediate testing framework by capturing the table AND the holdout prefix.
             class ForIntermediateTests(IntermediateEvaluator):
-                def evaluate(self, tokeniser: Tokeniser, holdout: Holdout, experiment_names: List[str]):
+                def evaluate(self, tokeniser: Tokeniser, holdout: Holdout, experiment_names: list[str]):
                     results = intrinsicEvaluation([tokeniser], do_whole_word=True,
                                                   reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=holdout)
                     addEvaluationToTable(table, results,
@@ -185,8 +185,8 @@ COLUMN_NAME_Pr = "Pr"
 COLUMN_NAME_Re = "Re"
 COLUMN_NAME_F1 = "$F_1$"
 
-def addEvaluationToTable(table: Table, results: List[TokeniserEvaluation], macro_average_all: bool=False,
-                         row_names: List[str]=None, row_prefix: List[str]=None):
+def addEvaluationToTable(table: Table, results: list[TokeniserEvaluation], macro_average_all: bool=False,
+                         row_names: list[str]=None, row_prefix: list[str]=None):
     """
     In-place function that determines the table structure for reporting results from Python experiments.
 
@@ -607,7 +607,7 @@ def main_deleteRandomMerges_Monolingual():
 
     graph = LineGraph(name=f"delete-random-types_{Pℛ𝒪𝒥ℰ𝒞𝒯.config.langTag()}", caching=CacheMode.IF_MISSING)
     if graph.needs_computation:
-        def pruneIndices(merge_indices: Tuple[int]):
+        def pruneIndices(merge_indices: tuple[int]):
             # , job_id=[1]):
             # print(time.strftime(f"[%H:%M:%S] Job ~{job_id[0]} started."))
             # job_id[0] += 1

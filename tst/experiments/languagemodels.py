@@ -3,7 +3,6 @@ Formats (not generates) the CSVs obtained from Weights & Biases for the LM train
 """
 from tst.preamble import *
 
-from typing import Tuple
 import csv
 import re
 
@@ -16,7 +15,7 @@ PATH_FINETUNING_RESULTS  = PATH_EXPERIMENTS_OUT / "nl-mlm-finetuning.csv"
 BPE_NAME   = "BPE"
 KNOCK_NAME = "BPE-knockout"
 CONV_NAME  = r"BPE $\to$ BPE-knockout"
-def task_formatter(wandb_name: str) -> Tuple[str, str]:
+def task_formatter(wandb_name: str) -> tuple[str, str]:
     if "sa" in wandb_name:
         task_formatted = "SA"
         task_family = "Sequence-level"

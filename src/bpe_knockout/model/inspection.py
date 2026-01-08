@@ -26,10 +26,10 @@ class BPEKnockoutVocabulariser_NoTrivialKnockout(BPEKnockoutVocabulariser):
         filtered_results = super()._rankOldMergesForKnockout(tk, reference, blame_tuples_once)
         return [m for m in filtered_results if not m.merge.isTrivial(minimum=self._long_part_threshold)]
 
-    def _getMetadata(self, tk: BTE, reference: ModestDataset) -> dict:
-        d = super()._getMetadata(tk, reference)
-        d["identifiers"]["tokeniser"] += "_keeptrivial"
-        return d
+    def _tokeniserToCache(self, tk: BTE, reference: ModestDataset) -> CacheableBPEKnockoutArtifacts:
+        artifacts = super()._tokeniserToCache(tk, reference)
+        artifacts._metadata.identification.names.tokeniser += "_keeptrivial"
+        return artifacts
 
 
 class BPEngineer:
@@ -43,7 +43,7 @@ class BPEngineer:
     def __init__(self, bte: BTE):
         self.bte = bte
 
-    def findInvariantViolations(self) -> List[str]:
+    def findInvariantViolations(self) -> list[str]:
         """
         There is an invariant (proved in my thesis under the name "original functional sin", OFS) in vanilla BPE that
         says that every type in the vocabulary can be formed by exactly one merge, because (as the proof shows) there
@@ -59,7 +59,7 @@ class BPEngineer:
                 multimerge_types.append(typ)
         return multimerge_types
 
-    def findDisabledTypes(self) -> List[str]:
+    def findDisabledTypes(self) -> list[str]:
         """
         It is easy to prove that a necessary condition for a type in the vocabulary of a BPE tokeniser to ever be formed
         is that the tokeniser forms it when you tokenise the type itself in string form:
@@ -122,9 +122,9 @@ class BPEngineer:
             chains.append(chain[::-1])
 
         class Chain:
-            def __init__(self, chain: List[Merge]):
-                self.as_list: List[Merge] = chain
-                self.connected_to_leaves: List[Merge] = []
+            def __init__(self, chain: list[Merge]):
+                self.as_list: list[Merge] = chain
+                self.connected_to_leaves: list[Merge] = []
 
         # chains.sort(key=lambda chain: len(chain))
         # lprint(chains)
@@ -236,7 +236,7 @@ class BpeMergeState:
 
     def __init__(self, bitstring: str):
         self.bitstring = bitstring
-        self.children: List[BpeMergeState] = []
+        self.children: list[BpeMergeState] = []
 
     def __eq__(self, other) -> bool:
         return self.bitstring == other.bitstring

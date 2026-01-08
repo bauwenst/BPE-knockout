@@ -10,7 +10,7 @@ It itself cannot run anything. Imputation should only be done by calling its
 functions.
 """
 from abc import abstractmethod, ABC
-from typing import Callable, Optional, Iterable, Dict
+from typing import Callable, Optional, Iterable
 from langcodes import Language
 from dataclasses import dataclass
 from pathlib import Path
@@ -176,7 +176,7 @@ def morphologyGenerator() -> Iterable[WordDecompositionWithFreeSegmentation]:
     return Pℛ𝒪𝒥ℰ𝒞𝒯.config.morphologies.generate()  # https://discuss.python.org/t/difference-between-return-generator-vs-yield-from-generator/2997
 
 
-def lexiconWeights(override_reweighter: Callable[[float],float]=None) -> Dict[str, float]:
+def lexiconWeights(override_reweighter: Callable[[float],float]=None) -> dict[str, float]:
     """
     Alias for loadAndWeightLexicon that automatically uses the project's word file, morphologies, and reweighting function.
     """

@@ -1,6 +1,5 @@
 from tst.preamble import *
 import itertools
-from typing import List
 import re
 
 TEXCHARS = re.compile(r"([&#$%{}_^\\])")
@@ -15,7 +14,7 @@ def get(lst: list, index: int, default=None):
 
 COLOURS = ["red", "orange", "teal", "blue", "violet"]
 
-def matchListElements(list1: List[str], list2: List[str], max_length: int=1_000_000, edge_label: str="out=0,in=180,looseness=0.4"):
+def matchListElements(list1: list[str], list2: list[str], max_length: int=1_000_000, edge_label: str="out=0,in=180,looseness=0.4"):
     """
     Goal: Make a very long TikZ diagram that has all the words of one list on one side, those of the other on the other side,
           and links them with TikZ lines.

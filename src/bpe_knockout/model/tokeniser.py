@@ -1,12 +1,10 @@
 from typing import Union
 from pathlib import Path
 
-from tktkt.util.printing import *
 from tktkt.interfaces.tokenisers import *
-from tktkt.wrappers.multiplexing import SuccessionalTokeniser
-from tktkt.factories.preprocessors import Preprocessor
-from tktkt.interfaces.huggingface import TktktToHuggingFace
 from tktkt.interfaces.identifiers import NoSpecials, WithSpecials
+from tktkt.interfaces.huggingface import TktktToHuggingFace
+from tktkt.wrappers.multiplexing import SuccessionalTokeniser
 
 from ..util.storage import fetchAndCacheDict, DEFAULT_TOKENISER_STEM, makeDownloadPath
 from .config import *
@@ -104,7 +102,7 @@ class BTE(TokeniserWithVocabulary[WithSpecials], SuccessionalTokeniser):
 
         return buffer[1:-1].split(" ")
 
-    def _finalTokens_faster(self, sequence_of_nonspaces: Iterable[str]) -> List[str]:  # TODO: Replace _finalTokens by this.
+    def _finalTokens_faster(self, sequence_of_nonspaces: Tokens) -> Tokens:  # TODO: Replace _finalTokens by this.
         buffer = " " + " ".join(sequence_of_nonspaces) + " "
         while True:
             tokens = buffer[1:-1].split(" ")
@@ -126,6 +124,7 @@ class BTE(TokeniserWithVocabulary[WithSpecials], SuccessionalTokeniser):
         return buffer[1:-1].split(" ")
 
     ####################################################################################################################
+    # TODO: Remove these
 
     @staticmethod
     def from_pretrained_tktkt(checkpoint: Union[str, Path], preprocessor: Preprocessor,
@@ -139,6 +138,8 @@ class BTE(TokeniserWithVocabulary[WithSpecials], SuccessionalTokeniser):
             3. You can give a string that is NOT an existing file or directory, and it will instead be looked up
                as if it is a checkpoint on the HuggingFace hub.
         """
+        raise DeprecationWarning("This feature is now deprecated. See the TkTkT README for how to load BTE tokenisers from a checkpoint.")
+
         # Make sure that you have the tokeniser file locally on disk.
         checkpoint_pathified = Path(checkpoint)
         if checkpoint_pathified.is_dir() or checkpoint_pathified.is_file():

@@ -3,9 +3,6 @@ Goal: BPE-knockout, a post-processing step for BPE where you knock some subwords
 rules using its two parents. This involves two additional problems solved here:
     1. A BPE tokenisers that can merge triplets, quadruplets ... tuples of any length >= 2.
     2. A way of deciding which types to knock out of the vocabulary. I came up with "blame ratio", see below.
-
-TODO: Because you're already requesting tokenisations and morphological segmentations during blame/amenability anyway,
-      you might as well use those to compute a Re, Pr, F1 for free. It would cut the time for doing a diagnostic run in half.
 """
 from abc import ABC, abstractmethod
 from typing import Any, Self
@@ -25,10 +22,11 @@ import tktkt  # To have access to tktkt.__version__
 from tktkt.util.iterables import cumsum, count, swapped
 from tktkt.util.strings import indicesToTokens
 from tktkt.util.printing import *
-from tktkt.models.bpe.vocabularisation import CacheableBPEArtifacts
-from tktkt.factories.artifacts import BPEArtifacts
+from tktkt.util.aggregates import ConfusionMatrix
+from tktkt.models.bpe.vocabularisation import CacheableBPEArtifacts, BPEArtifacts
 from tktkt.interfaces.tokenisers import Tokeniser
 from tktkt.interfaces.vocabularisers import *
+from tktkt.util.strings import shash
 
 from .. import __version__
 from ..util.datahandlers.holdout import Holdout
@@ -116,6 +114,9 @@ class BPEKnockoutArtifacts(BPEArtifacts):
 
 
 class CacheableBPEKnockoutArtifacts(CacheableBPEArtifacts, BPEKnockoutArtifacts):
+
+    _FILENAME = "diagnostics.json"
+
     def __init__(self, types: list[str], merges: list[tuple[str,...]], metadata: KnockoutMetadata):
         super().__init__(types, merges)
         self._metadata = metadata
@@ -126,14 +127,14 @@ class CacheableBPEKnockoutArtifacts(CacheableBPEArtifacts, BPEKnockoutArtifacts)
     def store(self, cache_path: Path):
         super().store(cache_path)
 
-        with open(cache_path / "metadata.json", "w", encoding="utf-8") as handle:
-            json.dump(asdict(self._metadata), handle)
+        with open(cache_path / CacheableBPEKnockoutArtifacts._FILENAME, "w", encoding="utf-8") as handle:
+            json.dump(asdict(self._metadata), handle, indent=4, ensure_ascii=False)
 
     @classmethod
     def load(cls, cache_path: Path) -> Self:
         bpe_artifacts = CacheableBPEArtifacts.load(cache_path)
 
-        with open(cache_path / "metadata.json", "r", encoding="utf-8") as handle:
+        with open(cache_path / CacheableBPEKnockoutArtifacts._FILENAME, "r", encoding="utf-8") as handle:
             metadata = json.load(handle)
 
         # Config fields are special, the rest of the metadata is trivial.
@@ -152,7 +153,7 @@ class CacheableBPEKnockoutArtifacts(CacheableBPEArtifacts, BPEKnockoutArtifacts)
 
     @classmethod
     def exists(cls, cache_path: Path) -> bool:
-        return super().exists(cache_path) and (cache_path / "metadata.json").exists()
+        return super().exists(cache_path) and (cache_path / CacheableBPEKnockoutArtifacts._FILENAME).exists()
 
 
 EPS = 0.001
@@ -180,10 +181,13 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
         # Eval
         self._holdout = holdout or Holdout(1.0)
         self._evaluator = iteration_evaluator
-        self._diagnostics = []
+        self._diagnostics: list[dict] = []
 
-    def _identifier(self) -> str:
-        return "bpe-knockout"
+    def _cacheSubfolder(self) -> str:
+        return "bpe-knockout" if self._config.reify.does_nothing() else "rebpe"
+
+    def _identifierPartial(self) -> str:
+        return shash(repr(self.preprocessor)) + "_" + shash(repr(self._config))
 
     def _cacheType(self):
         return CacheableBPEKnockoutArtifacts
@@ -281,7 +285,7 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
 
     ### KNOCKOUT ###
 
-    def _rankOldMergesForKnockout(self, tk: BTE, reference: ModestDataset, blame_tuples_once: bool=False) -> list[MergeBlame]:
+    def _rankOldMergesForKnockout(self, tk: BTE, reference: ModestDataset, blame_tuples_once: bool=False) -> tuple[list[MergeBlame],ConfusionMatrix]:
         """
         Compares BPE tokenisation to morphological tokenisation, and records the amount of times each BPE merge is used as
         well as the amount of times each merge makes a split disappear that the morphological segmentation mandates.
@@ -296,6 +300,8 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
         merge_lookup = {m.priority: m for m in tk.merge_graph.merges}
         blame        = {m.priority: 0 for m in tk.merge_graph.merges}
         total        = {m.priority: 0 for m in tk.merge_graph.merges}
+
+        old_performance = ConfusionMatrix()
 
         for obj in self._holdout(reference.generate(), train=True):
             lemma = obj.word
@@ -322,6 +328,14 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
             ref_split_indices = {match.start() for match in SPLIT_MARKER_RE.finditer(" ".join(reference_segmentation).replace("   ", SPLIT_MARKER))}
             indices_that_shouldve_never_merged = {index//2 for index in ref_split_indices - bpe_split_indices}  # In an ideal tokeniser, subtracting the BPE split positions should result in an empty set. When it doesn't, BPE is missing split positions, i.e., it merged too many.
 
+            # This is also a free evaluation over the train set.
+            old_performance.add(
+                tp=len(bpe_split_indices & ref_split_indices),
+                predicted=len(bpe_split_indices),
+                relevant=len(ref_split_indices),
+                total=0   # Not relevant for Pr, Re, F1. Would be sum(map(len, tokens)) - 1 but computing it is wasting compute.
+            )
+
             # Blame the merges that caused these indices to contract.
             # log("\t", reference_segmentation, "->", bpe_segmentation)
             # log("\t", merge_ids)
@@ -341,27 +355,20 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
                 merge_ids_seen.add(merge_id)
                 blame[merge_id] += weight
 
-        # Calculate ratios
-        # blame_ratios = dict()
-        # for merge_id in blame.keys():
-        #     blame_ratios[merge_id] = blame[merge_id]/total[merge_id] \
-        #                              if total[merge_id] != 0 else 0  # Protect against DBZ.
-        # filtered_results = [MergeBlame(merge=merge_lookup[merge_id], n_bad_applications=blame[merge_id], n_applications=total[merge_id]) for merge_id, ratio in blame_ratios.items()
-        #                     if ratio >= relative_blame_threshold]
-        # filtered_results.sort(reverse=True)
-
         results = [MergeBlame(merge=merge_lookup[merge_id], n_bad_applications=blame[merge_id], n_applications=total[merge_id]) for merge_id in blame.keys()]
         results.sort(reverse=True)
-        return results
+        return results, old_performance
 
     def _knockout(self, tk: BTE, reference: ModestDataset) -> list[MergeBlame]:
         self._print("Knockout...")
-        merges_to_remove = [m for m in self._rankOldMergesForKnockout(tk, reference, blame_tuples_once=self._config.knockout.blame_tuples_once)
+        merges_to_remove, prev_confusion_matrix = self._rankOldMergesForKnockout(tk, reference, blame_tuples_once=self._config.knockout.blame_tuples_once)
+        merges_to_remove = [m for m in merges_to_remove
                             if m.blame_ratio >= self._config.knockout.relative_blame_minimum]
         n_eligible = len(merges_to_remove)
         merges_to_remove = merges_to_remove[:max(0, len(tk.merge_graph.vocab) - self._config.knockout.min_vocab_size)]
         explanations = {e.name: count(filter(lambda m: m.merge.explanation == e, merges_to_remove)) for e in MergeExplanation}  # Because applying knockout changes the MergeExplanation, you have to record diagnostics before actually doing knockout.
         self._removeKnockoutMerges(tk, [m.merge for m in merges_to_remove])
+        self._diagnostics[-1]["micro_metrics_trainset"] = dict(zip(["pr", "re", "f1"], prev_confusion_matrix.computePrReF1()))
         self._diagnostics.append({
             "type": "knockout",
             "eligible": n_eligible,

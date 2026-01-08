@@ -1,4 +1,4 @@
-from typing import TextIO, Tuple, Optional, Callable, Dict
+from typing import TextIO, Optional, Callable
 from collections import Counter
 from pathlib import Path
 
@@ -36,7 +36,7 @@ def iterateTxt(open_file_handle: TextIO, verbose=False):
             yield line.rstrip()
 
 
-def iterateWordsFile(open_file_handle: TextIO, sep=" ", verbose=False) -> Iterable[Tuple[str, str]]:
+def iterateWordsFile(open_file_handle: TextIO, sep=" ", verbose=False) -> Iterable[tuple[str, str]]:
     """
     Iterating over the words file is slightly trickier than you think due to 2 technicalities that are easy to forget:
         - You must strip the newline at the end;
@@ -68,7 +68,7 @@ def wordsFileToCounter(words_path: Path, sep=" ") -> Counter:
 
 
 @timeit
-def mergeWordFiles(word_files: List[Path], out_file: Path, delete_afterwards: bool=False,
+def mergeWordFiles(word_files: list[Path], out_file: Path, delete_afterwards: bool=False,
                    trim_hapax_every: int=100000):
     """
     :param trim_hapax_every: To mitigate against very large tails, trim words of count 1 (hapax legomena)
@@ -185,7 +185,7 @@ def trimWordFile(words_path: Path, minimum: int) -> Path:
 
 @timeit
 def cleanWordFile(words_path: Path) -> Path:
-    """
+    r"""
     Here's how the cleaning system works:
         - Filter out words that are too long or weirdly numerical.
         - Clean away several characters (e.g. control characters) inside the remaining words.
@@ -431,7 +431,7 @@ def intersectLexiconCounts(all_lemmata_wordfile: Path,
 
 def loadAndWeightLexicon(all_lemmata_wordfile: Path,
                          subset_lexicon: Iterable[str], subset_name: str,
-                         reweighting_function: Callable[[float],float]) -> Dict[str, float]:
+                         reweighting_function: Callable[[float],float]) -> dict[str, float]:
     """
     Takes care of converting word counts (integers) to weights (floats)
     and returns a queriable object even if no counts exist.
