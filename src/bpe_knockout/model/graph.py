@@ -127,7 +127,10 @@ class MergeGraph:
         return new_merge
 
     def knockout(self, type_to_delete: str):
-        """New implementation that is equivalent to that in the paper, but more modularised."""
+        """
+        Rewire all the merges that involve the given type, and then cut it out of the graph.
+        This approach is equivalent to the one in the paper, but more modularised.
+        """
         # Collect all the information we have about this type.
         affected_merges   = self.merges_with[type_to_delete]
         replacement_parts = self.merges_of[type_to_delete][0].parts
@@ -145,9 +148,14 @@ class MergeGraph:
             m.explanation = MergeExplanation.KNOCKOUT
 
         # Cut the type out of the graph.
-        self.cascade(type_to_delete, cleanup=False)
+        self.detach(type_to_delete, cascade=False)
 
     def rewire(self, type_to_rewire: str, new_merge: MergeOnDisk) -> Merge:
+        """
+        Changes the parts from which the given type is constructed (if it ever is).
+        For example: if the type "bruidsjurk" is originally constructed "bruid sjurk", this method allows you to rewire
+        it to "bruids jurk", or "bruid s jurk", etc... The new merge is given the same priority as the old merge.
+        """
         if type_to_rewire not in self.vocab:
             raise ValueError(f"Type does not exist: {type_to_rewire}")
         # print("Rewiring", type_to_rewire, "to", new_merge)
@@ -167,13 +175,13 @@ class MergeGraph:
 
         return merge
 
-    def cascade(self, type_to_delete: str, cleanup: bool=True) -> set[str]:
+    def detach(self, type_to_delete: str, cascade: bool=True) -> set[str]:
         """
-        Applies knockout to the entire tree of descendants of the given type.
+        Take out the given type from the BPE graph. Optionally, also take out the entire subgraph of descendants.
         This is easy to do: just prevent the type from being formed again, and all its descendants are blocked too.
 
-        :param cleanup: If false, the blocked merges and their resulting types keep existing in the tokeniser, but will
-                        just never be formed again.
+        :param cascade: If false, the blocked merges and their resulting types keep existing in the tokeniser, but will
+                        still never be formed again since their ancestor cannot be formed.
         """
         if type_to_delete not in self.vocab:
             raise ValueError(f"Type does not exist: {type_to_delete}")
@@ -181,26 +189,20 @@ class MergeGraph:
         if self.inAlphabet(type_to_delete):
             warn(f"Type {type_to_delete} is in the alphabet. Knockout will result in some inputs being impossible to represent.")
 
-        # Detach this root from the rest of the graph
-        for m in self.merges_of[type_to_delete]:
-            for parent in set(m.parts):
-                self.merges_with[parent].remove(m)
-
-        # Handle the cascade
-        if not cleanup:
+        # First, get all the vertices that need to be removed.
+        if not cascade:
             types_to_delete = {type_to_delete}
         else:  # You might think that cascaded knockout can be done recursively, but it's more difficult than that since the BPE merge graph is a DAG, not a tree.
-            frontier        = {type_to_delete}
-            types_to_delete = set()
+            frontier        = {type_to_delete}  # open set
+            types_to_delete = set()             # closed set
             while frontier:
                 current_type = frontier.pop()
                 types_to_delete.add(current_type)
 
-                affected_types = set()
-                for m in self.merges_with[current_type]:
-                    affected_types |= set(m.parts)
+                affected_types = {m.childType() for m in self.merges_with[current_type]}
                 frontier |= affected_types - types_to_delete
 
+        # Now detach the arcs pointing into each vertex and out of each vertex.
         for type_to_delete in types_to_delete:
             # Remove from vocab.
             self.vocab.pop(type_to_delete)
@@ -208,6 +210,18 @@ class MergeGraph:
             # Remove the merge that made this.
             for m in self.merges_of[type_to_delete]:
                 self.merges.remove(m)
+                for parent in set(m.parts):
+                    if parent in self.merges_with:  # May have been cut out already.
+                        self.merges_with[parent].remove(m)
+
+            # Remove the merges this participated in.
+            for m in self.merges_with[type_to_delete]:
+                self.merges.remove(m)
+                for coparent in set(m.parts):
+                    if coparent in self.merges_with:
+                        self.merges_with[coparent].remove(m)
+                if m.childType() in self.merges_of:
+                    self.merges_of[m.childType()].remove(m)
 
             # Forget that you had merges for this.
             self.merges_of.pop(type_to_delete)

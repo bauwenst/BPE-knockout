@@ -376,7 +376,7 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
             "max_blame":    max((merge.blame_ratio        for merge in merges_to_remove), default=0),
             "min_blame":    min((merge.blame_ratio        for merge in merges_to_remove), default=0),
             "vocab_size": len(tk.merge_graph.vocab),
-            "explanations": explanations
+            "explanations": explanations  # This does not include the types removed due to cascading, but that makes sense since knockout is supervised whilst cascading is not and thus it makes little sense to link its removals to where the merges came from. (You can see the effect of cascading in the vocab size, of course.)
         })
         return merges_to_remove  # For diagnostic purposes
 
@@ -384,7 +384,7 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
         for merge in tqdm(merges_to_remove, desc="PRUNING GRAPH", disable=not self._print.verbose):
             if self._config.reify == ReifyMode.NONE_CASCADE:
                 try:  # Cascading removes many types, so chances are that one type removes another type to be removed.
-                    tk.merge_graph.cascade(merge.childType(), cleanup=True)
+                    tk.merge_graph.detach(merge.childType(), cascade=True)
                 except:
                     pass
             else:
