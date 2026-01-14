@@ -242,6 +242,7 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
 
             if END_IF_NO_MORE_DELETIONS and not removed_merges:
                 self._print("Early stop: no merges knocked out.")
+                self._diagnostics.append({"type": "convergence" if self._config.reify.does_nothing() else "early-no-knockout", "iterations": iteration - 1, "vocab_size": len(tk.merge_graph.vocab)})
                 break
 
             if evaluator and removed_merges:
@@ -252,18 +253,21 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
                 iteration += 1
                 continue
 
+            if self._config.evaluate_before_reify:
+                self._diagnosticsAppendTrainEval(self._evaluateKnockout(tk, reference))
+
             all_disqualified_merges.update(" ".join(m.merge.parts) for m in removed_merges)
             novel_merges = self._reify(tk, all_disqualified_merges)
             needs_final_knockout = len(novel_merges) > 0
             self._print(f"Repaired or reified {len(novel_merges)} merges.")
 
-            if END_IF_NO_MORE_ADDITIONS and not novel_merges:
-                self._print("Early stop: no new sub-merges available that weren't knocked out before, nor that exist below their triplet(s).")
-                break
-
             if not removed_merges and not novel_merges:
                 self._print("Early stop: tokeniser fully converged (no more deletions, no more additions).")
                 self._diagnostics.append({"type": "convergence", "iterations": iteration - 1, "vocab_size": len(tk.merge_graph.vocab)})  # The iteration where you discover that you are identical to previous iteration does not count.
+                break
+            elif END_IF_NO_MORE_ADDITIONS and not novel_merges:
+                self._print("Early stop: no new sub-merges available that weren't knocked out before, nor that exist below their triplet(s).")
+                self._diagnostics.append({"type": "early-no-reify", "iterations": iteration, "vocab_size": len(tk.merge_graph.vocab)})
                 break
 
             if evaluator and novel_merges:
@@ -333,7 +337,8 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
                 tp=len(bpe_split_indices & ref_split_indices),
                 predicted=len(bpe_split_indices),
                 relevant=len(ref_split_indices),
-                total=0   # Not relevant for Pr, Re, F1. Would be sum(map(len, tokens)) - 1 but computing it is wasting compute.
+                total=0,   # Not relevant for Pr, Re, F1. Would be sum(map(len, tokens)) - 1 but computing it is wasting compute.
+                weight=weight
             )
 
             # Blame the merges that caused these indices to contract.
@@ -368,7 +373,7 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
         merges_to_remove = merges_to_remove[:max(0, len(tk.merge_graph.vocab) - self._config.knockout.min_vocab_size)]
         explanations = {e.name: count(filter(lambda m: m.merge.explanation == e, merges_to_remove)) for e in MergeExplanation}  # Because applying knockout changes the MergeExplanation, you have to record diagnostics before actually doing knockout.
         self._removeKnockoutMerges(tk, [m.merge for m in merges_to_remove])
-        self._diagnostics[-1]["micro_metrics_trainset"] = dict(zip(["pr", "re", "f1"], prev_confusion_matrix.computePrReF1()))
+        self._diagnosticsAppendTrainEval(prev_confusion_matrix)
         self._diagnostics.append({
             "type": "knockout",
             "eligible": n_eligible,
@@ -395,7 +400,8 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
 
     def _anneal(self, tk: BTE, reference: ModestDataset) -> list[MergeAmenability]:
         self._print("Annealing...")
-        merges_to_add = [m for m in self._rankNewMergesForAnnealing(tk, reference)
+        merges_to_add, prev_confusion_matrix = self._rankNewMergesForAnnealing(tk, reference)
+        merges_to_add = [m for m in merges_to_add
                          if m.amenability_ratio >= self._config.annealing.relative_amenability_minimum and m.n_good_potential_applications >= self._config.annealing.absolute_application_minimum]
         n_eligible = len(merges_to_add)
 
@@ -420,6 +426,7 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
 
         # Actually do the addition
         self._addAnnealingMerges(tk, [m.merge for m in merges_to_add], add_missing_atoms=True)
+        self._diagnosticsAppendTrainEval(prev_confusion_matrix)
         self._diagnostics.append({
             "type": "anneal",
             "eligible": n_eligible,
@@ -440,7 +447,7 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
                 warn(f"Failed to add arcs for {merge_string} to BPE graph. Probably a missing atom.")
         tk._syncWithGraph()
 
-    def _rankNewMergesForAnnealing(self, tk: BTE, reference: ModestDataset) -> list[MergeAmenability]:
+    def _rankNewMergesForAnnealing(self, tk: BTE, reference: ModestDataset) -> tuple[list[MergeAmenability],ConfusionMatrix]:
         """
         Suggest merges which improve morphological splits if applied.
         If these involve tokens (characters) that are not in the vocabulary, those will also be added.
@@ -461,6 +468,8 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
         do_fuse_spans = False  # Not sure how you would count "total" for this one, unless in a second pass when you already know all the merge spans.
         amenability_count = Counter()
         total_count       = Counter()
+
+        old_performance = ConfusionMatrix()
 
         for obj in self._holdout(reference.generate(), train=True):
             lemma = obj.word
@@ -483,6 +492,15 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
             letter_indices_that_need_to_merge = sorted([index//2 + 1 for index in bpe_split_indices - ref_split_indices])
 
             log(letter_indices_that_need_to_merge)
+
+            # This is also a free evaluation over the train set.
+            old_performance.add(
+                tp=len(bpe_split_indices & ref_split_indices),
+                predicted=len(bpe_split_indices),
+                relevant=len(ref_split_indices),
+                total=0,   # Not relevant for Pr, Re, F1. Would be sum(map(len, tokens)) - 1 but computing it is wasting compute.
+                weight=weight
+            )
 
             # These are all the letters with a space in front of them that shouldn't have a space. Now we want to convert
             # those spaces to the token pairs that merge to delete them.
@@ -537,7 +555,7 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
         # print(pd.Series(amenable.values()).describe())
         results = [MergeAmenability(merge=merge, n_good_potential_applications=amenability_count[merge], n_potential_applications=total_count[merge]) for merge in amenability_ratios]
         results.sort(reverse=True)
-        return results
+        return results, old_performance
 
     ### REIFICATION ###
 
@@ -709,6 +727,37 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
         diagnostics["vocab_size"] = len(tk.merge_graph.vocab)
         self._diagnostics.append(diagnostics)
         return new_merges
+
+    def _evaluateKnockout(self, tk: BTE, reference: ModestDataset) -> ConfusionMatrix:
+        segment = self._config.knockout.reference.toMethod()  # We use knockout's reference mode.
+        weights = lexiconWeights() if self._config.weighted_training else dict()
+        performance = ConfusionMatrix()
+
+        for obj in self._holdout(reference.generate(), train=True):
+            lemma = obj.word
+            weight = weights.get(lemma, 1)
+
+            reference_segmentation = " ".join(segment(obj))
+            reference_segmentation = BPEKnockoutVocabulariser._preprocessAlreadySegmentedString(tk, reference_segmentation)
+
+            tokens           = tk.prepareAndTokenise(lemma)
+            bpe_segmentation = " ".join(tokens)
+
+            bpe_split_indices = {match.start() for match in SPLIT_MARKER_RE.finditer(" ".join(bpe_segmentation      ).replace("   ", SPLIT_MARKER))}
+            ref_split_indices = {match.start() for match in SPLIT_MARKER_RE.finditer(" ".join(reference_segmentation).replace("   ", SPLIT_MARKER))}
+
+            performance.add(
+                tp=len(bpe_split_indices & ref_split_indices),
+                predicted=len(bpe_split_indices),
+                relevant=len(ref_split_indices),
+                total=0,   # Not relevant for Pr, Re, F1. Would be sum(map(len, tokens)) - 1 but computing it is wasting compute.
+                weight=weight
+            )
+
+        return performance
+
+    def _diagnosticsAppendTrainEval(self, cm: ConfusionMatrix):
+        self._diagnostics[-1]["micro_metrics_trainset"] = dict(zip(["pr", "re", "f1"], cm.computePrReF1()))
 
     ### TOKENISATION METHODS ###
 

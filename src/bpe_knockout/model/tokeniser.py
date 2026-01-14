@@ -40,8 +40,8 @@ class BTE(TokeniserWithVocabulary[WithSpecials], SuccessionalTokeniser):
             do_prune  = self._metadata.knockout.reference != ReferenceMode.NONE
             do_anneal = self._metadata.annealing.reference != ReferenceMode.NONE
             return "BTE" \
-                + ("-knockout-" + self._metadata.knockout.reference.toLetter()) * do_prune \
-                + ("-reify" * (self._metadata.reify != ReifyMode.NONE)) \
+                + ("-knockout-" + self._metadata.knockout.reference.toLetter() + "-cascade"*(self._metadata.reify == ReifyMode.NONE_CASCADE)) * do_prune \
+                + ("-reify" * (not self._metadata.reify.does_nothing())) \
                 + (f"_{self._metadata.iterations}it" if self._metadata.iterations > 0 else "") \
                 + (f"_anneal-{self._metadata.annealing.reference.toLetter()}-{self._metadata.annealing.when.toLetter()}") * do_anneal
 

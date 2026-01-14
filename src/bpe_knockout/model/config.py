@@ -98,6 +98,7 @@ class BTEConfig:
     knockout:   KnockoutConfig = dataclasses.field(default_factory=KnockoutConfig)
     annealing: AnnealingConfig = dataclasses.field(default_factory=AnnealingConfig)
     reify: ReifyMode = ReifyMode.NONE
+    evaluate_before_reify: bool = False  # TODO: Once the ReBPE paper is finished, move this to a ReifyConfig.
     iterations: int = 1
 
     # Legacy arguments that are not really relevant anymore.

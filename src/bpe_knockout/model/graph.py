@@ -16,12 +16,12 @@ MergeList   = list[MergeOnDisk]
 
 
 class MergeExplanation(Enum):
-    PREEXISTING     = 1
-    KNOCKOUT        = 2
-    ANNEALED        = 3
-    REPAIRED        = 4
-    REIFIED         = 5
-    ALREADY_REIFIED = 6
+    PREEXISTING     = 1  # Merge was added by BPE vocabularisation
+    KNOCKOUT        = 2  # Merge is a tuple made by knockout
+    ANNEALED        = 3  # Merge was added by annealing
+    REPAIRED        = 4  # Merge was added by ReBPE reparation
+    REIFIED         = 5  # Merge didn't exist before and was created and applied by ReBPE reification
+    ALREADY_REIFIED = 6  # Merge did exist before (and is binary), and was repurposed by ReBPE to do reification. Probably a subset of the original BPE merges. When knocked out, this means it wasn't blamed enough originally, but after reification it did receive enough blame.
 
 
 @dataclass
