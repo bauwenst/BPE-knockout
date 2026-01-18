@@ -259,7 +259,7 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
             all_disqualified_merges.update(" ".join(m.merge.parts) for m in removed_merges)
             novel_merges = self._reify(tk, all_disqualified_merges)
             needs_final_knockout = len(novel_merges) > 0
-            self._print(f"Repaired or reified {len(novel_merges)} merges.")
+            self._print(f"Modified {len(novel_merges)} merges.")
 
             if not removed_merges and not novel_merges:
                 self._print("Early stop: tokeniser fully converged (no more deletions, no more additions).")
@@ -575,8 +575,8 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
         # Setup
         if all_disqualified_merges is None:
             all_disqualified_merges = set()
-        sorted_merges = sorted(tk.merge_graph.merges)
-        new_merges    = set()  # Union of (1) triplets that were repaired into different triplets, (2) new binary merges that were applied in at least one triplet, and (3) old binary merges that were applied in at least one other triplet.
+        sorted_merges   = sorted(tk.merge_graph.merges)
+        modified_merges = set()  # Union of (1) triplets that were repaired into different triplets, (2) new binary merges that were applied in at least one triplet, and (3) old binary merges that were applied in at least one other triplet.
 
         log = doPrint(Pℛ𝒪𝒥ℰ𝒞𝒯.debug_prints)
         diagnostics: dict[str,Any] = {"type": "reify"}
@@ -604,11 +604,11 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
                 # self._print(f"Found divergent triplet: expected {m.parts} but got {limited_tokens}")
                 m = tk.merge_graph.rewire(typ, limited_tokens)
                 m.explanation = MergeExplanation.REPAIRED
-                new_merges.add(m)
-        diagnostics["triplets_repaired"] = len(new_merges)
+                modified_merges.add(m)
+        diagnostics["repaired_merges"] = len(modified_merges)
 
         if not self._config.reify.does_link():
-            return new_merges
+            return modified_merges
 
         # Part 2: Find new binary merges inside all triplets.
         suggested_merge_strings: dict[str, set[Merge]] = dict()
@@ -687,6 +687,7 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
             merge_had_effect = False  # "was loop not empty"; this can only stay false for merges that (1) already existed and (2) are VERY late.
             for triplet in filter(lambda triplet: submerge < triplet, indices_occurs_in_triplet.keys()):
                 merge_had_effect = True
+                modified_merges.add(triplet)
 
                 # 1. Update the tuple inside the triplet's merge node.
                 new_parts = []
@@ -713,8 +714,8 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
                         tk.merge_graph.merges_with[part].remove(triplet)
 
             if merge_had_effect:
-                new_merges.add(submerge)
                 if type_is_new:
+                    modified_merges.add(submerge)
                     submerge.explanation = MergeExplanation.REIFIED
                     diagnostics["created_merges"] += 1
                 else:
@@ -725,8 +726,9 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
 
         # Diagnostics
         diagnostics["vocab_size"] = len(tk.merge_graph.vocab)
+        diagnostics["total_modified_merges"] = len(modified_merges)
         self._diagnostics.append(diagnostics)
-        return new_merges
+        return modified_merges
 
     def _evaluateKnockout(self, tk: BTE, reference: ModestDataset) -> ConfusionMatrix:
         segment = self._config.knockout.reference.toMethod()  # We use knockout's reference mode.
