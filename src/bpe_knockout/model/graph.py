@@ -126,17 +126,19 @@ class MergeGraph:
         self.next_merge += 1
         return new_merge
 
-    def knockout(self, type_to_delete: str):
+    def knockout(self, type_to_delete: str) -> list[Merge]:
         """
         Rewire all the merges that involve the given type, and then cut it out of the graph.
         This approach is equivalent to the one in the paper, but more modularised.
+
+        :return: The merges that now use the deleted type's parts rather than the type itself.
         """
         # Collect all the information we have about this type.
-        affected_merges   = self.merges_with[type_to_delete]
+        affected_merges   = list(self.merges_with[type_to_delete])  # list() because everything below needs the full list while the loop shrinks it.
         replacement_parts = self.merges_of[type_to_delete][0].parts
 
         # Rewire all the affected merges.
-        for m in list(affected_merges):  # list() because the whole point of this loop is to shrink the list.
+        for m in affected_merges:
             self.rewire(
                 m.childType(),
                         (" " + "  ".join(m.parts)          + " ")  # Two spaces because " xy xy ".replace(" xy ", " x y ") == " x y xy " due to the middle space not being allowed to be the last space of one match and the first of another.
@@ -149,6 +151,7 @@ class MergeGraph:
 
         # Cut the type out of the graph.
         self.detach(type_to_delete, cascade=False)
+        return affected_merges
 
     def rewire(self, type_to_rewire: str, new_merge: MergeOnDisk) -> Merge:
         """

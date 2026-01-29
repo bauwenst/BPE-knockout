@@ -1,4 +1,4 @@
-__version__ = "2026.01.08"
+__version__ = "2026.02.01"
 
 from .model.config import BTEConfig, KnockoutConfig, AnnealingConfig, ReferenceMode, ReifyMode, AnnealingTime
 from .model.tokeniser import BTE

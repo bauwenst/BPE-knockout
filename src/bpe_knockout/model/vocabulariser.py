@@ -372,7 +372,7 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
         n_eligible = len(merges_to_remove)
         merges_to_remove = merges_to_remove[:max(0, len(tk.merge_graph.vocab) - self._config.knockout.min_vocab_size)]
         explanations = {e.name: count(filter(lambda m: m.merge.explanation == e, merges_to_remove)) for e in MergeExplanation}  # Because applying knockout changes the MergeExplanation, you have to record diagnostics before actually doing knockout.
-        self._removeKnockoutMerges(tk, [m.merge for m in merges_to_remove])
+        n_collateral = self._removeKnockoutMerges(tk, [m.merge for m in merges_to_remove])
         self._diagnosticsAppendTrainEval(prev_confusion_matrix)
         self._diagnostics.append({
             "type": "knockout",
@@ -381,20 +381,23 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
             "max_blame":    max((merge.blame_ratio        for merge in merges_to_remove), default=0),
             "min_blame":    min((merge.blame_ratio        for merge in merges_to_remove), default=0),
             "vocab_size": len(tk.merge_graph.vocab),
+            "collateral": n_collateral,
             "explanations": explanations  # This does not include the types removed due to cascading, but that makes sense since knockout is supervised whilst cascading is not and thus it makes little sense to link its removals to where the merges came from. (You can see the effect of cascading in the vocab size, of course.)
         })
         return merges_to_remove  # For diagnostic purposes
 
-    def _removeKnockoutMerges(self, tk: BTE, merges_to_remove: Iterable[Merge]):
+    def _removeKnockoutMerges(self, tk: BTE, merges_to_remove: Iterable[Merge]) -> int:
+        modified_merges = set()
         for merge in tqdm(merges_to_remove, desc="PRUNING GRAPH", disable=not self._print.verbose):
             if self._config.reify == ReifyMode.NONE_CASCADE:
                 try:  # Cascading removes many types, so chances are that one type removes another type to be removed.
-                    tk.merge_graph.detach(merge.childType(), cascade=True)
+                    tk.merge_graph.detach(merge.childType(), cascade=True)  # TODO: Perhaps we should also return something about the impact of this.
                 except:
                     pass
             else:
-                tk.merge_graph.knockout(merge.childType())
+                modified_merges.update(tk.merge_graph.knockout(merge.childType()))
         tk._syncWithGraph()
+        return len(modified_merges)
 
     ### ANNEALING ###
 
