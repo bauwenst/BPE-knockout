@@ -18,7 +18,7 @@ class BPEKnockoutVocabulariser_NoTrivialKnockout(BPEKnockoutVocabulariser):
 
     (I show in my thesis that knockout's performance gain is indeed more than this.)
     """
-    def __init__(self, initial_tokeniser: BPEArtifacts, config: BTEConfig, long_part_threshold: int, holdout: Holdout, iteration_evaluator: IntermediateEvaluator, quiet: bool=True):
+    def __init__(self, initial_tokeniser: BPEArtifacts, config: FullBPEKnockoutConfig, long_part_threshold: int, holdout: Holdout, iteration_evaluator: IntermediateEvaluator, quiet: bool=True):
         super().__init__(initial_tokeniser=initial_tokeniser, config=config, holdout=holdout, iteration_evaluator=iteration_evaluator, quiet=quiet)
         self._long_part_threshold = long_part_threshold
 

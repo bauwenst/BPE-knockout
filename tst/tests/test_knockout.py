@@ -10,7 +10,7 @@ def test_basic():
     """
     from tst.configs import setupDutch
     project = setupDutch()
-    bte_knockout = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC)), quiet=False)
+    bte_knockout = BTE(FullBPEKnockoutConfig(knockout=KnockoutConfig(reference=ReferenceMode.ALL)), quiet=False)
     # print(bte_knockout.getBadOldMerges(relative_blame_threshold=0.5))
 
     print(bte_knockout.merge_graph.getRawMerges())
@@ -24,7 +24,7 @@ def test_iterative():
     """
     from tst.configs import setupDutch
     project = setupDutch()
-    bte_knockout = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC), reify=ReifyMode.FIX_AND_LINK_AND_MAKE, iterations=3), quiet=False)
+    bte_knockout = BTE(FullBPEKnockoutConfig(knockout=KnockoutConfig(reference=ReferenceMode.ALL), reify=ReifyConfig(mode=ReifyMode.FIX_AND_LINK_AND_MAKE), iterations=3), quiet=False)
 
     print(bte_knockout.getVocabSize())
     print(bte_knockout.prepareAndTokenise(" Deze bruidsjurk is zo mooi geconserveerd!"))

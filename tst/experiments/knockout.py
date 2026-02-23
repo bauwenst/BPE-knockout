@@ -23,9 +23,9 @@ from bpe_knockout.util.datahandlers.wordfiles import ACCENTS
 print("Loading tests...")
 
 default_preprocessor = Preprocessor(splitter=BoundariesFromSpacesPretokeniser(marker=RobertaSpaceMarker, byte_based=True))
-untrained_bte = BTE(BTEConfig())
-# modes_to_test = [RefMode.MORPHEMIC, RefMode.LEXEMIC]  # Thesis, not paper.
-modes_to_test = [ReferenceMode.MORPHEMIC]
+untrained_bte = BTE(FullBPEKnockoutConfig())
+# modes_to_test = [RefMode.ALL, RefMode.LEXEMIC]  # Thesis, not paper.
+modes_to_test = [ReferenceMode.ALL]
 def getAllConfigs():  # In a function to protect against imputation if these are never needed.
     return [setupEnglish(), setupGerman(), setupDutch()]
 
@@ -61,7 +61,7 @@ def assert_tokenisers_equal(tokeniser1=robbert_tokenizer, tokeniser2=untrained_b
 
 
 def print_knockout():
-    bte = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.ONLY_FREE_MORPHS)), execution_policy=ExecutionPolicy.POSTPONED)
+    bte = BTE(FullBPEKnockoutConfig(knockout=KnockoutConfig(reference=ReferenceMode.ONLY_COMPOUNDS)), execution_policy=ExecutionPolicy.POSTPONED)
 
     summaries = bte._rankOldMergesForKnockout()
     table = PrintTable()
@@ -87,7 +87,7 @@ def visualise():
 
 
 def test_save_and_load():
-    bte = BTE(init_config=BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC)), execution_policy=ExecutionPolicy.IMMEDIATE)
+    bte = BTE(init_config=FullBPEKnockoutConfig(knockout=KnockoutConfig(reference=ReferenceMode.ALL)), execution_policy=ExecutionPolicy.IMMEDIATE)
     print(bte.vocab.size())
     out_path = bte.save(PATH_DATA_TEMP)
 
@@ -101,7 +101,7 @@ def time_iterators():
     iterating with different bodies automatically displays the time taken to
     generate the iterator + whatever time the body takes.
     """
-    bte_tokenizer = BTE(BTEConfig())
+    bte_tokenizer = BTE(FullBPEKnockoutConfig())
     print()
 
     # Time to generate objects: 13s
@@ -131,7 +131,7 @@ def test_onlyTrivials():
     table = Table(f"bte-intrinsic-onlytrivials-{longpart}", caching=CacheMode.NONE)
 
     if table.needs_computation:
-        bte = BTE(BTEConfig())
+        bte = BTE(FullBPEKnockoutConfig())
 
         # Find trivial merges
         trivials = [merge for merge in bte.merge_graph.merges if merge.isTrivial(minimum=longpart)]
@@ -165,7 +165,7 @@ def test_iterative():
                                          row_names=[experiment_names[-1]])
 
             # Do reification
-            bte = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC), reify=ReifyMode.FIX_AND_LINK_AND_MAKE, iterations=MAX_ITERATIONS),
+            bte = BTE(FullBPEKnockoutConfig(knockout=KnockoutConfig(reference=ReferenceMode.ALL), reify=ReifyMode.FIX_AND_LINK_AND_MAKE, iterations=MAX_ITERATIONS),
                       execution_policy=ExecutionPolicy.POSTPONED, holdout=holdout)
             bte._iterative(iterations=MAX_ITERATIONS, evaluator=ForIntermediateTests())
 
@@ -281,8 +281,8 @@ def main_tokenDiffs_Monolingual():
             # TODO: You should kinda treat the confusion matrix as a figure.
             #       Will allow caching and re-displaying when loading from cache.
             cm = ConfusionMatrix()
-            bpe = BTE(BTEConfig())
-            bte = BTE(BTEConfig(knockout=KnockoutConfig(reference=mode)))
+            bpe = BTE(FullBPEKnockoutConfig())
+            bte = BTE(FullBPEKnockoutConfig(knockout=KnockoutConfig(reference=mode)))
             for obj in morphologyGenerator():
                 lemma = obj.word
 
@@ -320,7 +320,7 @@ def main_knockedMerges_Multilingual():
 
             if ids.needs_computation or lengths.needs_computation:
                 language.morphologies  # do something with this
-                bte = BTE(BTEConfig(knockout=KnockoutConfig(reference=mode)), execution_policy=ExecutionPolicy.POSTPONED)
+                bte = BTE(FullBPEKnockoutConfig(knockout=KnockoutConfig(reference=mode)), execution_policy=ExecutionPolicy.POSTPONED)
                 blamed_merges = bte._rankOldMergesForKnockout()
                 for _,_, merge in blamed_merges:
                     if ids.needs_computation:
@@ -376,7 +376,7 @@ def main_effectiveDropoutRate_Multilingual():
     table = Table("bte-effective-dropout", caching=CacheMode.IF_MISSING)
     if table.needs_computation:
         for language in getAllConfigs():
-            bte = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC)), execution_policy=ExecutionPolicy.POSTPONED)
+            bte = BTE(FullBPEKnockoutConfig(knockout=KnockoutConfig(reference=ReferenceMode.ALL)), execution_policy=ExecutionPolicy.POSTPONED)
 
             total_merges               = 0
             total_dropped_merges       = 0
@@ -410,8 +410,8 @@ def main_effectiveDropoutRate_Multilingual():
 #     if table.needs_computation:
 #         import itertools
 #         # Construct possible tokenisers
-#         modesets = list(itertools.product((RefMode.NONE,RefMode.MORPHEMIC,RefMode.LEXEMIC),
-#                                           (RefMode.NONE,RefMode.MORPHEMIC,RefMode.LEXEMIC)))
+#         modesets = list(itertools.product((RefMode.NONE,RefMode.ALL,RefMode.LEXEMIC),
+#                                           (RefMode.NONE,RefMode.ALL,RefMode.LEXEMIC)))
 #         fullsets = []
 #         total_stages = 0
 #         for anneal, knockout in modesets:
@@ -490,8 +490,8 @@ def main_intrinsicMultilingual():
             # for mode in modes_to_test:  # Technically the user should expect this for loop, but no user would realistically want to test multiple training modes across different languages.
             mode = modes_to_test[0]
 
-            bte_knockout          = BTE(BTEConfig(knockout=KnockoutConfig(reference=mode)))
-            bte_knockout_holdout  = BTE(BTEConfig(knockout=KnockoutConfig(reference=mode)), holdout=holdout)
+            bte_knockout          = BTE(FullBPEKnockoutConfig(knockout=KnockoutConfig(reference=mode)))
+            bte_knockout_holdout  = BTE(FullBPEKnockoutConfig(knockout=KnockoutConfig(reference=mode)), holdout=holdout)
             # bte_knockout_keeplong = BTE(BteInitConfig(knockout=mode, keep_long_merges=True))
             # bte_knockout_weighted = BTE(BteInitConfig(knockout=mode, weighted_training=True))
 
@@ -535,7 +535,7 @@ def main_intrinsicHoldout_Monolingual():
         for f in reversed(HOLDOUTS):
             holdout = Holdout(f)
             results = intrinsicEvaluation(
-                [BTE(BTEConfig(knockout=KnockoutConfig(reference=mode)), holdout=holdout)], do_whole_word=True,
+                [BTE(FullBPEKnockoutConfig(knockout=KnockoutConfig(reference=mode)), holdout=holdout)], do_whole_word=True,
                 reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=holdout
             )
             addEvaluationToTable(table, results,
@@ -559,9 +559,9 @@ def main_intrinsicWeightedTraining_Monolingual():
         for cls in [BTE, BTE_NoTrivialKnockout]:
             tokenisers = []
             Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter = lambda x: x
-            tokenisers.append(cls(BTEConfig(knockout=KnockoutConfig(reference=mode), weighted_training=True)))
+            tokenisers.append(cls(FullBPEKnockoutConfig(knockout=KnockoutConfig(reference=mode), weighted_training=True)))
             Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter = lambda x: 1 + math.log10(x)
-            tokenisers.append(cls(BTEConfig(knockout=KnockoutConfig(reference=mode), weighted_training=True)))
+            tokenisers.append(cls(FullBPEKnockoutConfig(knockout=KnockoutConfig(reference=mode), weighted_training=True)))
 
             results_idweighted = intrinsicEvaluation(
                 tokenisers, do_whole_word=True,
@@ -613,7 +613,7 @@ def main_deleteRandomMerges_Monolingual():
             # job_id[0] += 1
 
             # Construct tokeniser
-            bte = BTE(BTEConfig(), quiet=True)
+            bte = BTE(FullBPEKnockoutConfig(), quiet=True)
             merges = list(map(lambda i: bte.merge_graph.merges[i],
                               merge_indices))  # The list() is important here! You must do all your array accesses BEFORE altering the array!
             # for merge_idx in tqdm(merge_indices, desc="RANDOMLY PRUNING GRAPH"):
@@ -637,7 +637,7 @@ def main_deleteRandomMerges_Monolingual():
         # Generate all random indices BEFORE doing the experiments. This way, there are no race conditions due to
         # threads calling the pseudo-RNG in unpredictable order. Now the code stays reproducible.
         rng = npr.default_rng(seed=0)
-        amount_of_merges = len(BTE(BTEConfig()).merge_graph.merges)
+        amount_of_merges = len(BTE(FullBPEKnockoutConfig()).merge_graph.merges)
         all_index_lists = [tuple(rng.choice(amount_of_merges, size=int(amount_of_merges * p/100), replace=False))
                            for p in DELETION_PERCENTAGES
                            for _ in range(SAMPLES if p != 0 else 1)]
@@ -691,7 +691,7 @@ def main_deleteLastMerges_Monolingual():
     """
     graph = LineGraph(name=f"delete-last-types_{Pℛ𝒪𝒥ℰ𝒞𝒯.config.langTag()}", caching=CacheMode.IF_MISSING)
     if graph.needs_computation:
-        bte = BTE(BTEConfig(), quiet=True, execution_policy=ExecutionPolicy.POSTPONED)
+        bte = BTE(FullBPEKnockoutConfig(), quiet=True, execution_policy=ExecutionPolicy.POSTPONED)
         initial_merges = len(bte.merge_graph.merges)
         results = []
 
@@ -740,7 +740,7 @@ def main_deleteLastLeaves_Monolingual():
 
     g1 = LineGraph("leaf-percentages", caching=CacheMode.IF_MISSING)
     if g1.needs_computation:
-        bte = BTE(BTEConfig(), quiet=True)
+        bte = BTE(FullBPEKnockoutConfig(), quiet=True)
         amount_of_merges = len(bte.merge_graph.merges)
 
         for p in PERCENTAGES:
@@ -780,7 +780,7 @@ def main_deleteLastLeaves_Monolingual():
     if g2.needs_computation:
         for p in DELETION_PERCENTAGES:
             # Re-initialise a new BTE each time because I'm scared of re-using one (leaf status changes with knockout)
-            bte = BTE(BTEConfig(), quiet=True)
+            bte = BTE(FullBPEKnockoutConfig(), quiet=True)
             amount_of_merges = len(bte.merge_graph.merges)
             to_knock_out = int(amount_of_merges * p/100)
             wprint(f"\tDeleting {to_knock_out} merges to get to {p}% deletion...")
@@ -867,7 +867,7 @@ def main_blameThreshold_Monolingual():
     g2 = LineGraph("blame-threshold-evaluation", caching=CacheMode.IF_MISSING)
     if g1.needs_computation or g2.needs_computation:
         # We can get a rating for ALL merges by requesting to return all merges with a blame above 0.
-        bte = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC)), execution_policy=ExecutionPolicy.POSTPONED, quiet=True)
+        bte = BTE(FullBPEKnockoutConfig(knockout=KnockoutConfig(reference=ReferenceMode.ALL)), execution_policy=ExecutionPolicy.POSTPONED, quiet=True)
         all_merges = bte._rankOldMergesForKnockout()
 
         # And now we just filter them out manually.
@@ -879,7 +879,7 @@ def main_blameThreshold_Monolingual():
 
             if g2.needs_computation:
                 # Construct tokeniser
-                bte = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC)), execution_policy=ExecutionPolicy.POSTPONED, quiet=True)
+                bte = BTE(FullBPEKnockoutConfig(knockout=KnockoutConfig(reference=ReferenceMode.ALL)), execution_policy=ExecutionPolicy.POSTPONED, quiet=True)
                 for merge in relevant_merges:
                     bte.merge_graph.knockout(merge.childType())
                 bte._syncWithGraph()

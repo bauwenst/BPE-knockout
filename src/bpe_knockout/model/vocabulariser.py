@@ -103,7 +103,7 @@ class KnockoutRandomisation:
 class KnockoutMetadata:
     identification: KnockoutIdentification
     randomisation: KnockoutRandomisation
-    config: BTEConfig
+    config: FullBPEKnockoutConfig
     iterations: list[dict]
 
 
@@ -138,12 +138,18 @@ class CacheableBPEKnockoutArtifacts(CacheableBPEArtifacts, BPEKnockoutArtifacts)
             metadata = json.load(handle)
 
         # Config fields are special, the rest of the metadata is trivial.
-        config = metadata["config"]
+        config: dict = metadata["config"]
+
+        ### Backwards-compatibility (to be removed before the year 2027)
+        if not isinstance(config["reify"], dict):
+            config["reify"] = {"mode": config.pop("reify"), "evaluate_before_reify": config.pop("evaluate_before_reify", False)}
+        ###
+
         config["knockout"]["reference"]  = ReferenceMode(config["knockout"]["reference"])
         config["annealing"]["reference"] = ReferenceMode(config["annealing"]["reference"])
         config["annealing"]["when"]      = AnnealingTime(config["annealing"]["when"])
-        config["reify"]                  = ReifyMode(config["reify"])
-        metadata["config"] = dacite.from_dict(BTEConfig, config)
+        config["reify"]["mode"]          = ReifyMode(config["reify"]["mode"])
+        metadata["config"] = dacite.from_dict(FullBPEKnockoutConfig, config)
 
         return CacheableBPEKnockoutArtifacts(
             types=bpe_artifacts._types,
@@ -165,7 +171,7 @@ SPLIT_MARKER_RE = re.compile(re.escape(SPLIT_MARKER))
 
 class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEKnockoutArtifacts]):
 
-    def __init__(self, initial_tokeniser: BPEArtifacts, config: BTEConfig,
+    def __init__(self, initial_tokeniser: BPEArtifacts, config: FullBPEKnockoutConfig,
                  holdout: Holdout=None, iteration_evaluator: IntermediateEvaluator=None, quiet: bool=False):
         super().__init__(preprocessor=initial_tokeniser.preprocessorEffective())
         self._config = config
@@ -175,8 +181,8 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
         if config.iterations < 1 and config.annealing == ReferenceMode.NONE:  # You are literally doing nothing.
             raise ValueError("No iteration nor annealing was requested from the vocabulariser.")
 
-        if config.reify != ReifyMode.NONE and config.knockout == ReferenceMode.NONE:
-            raise ValueError(f"Cannot do reification ({config.reify}) without applying knockout first.")
+        if config.reify.mode != ReifyMode.NONE and config.knockout == ReferenceMode.NONE:
+            raise ValueError(f"Cannot do reification ({config.reify.mode}) without applying knockout first.")
 
         # Eval
         self._holdout = holdout or Holdout(1.0)
@@ -184,7 +190,7 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
         self._diagnostics: list[dict] = []
 
     def _cacheSubfolder(self) -> str:
-        return "bpe-knockout" if self._config.reify.does_nothing() else "rebpe"
+        return "bpe-knockout" if self._config.reify.mode.does_nothing() else "rebpe"
 
     def _identifierPartial(self) -> str:
         return shash(repr(self.preprocessor)) + "_" + shash(repr(self._config))
@@ -225,7 +231,7 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
                 evaluator.evaluate(tk, self._holdout, [f"{0} it", "+anneal"])
 
         # Stopping conditions
-        END_IF_NO_MORE_DELETIONS = self._config.reify.does_nothing()  # If False, it's possible to just be reifying merges recursively (you reify, do no knockout, then reify again). Note that it's possible to have no knockout in one iteration, but do knockout in the next after adding some novel merges.
+        END_IF_NO_MORE_DELETIONS = self._config.reify.mode.does_nothing()  # If False, it's possible to just be reifying merges recursively (you reify, do no knockout, then reify again). Note that it's possible to have no knockout in one iteration, but do knockout in the next after adding some novel merges.
         END_IF_NO_MORE_ADDITIONS = False  # If False, can do multiple rounds of knockout without any reification. If True, will cause early stopping when there are no more non-disqualified merges to be suggested, or those that were suggested all need to be created whereas the config demands backwards-compatibility, or if it wasn't, they exist above their triplet.
         DO_KNOCKOUT_IF_NOT_ENDED_ON_IT = True  # Recommendable because the latest additions might be morphologically bad.
         needs_final_knockout = DO_KNOCKOUT_IF_NOT_ENDED_ON_IT and iterations > 0
@@ -242,18 +248,18 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
 
             if END_IF_NO_MORE_DELETIONS and not removed_merges:
                 self._print("Early stop: no merges knocked out.")
-                self._diagnostics.append({"type": "convergence" if self._config.reify.does_nothing() else "early-no-knockout", "iterations": iteration - 1, "vocab_size": len(tk.merge_graph.vocab)})
+                self._diagnostics.append({"type": "convergence" if self._config.reify.mode.does_nothing() else "early-no-knockout", "iterations": iteration - 1, "vocab_size": len(tk.merge_graph.vocab)})
                 break
 
             if evaluator and removed_merges:
                 evaluator.evaluate(tk, self._holdout, [f"{iteration} it", "+knockout"])
 
             # --- REIFICATION PHASE ---
-            if self._config.reify.does_nothing():
+            if self._config.reify.mode.does_nothing():
                 iteration += 1
                 continue
 
-            if self._config.evaluate_before_reify:
+            if self._config.reify.evaluate_before_reify:
                 self._diagnosticsAppendTrainEval(self._evaluateKnockout(tk, reference))
 
             all_disqualified_merges.update(" ".join(m.merge.parts) for m in removed_merges)
@@ -389,7 +395,7 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
     def _removeKnockoutMerges(self, tk: BTE, merges_to_remove: Iterable[Merge]) -> int:
         modified_merges = set()
         for merge in tqdm(merges_to_remove, desc="PRUNING GRAPH", disable=not self._print.verbose):
-            if self._config.reify == ReifyMode.NONE_CASCADE:
+            if self._config.reify.mode == ReifyMode.NONE_CASCADE:
                 try:  # Cascading removes many types, so chances are that one type removes another type to be removed.
                     tk.merge_graph.detach(merge.childType(), cascade=True)  # TODO: Perhaps we should also return something about the impact of this.
                 except:
@@ -572,7 +578,7 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
         In the code below, when I use "triplet", I mean "thing with submerges". Often it has more than 3 subwords,
         even after just one iteration of knockout, meaning it also suggests more than one submerge.
         """
-        if self._config.reify == ReifyMode.NONE:
+        if self._config.reify.mode == ReifyMode.NONE:
             return set()
 
         # Setup
@@ -586,7 +592,7 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
 
         # Part 1: Find triplets which diverge from the actual tokenisation, and fix them.
         for m in sorted_merges:
-            if not self._config.reify.does_fix():  # Skip this whole loop.
+            if not self._config.reify.mode.does_fix():  # Skip this whole loop.
                 break
             if len(m.parts) <= 2:  # Not a triplet
                 continue
@@ -610,7 +616,7 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
                 modified_merges.add(m)
         diagnostics["repaired_merges"] = len(modified_merges)
 
-        if not self._config.reify.does_link():
+        if not self._config.reify.mode.does_link():
             return modified_merges
 
         # Part 2: Find new binary merges inside all triplets.
@@ -668,7 +674,7 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
                     continue
             else:  # Make new type.
                 type_is_new = True
-                if self._config.reify.is_backwards_compatible():
+                if self._config.reify.mode.is_backwards_compatible():
                     continue
 
                 log(f"Reified merge '{merge_string}' will be created.")

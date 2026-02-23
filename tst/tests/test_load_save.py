@@ -19,7 +19,7 @@ def test_native():
     """
     from tst.configs import setupEnglish
     project = setupEnglish()
-    btek = BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC)))
+    btek = BTE(FullBPEKnockoutConfig(knockout=KnockoutConfig(reference=ReferenceMode.ALL)))
     print("Knockout |V|:", btek.getVocabSize())
     path = btek.save(folder=TkTkTPaths.pathToModels() / "test-native-en")
 

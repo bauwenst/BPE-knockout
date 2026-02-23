@@ -1,13 +1,13 @@
 from tktkt.interfaces.huggingface import TktktToHuggingFace
 
 from bpe_knockout.model.vocabulariser import BTE
-from bpe_knockout.model.config import BTEConfig, KnockoutConfig, ReferenceMode
+from bpe_knockout.model.config import FullBPEKnockoutConfig, KnockoutConfig, ReferenceMode
 from bpe_knockout.util.datahandlers.bpetrainer import SPECIAL_TYPES
 
 
 def test_hf():
     knockout = TktktToHuggingFace(
-        BTE(BTEConfig(knockout=KnockoutConfig(reference=ReferenceMode.MORPHEMIC)),
+        BTE(FullBPEKnockoutConfig(knockout=KnockoutConfig(reference=ReferenceMode.ALL)),
             starting_vocab=..., starting_mergelist=...),
         specials=SPECIAL_TYPES
     )

@@ -5,22 +5,22 @@ from modest.interfaces.morphologies import MorphologyVisitor, FreeMorphSplit, Mo
 
 
 class ReferenceMode(str, Enum):  # The str parent allows JSON serialisation: https://stackoverflow.com/a/51976841/9352077
-    NONE      = 1
-    MORPHEMIC = 2
-    ONLY_FREE_MORPHS = 3
+    NONE           = 1
+    ALL            = 2  # Segmentation into all morphs, i.e. surface forms of morphemes
+    ONLY_COMPOUNDS = 3  # Segmentation into only free morphs, i.e. all bound morphs are concatenated. These are compound boundaries.
 
     def toMethod(self) -> MorphologyVisitor:
-        if   self == ReferenceMode.ONLY_FREE_MORPHS:
+        if   self == ReferenceMode.ONLY_COMPOUNDS:
             return FreeMorphSplit()
-        elif self == ReferenceMode.MORPHEMIC:
+        elif self == ReferenceMode.ALL:
             return MorphSplit()
         else:
             raise NotImplementedError()
 
     def toLetter(self) -> str:
-        if   self == ReferenceMode.ONLY_FREE_MORPHS:
+        if   self == ReferenceMode.ONLY_COMPOUNDS:
             return "f"
-        elif self == ReferenceMode.MORPHEMIC:
+        elif self == ReferenceMode.ALL:
             return "m"
         elif self == ReferenceMode.NONE:
             return ""
@@ -94,11 +94,16 @@ class AnnealingConfig:
 
 
 @dataclasses.dataclass
-class BTEConfig:
+class ReifyConfig:
+    mode: ReifyMode = ReifyMode.NONE
+    evaluate_before_reify: bool = False
+
+
+@dataclasses.dataclass  # NOTE: If you add, move or remove any enums in this config, also modify the CacheableBPEKnockoutArtifacts.load() method.
+class FullBPEKnockoutConfig:
     knockout:   KnockoutConfig = dataclasses.field(default_factory=KnockoutConfig)
     annealing: AnnealingConfig = dataclasses.field(default_factory=AnnealingConfig)
-    reify: ReifyMode = ReifyMode.NONE
-    evaluate_before_reify: bool = False  # TODO: Once the ReBPE paper is finished, move this to a ReifyConfig.
+    reify:         ReifyConfig = dataclasses.field(default_factory=ReifyConfig)
     iterations: int = 1
 
     # Legacy arguments that are not really relevant anymore.

@@ -1,6 +1,6 @@
-__version__ = "2026.02.01"
+__version__ = "2026.02.22"
 
-from .model.config import BTEConfig, KnockoutConfig, AnnealingConfig, ReferenceMode, ReifyMode, AnnealingTime
+from .model.config import FullBPEKnockoutConfig, KnockoutConfig, AnnealingConfig, ReifyConfig, ReferenceMode, ReifyMode, AnnealingTime
 from .model.tokeniser import BTE
 from .model.vocabulariser import BPEKnockoutVocabulariser
 from .model.auto import AutoKnockout, AutoMerges

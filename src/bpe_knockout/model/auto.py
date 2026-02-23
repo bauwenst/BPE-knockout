@@ -20,7 +20,7 @@ class AutoKnockout:
     a Vocabulariser has never been an object and always a Path.)
     """
 
-    def __init__(self, config: BTEConfig):
+    def __init__(self, config: FullBPEKnockoutConfig):
         self.config = config
 
     def from_pretrained(self, checkpoint: str, original_specials: AutoVocabSpecs[WithSpecials], reference: ModestDataset) -> BTE[WithSpecials]:
