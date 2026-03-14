@@ -184,7 +184,6 @@ def testMapping():
 
 
 def convertMerges():
-    from bpe_knockout.util.storage import HuggingFaceTokeniserPath
     robbert = HuggingFaceTokeniserPath(PATH_DATA_TEMP / "robbert_2020.json")
 
     changed = 0

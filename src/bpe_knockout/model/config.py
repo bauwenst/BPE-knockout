@@ -99,12 +99,10 @@ class ReifyConfig:
     evaluate_before_reify: bool = False
 
 
-@dataclasses.dataclass  # NOTE: If you add, move or remove any enums in this config, also modify the CacheableBPEKnockoutArtifacts.load() method.
+# NOTE: If you add, move or remove any enums in this config, also modify the CacheableBPEKnockoutArtifacts.load() method.
+@dataclasses.dataclass
 class FullBPEKnockoutConfig:
     knockout:   KnockoutConfig = dataclasses.field(default_factory=KnockoutConfig)
     annealing: AnnealingConfig = dataclasses.field(default_factory=AnnealingConfig)
     reify:         ReifyConfig = dataclasses.field(default_factory=ReifyConfig)
     iterations: int = 1
-
-    # Legacy arguments that are not really relevant anymore.
-    weighted_training: bool = False  # Shown in the paper to not really matter.

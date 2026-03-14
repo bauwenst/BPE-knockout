@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bpe_knockout"
-version = "2026.02.22"  # Don't forget to update __version__ too.
-requires-python = ">= 3.10"
+version = "2026.03.13"  # Don't forget to update __version__ too.
+requires-python = ">= 3.9"
 authors = [
   {name = "Thomas Bauwens", email = "thomas.bauwens@kuleuven.be"}
 ]
@@ -21,27 +21,27 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "transformers >= 4.17.0",
+    # No dependency on 'transformers' because it's crazy heavy.
     "tokenizers >= 0.13.2",
-    "datasets >= 2.10.1",
-    "torch",  # We only need torch for using DataLoader in type annotations. It's required by transformers anyway.
 
-    "requests",
     "langcodes",
     "language_data",
     "numpy >= 1.23.5",
     "tqdm"
 ]
 
-# These are not optional, but if you have these packages as editable installs, you don't want to let pip install them again!
 [project.optional-dependencies]
-github = [
+full = [  # These are not optional, but if you have these packages as editable installs, you don't want to let pip install them again!
     "tktkt[github] @ git+https://github.com/bauwenst/TkTkT",
     "modest[github] @ git+https://github.com/bauwenst/MoDeST",
-    "fiject        @ git+https://github.com/bauwenst/fiject"
 ]
 tests = [
-    "scipy"
+    "scipy",
+    "fiject",
+    "transformers >= 4.17.0",
+    "torch",  # We only need torch for using DataLoader in type annotations. It's required by transformers anyway.
+    "datasets >= 2.10.1",
+    "requests",
 ]
 
 # Include morphological data and tokeniser files.

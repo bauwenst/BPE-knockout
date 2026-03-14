@@ -1,5 +1,8 @@
-from transformers import AutoTokenizer, PreTrainedTokenizerBase
 from huggingface_hub import hf_hub_download
+try:
+    from transformers import PreTrainedTokenizerBase
+except ImportError:
+    PreTrainedTokenizerBase = object
 
 from tktkt.interfaces.identifiers import AutoVocabSpecs, AutoVocab, repairAbsoluteSpecials, areNotAbsoluteSpecials, \
     SpecialsExtended
@@ -24,6 +27,7 @@ class AutoKnockout:
         self.config = config
 
     def from_pretrained(self, checkpoint: str, original_specials: AutoVocabSpecs[WithSpecials], reference: ModestDataset) -> BTE[WithSpecials]:
+        from transformers import AutoTokenizer, PreTrainedTokenizerBase
         tkz: PreTrainedTokenizerBase = AutoTokenizer.from_pretrained(checkpoint)
         return self.from_objects(
             preprocessor=HuggingFacePreprocessorForWords(tkz),

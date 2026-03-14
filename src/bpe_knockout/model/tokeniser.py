@@ -1,12 +1,7 @@
-from typing import Union
-from pathlib import Path
-
 from tktkt.interfaces.tokenisers import *
-from tktkt.interfaces.identifiers import NoSpecials, WithSpecials
-from tktkt.interfaces.huggingface import TktktToHuggingFace
+from tktkt.interfaces.identifiers import WithSpecials
 from tktkt.wrappers.multiplexing import SuccessionalTokeniser
 
-from ..util.storage import fetchAndCacheDict, DEFAULT_TOKENISER_STEM, makeDownloadPath
 from .config import *
 from .graph import *
 
@@ -122,62 +117,3 @@ class BTE(TokeniserWithVocabulary[WithSpecials], SuccessionalTokeniser):
             buffer = buffer.replace(best_merge[1], best_merge[2])
 
         return buffer[1:-1].split(" ")
-
-    ####################################################################################################################
-    # TODO: Remove these
-
-    @staticmethod
-    def from_pretrained_tktkt(checkpoint: Union[str, Path], preprocessor: Preprocessor,
-                              specials: WithSpecials=NoSpecials(), unk_id: int=0) -> "BTE[WithSpecials]":
-        """
-        Load a TkTkT-saved checkpoint (not a HuggingFace-trained checkpoint!) into a TkTkT object.
-
-        Wraps BTE.load(file) to add three features:
-            1. You can give a local path as a string, like you would in HuggingFace for local files.
-            2. You can give a directory path (as Path or as string), in which case the .json file stem will be imputed.
-            3. You can give a string that is NOT an existing file or directory, and it will instead be looked up
-               as if it is a checkpoint on the HuggingFace hub.
-        """
-        raise DeprecationWarning("This feature is now deprecated. See the TkTkT README for how to load BTE tokenisers from a checkpoint.")
-
-        # Make sure that you have the tokeniser file locally on disk.
-        checkpoint_pathified = Path(checkpoint)
-        if checkpoint_pathified.is_dir() or checkpoint_pathified.is_file():
-            if checkpoint_pathified.is_dir():
-                path = checkpoint_pathified / f"{DEFAULT_TOKENISER_STEM}.json"
-                if not checkpoint_pathified.is_file():
-                    raise ValueError(f"Couldn't load tokeniser from checkpoint: {checkpoint_pathified.as_posix()} is a directory without recognisable tokeniser file.")
-            else:
-                path = checkpoint_pathified
-        else:  # Comes from a remote location. Could've been cached already though.
-            path = makeDownloadPath() / checkpoint.replace("/", "--") / f"{DEFAULT_TOKENISER_STEM}.json"
-            if not path.exists():
-                # TODO: I wonder how this function fails, actually.
-                fetchAndCacheDict(f"https://huggingface.co/{checkpoint}/raw/main/tokenizer.json",
-                                  cache_folder=path.parent, stem=DEFAULT_TOKENISER_STEM)
-                assert path.exists()
-
-        # Load from disk.
-        from .vocabulariser import BPEKnockoutVocabulariser
-        types, merges, meta = BPEKnockoutVocabulariser._parseJson(path)
-        return BTE(
-            preprocessor=preprocessor,
-            vocab=Vocab(types, specials=specials, unk_id=unk_id),
-            merges=merges,
-            metadata=meta
-        )
-
-    @staticmethod
-    def from_pretrained(checkpoint: Union[str, Path], preprocessor: Preprocessor,
-                        specials: WithSpecials=NoSpecials(), unk_id: int=0) -> TktktToHuggingFace:
-        """
-        Load a TkTkT-saved checkpoint (not a HuggingFace-trained checkpoint!) into a HuggingFace tokeniser.
-        If you want to load a HuggingFace-saved checkpoint into a TkTkT tokeniser, use .fromHuggingFace() in any
-        of the subclasses of this class.
-
-        Wraps around from_pretrained_tktkt() to give it the HuggingFace interface, which is what you expect from a
-        call to from_pretrained().
-
-        Special types are detected automatically. That won't work for all vocabs, but it works for what we need.
-        """
-        return TktktToHuggingFace(BTE.from_pretrained_tktkt(checkpoint, preprocessor, specials, unk_id))

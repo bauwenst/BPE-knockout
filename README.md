@@ -1,11 +1,10 @@
 <img src="doc/logo.png">
 
-Repo hosting all the code used for the NAACL 2024 paper [*"BPE-knockout: Pruning Pre-existing BPE Tokenisers with Backwards-compatible Morphological Semi-supervision"*](https://aclanthology.org/2024.naacl-long.324/),
-including source code for BPE-knockout tokenisation.
+Repo hosting the implementation of BPE-knockout and ReBPE tokenisation, as well as the intrinsic evaluations for the NAACL 2024 
+paper [*"BPE-knockout: Pruning Pre-existing BPE Tokenisers with Backwards-compatible Morphological Semi-supervision"*](https://aclanthology.org/2024.naacl-long.324/).
 
-Want to reproduce or extend the intrinsic evaluations of the paper? Read on!
-Extrinsic evaluations are done with [RobBERT's](https://github.com/iPieter/RobBERT) framework. The pre-trained model
-checkpoints are available on the [HuggingFace Hub](https://huggingface.co/collections/Bauwens/bpe-knockout-660be8a33336a7e1289be624).
+(Extrinsic evaluations for that paper were done with [RobBERT's](https://github.com/iPieter/RobBERT) framework, and the pre-trained model checkpoints 
+are available on the [HuggingFace Hub](https://huggingface.co/collections/Bauwens/bpe-knockout-660be8a33336a7e1289be624).)
 
 Table of contents:
 - [Installation](#installing)
@@ -28,7 +27,7 @@ you would run:
 from transformers import AutoTokenizer
 hf_bpe_tokeniser = AutoTokenizer.from_pretrained("roberta-base")
 
-# Construct TkTkT object
+# Construct TkTkT object  FIXME: No longer works because string-based loading is banned in TkTkT.
 from tktkt.models.bpe.knockout import BPEKnockout
 tktkt_bpek_tokeniser = BPEKnockout.fromHuggingFace(hf_bpe_tokeniser, "English")
 
@@ -40,28 +39,29 @@ The resulting object is indeed a HuggingFace tokeniser, but internally it works 
 
 ## Installing
 ### Minimal package
-If you are only interested in using the BPE-knockout package (including our English, German and Dutch BPE tokenisers and
-the respective morphological data loaders, but **not** including corpus word counts) and not in running the experiments
-from the paper, you likely just want to run:
-```shell
-pip install "bpe_knockout[github] @ git+https://github.com/bauwenst/BPE-knockout"
-```
-As shown in the above example, user-friendly encapsulations for BPE-knockout are provided by the [TkTkT package](https://github.com/bauwenst/TkTkT),
-which may be more interesting to you than the core algorithm and configuration code which is provided here. In any case, installing
-either package will install the other automatically anyway.
+If you are only interested in using the BPE-knockout and ReBPE tokenisers, I recommend you to just install 
+the [TkTkT package](https://github.com/bauwenst/TkTkT). It has this package as a dependency.
 
-### Full experiments, editable code
-If you want to run experiments from the paper and/or have access to the word count files, this means you want to download
-everything in this repository and tell Python to use the folder into which you cloned for the package code, rather than
-copying the code to your global or virtual `site-packages` directory. In that case, run:
+*Warning:* If you do decide to manually install this package, don't forget to add the `[full]` suffix 
+(`pip install "bpe_knockout[full] @ git+..."`) in case you don't have an installation for any of my other packages.
+
+### Reproducing the paper
+If you want to run experiments from the paper (and/or have access to the word count files), this means you want to download
+everything in this repository, and tell Python to use the folder into which you cloned for the package code, rather than
+copying the code to your global or virtual `site-packages` directory. 
+
+The once-working experiments run for the camera-ready version of the paper can be recovered from commit `c08a7`. 
+For this purpose, run:
 ```shell
 git clone https://github.com/bauwenst/BPE-knockout
 cd BPE-knockout
-pip install -e .[github]
+git checkout c09a7
+pip install -e .[full]
 ```
 *Warning*:
 - If you're using conda or venv, don't forget to activate your environment before running any calls to `pip install`.
-- If you have an editable installation of my other packages `TkTkT` and/or `Fiject` and would like to keep it, do *not* include the `[github]` suffix.
+- If you have an editable installation of my other packages `TkTkT` and/or `Fiject` and would like to keep it, do *not* 
+  include the `[full]` suffix.
 
 ## More usage examples
 ### Saving and loading tokeniser after knockout
@@ -74,7 +74,7 @@ from transformers import AutoTokenizer
 from tktkt.models.bpe.knockout import BPEKnockout
 from tktkt.models.huggingface.wrapper import HuggingFacePreprocessor
 
-# Load old tokeniser and apply knockout.
+# Load old tokeniser and apply knockout. FIXME: No longer works.
 hf_base = AutoTokenizer.from_pretrained("roberta-base")
 tktkt_knockout = BPEKnockout.fromHuggingFace(hf_base, language="English")
 
@@ -95,7 +95,7 @@ uploaded to the HuggingFace hub. Rather than downloading them manually, you can 
 For convenience, there is one that has the TkTkT interface and one that converts it to the HuggingFace interface:
 ```python
 from tktkt.models.bpe.knockout import BPEKnockout
-
+# FIXME: No longer works.
 dutch_bpe_knockout_hf    = BPEKnockout.from_pretrained("Bauwens/RoBERTa-nl_BPE_30k_BPE-knockout_9k")
 dutch_bpe_knockout_tktkt = BPEKnockout.from_pretrained_tktkt("Bauwens/RoBERTa-nl_BPE_30k_BPE-knockout_9k")
 ```

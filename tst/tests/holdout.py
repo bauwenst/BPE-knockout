@@ -1,4 +1,4 @@
-from bpe_knockout.util.datahandlers.holdout import *
+from bpe_knockout.util.holdout import *
 
 
 def smallTest():

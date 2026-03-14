@@ -29,11 +29,12 @@ from tktkt.interfaces.vocabularisers import *
 from tktkt.util.strings import shash
 
 from .. import __version__
-from ..util.datahandlers.holdout import Holdout
-from ..util.project.config import Pℛ𝒪𝒥ℰ𝒞𝒯, lexiconWeights
+from ..util.holdout import Holdout
 from .config import *
 from .graph import *
 from .tokeniser import BTE
+
+_DEBUG_PRINTS = False
 
 
 @dataclass
@@ -143,6 +144,8 @@ class CacheableBPEKnockoutArtifacts(CacheableBPEArtifacts, BPEKnockoutArtifacts)
         ### Backwards-compatibility (to be removed before the year 2027)
         if not isinstance(config["reify"], dict):
             config["reify"] = {"mode": config.pop("reify"), "evaluate_before_reify": config.pop("evaluate_before_reify", False)}
+        if "weighted_training" in config:
+            config.pop("weighted_training")
         ###
 
         config["knockout"]["reference"]  = ReferenceMode(config["knockout"]["reference"])
@@ -302,10 +305,9 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
 
         Can be repeated before and after knockout; there will always be merges to blame.
         """
-        log = doPrint(Pℛ𝒪𝒥ℰ𝒞𝒯.debug_prints)
+        log = doPrint(_DEBUG_PRINTS)
 
         segment = self._config.knockout.reference.toMethod()
-        weights = lexiconWeights() if self._config.weighted_training else dict()
 
         merge_lookup = {m.priority: m for m in tk.merge_graph.merges}
         blame        = {m.priority: 0 for m in tk.merge_graph.merges}
@@ -315,8 +317,9 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
 
         for obj in self._holdout(reference.generate(), train=True):
             lemma = obj.word
-            weight = weights.get(lemma, 1)
+            # weight = weights.get(lemma, 1)
             # log(lemma)
+            weight = 1
 
             # Get morphological split
             reference_segmentation = " ".join(segment(obj))
@@ -469,10 +472,9 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
             ade+mb and mb+uis
         yet by doing either of those merges, you don't get the correct split.
         """
-        log = doPrint(Pℛ𝒪𝒥ℰ𝒞𝒯.debug_prints)
+        log = doPrint(_DEBUG_PRINTS)
 
         segment = self._config.annealing.reference.toMethod()
-        weights = lexiconWeights() if self._config.weighted_training else dict()
 
         do_fuse_spans = False  # Not sure how you would count "total" for this one, unless in a second pass when you already know all the merge spans.
         amenability_count = Counter()
@@ -482,8 +484,9 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
 
         for obj in self._holdout(reference.generate(), train=True):
             lemma = obj.word
-            weight = weights.get(lemma, 1)
+            # weight = weights.get(lemma, 1)
             log(lemma)
+            weight = 1
 
             # Get morphological split
             reference_segmentation = " ".join(segment(obj))
@@ -587,7 +590,7 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
         sorted_merges   = sorted(tk.merge_graph.merges)
         modified_merges = set()  # Union of (1) triplets that were repaired into different triplets, (2) new binary merges that were applied in at least one triplet, and (3) old binary merges that were applied in at least one other triplet.
 
-        log = doPrint(Pℛ𝒪𝒥ℰ𝒞𝒯.debug_prints)
+        log = doPrint(_DEBUG_PRINTS)
         diagnostics: dict[str,Any] = {"type": "reify"}
 
         # Part 1: Find triplets which diverge from the actual tokenisation, and fix them.
@@ -741,12 +744,12 @@ class BPEKnockoutVocabulariser(SegmentationSupervisedVocabulariser[CacheableBPEK
 
     def _evaluateKnockout(self, tk: BTE, reference: ModestDataset) -> ConfusionMatrix:
         segment = self._config.knockout.reference.toMethod()  # We use knockout's reference mode.
-        weights = lexiconWeights() if self._config.weighted_training else dict()
         performance = ConfusionMatrix()
 
         for obj in self._holdout(reference.generate(), train=True):
             lemma = obj.word
-            weight = weights.get(lemma, 1)
+            # weight = weights.get(lemma, 1)
+            weight = 1
 
             reference_segmentation = " ".join(segment(obj))
             reference_segmentation = BPEKnockoutVocabulariser._preprocessAlreadySegmentedString(tk, reference_segmentation)

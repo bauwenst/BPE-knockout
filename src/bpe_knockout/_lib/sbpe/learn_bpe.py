@@ -40,6 +40,7 @@ from .heap import HeapWithInverseIndex
 def error(message: str):
     sys.stderr.write(message)
 
+
 DEFAULT_PREPROCESSOR = Preprocessor(  # [Bauwens] This is a minimal preprocessor that is correct, but there are better ones (to support numbers and so on). E.g.: "BPE-knockout is (very) cool." -> ["BPE", "-", "knockout</w>", "is</w>", "(</w>", "very</w>", ")</w>", "cool</w>", ".</w>"]
     IdentityMapper(),
     IdentityMapper(),
@@ -134,7 +135,7 @@ class PairStats:
     around a heap of operations, with additional functions for updating counts
     when a new operation has been selected.
     """
-    def __init__(self, vocab, probabilistic):
+    def __init__(self, vocab, probabilistic: bool):
         self.vocab = vocab
         self.probabilistic = probabilistic
 
@@ -350,8 +351,8 @@ def learn_bpe(infiles: list[Iterable[str]], outfile: TextIO,
     :param num_symbols_ori: size of vocab OR amount of merges.
     :param total_symbols: if True, num_symbols_ori is the vocab size. If False, it is the amount of merges.
     :param probabilistic: BPE (False) or S-BPE (True). Should really be "statistical".
-    :param frac_stopping: "k" parameter in the paper. Should be 0.002.
-    :param frac_stopping_average_n: "M" parameter in the paper. They say 5 is okay.
+    :param frac_stopping: "k" parameter in the paper. Stop when the likelihood increase falls below this fraction of the initial one. Should be 0.002.
+    :param frac_stopping_average_n: "M" parameter in the paper. "Mini-batch" size for frac-stopping computation. They say 5 is okay.
     :param min_frequency: If using BPE, stops early when the argmax drops below this.
     :param is_dict: whether or not the infiles are in "dictionary mode", i.e.
         word1 count1
@@ -401,89 +402,3 @@ def learn_bpe(infiles: list[Iterable[str]], outfile: TextIO,
 
     error(f"{num_written} pairs written to file.\n")
     return num_written
-
-
-def create_arg_parser(subparsers=None):
-    """
-    Create the argument parser.
-
-    Copied from the original implementation to be command-line compatible.
-    """
-    if subparsers:
-        parser = subparsers.add_parser('learn-bpe',
-                                       formatter_class=argparse.RawDescriptionHelpFormatter,
-                                       description="learn BPE-based word segmentation")
-    else:
-        parser = argparse.ArgumentParser(
-            formatter_class=argparse.RawDescriptionHelpFormatter,
-            description="learn BPE-based word segmentation")
-
-    parser.add_argument(
-        '--input', '-i', type=argparse.FileType('r'), default=[sys.stdin],
-        metavar='PATH', nargs="+",
-        help="Input text(s) (default: standard input).")
-
-    parser.add_argument(
-        '--probabilistic', '-p', action="store_true",
-        help="Use probabilistic BPE")
-    parser.add_argument(
-        '--frac-stopping', '-fs', type=float, default=0.0,
-        help="(Probabilistic) Stop when the likelihood increase falls below this fraction of the initial one)")
-    parser.add_argument(
-        '--frac-stopping-average', '-fsa', type=int, default=5,
-        help='"Mini-batch" size for frac-stopping computation (default: %(default)s)')
-    parser.add_argument(
-        '--output', '-o', type=argparse.FileType('w'), default=sys.stdout,
-        metavar='PATH',
-        help="Output file for BPE codes (default: standard output)")
-    parser.add_argument(
-        '--symbols', '-s', type=int, default=10000,
-        help="Create this many new symbols (each representing a character n-gram) (default: %(default)s))")
-    parser.add_argument(
-        '--min-frequency', type=int, default=2, metavar='FREQ',
-        help='Stop if no symbol pair has frequency >= FREQ (default: %(default)s))')
-    parser.add_argument('--dict-input', action="store_true",
-        help="If set, input file is interpreted as a dictionary where each line contains a word-count pair")
-    parser.add_argument(
-        '--total-symbols', '-t', action="store_true",
-        help="Subtract number of characters from the symbols to be generated (so that '--symbols' becomes an estimate for the total number of symbols needed to encode text).")
-    parser.add_argument(
-        '--verbose', '-v', action="store_true",
-        help="verbose mode.")
-
-    return parser
-
-
-def main():
-    # Full compatibility with original implementation.
-    # I do not know exactly why this is different to the standard file objects,
-    # but some special utf-8 symbols are handled differently if the codecs call
-    # is not present.
-    sys.stderr = codecs.getwriter('UTF-8')(sys.stderr.buffer)
-    sys.stdout = codecs.getwriter('UTF-8')(sys.stdout.buffer)
-    sys.stdin  = codecs.getreader('UTF-8')(sys.stdin.buffer)
-
-    arg_parser = create_arg_parser()
-    args = arg_parser.parse_args()
-
-    # Full compatibility with original implementation
-    for i in range(len(args.input)):
-        if args.input[i].name != '<stdin>':
-            args.input[i] = codecs.open(args.input[i].name, encoding='utf-8')
-    if args.output.name != '<stdout>':
-        args.output = codecs.open(args.output.name, 'w', encoding='utf-8')
-
-    learn_bpe(
-        args.input, args.output, args.symbols,
-        probabilistic=args.probabilistic,
-        frac_stopping=args.frac_stopping,
-        frac_stopping_average_n=args.frac_stopping_average,
-        min_frequency=args.min_frequency,
-        is_dict      =args.dict_input,
-        total_symbols=args.total_symbols,
-        verbose      =args.verbose,
-    )
-
-
-if __name__ == "__main__":
-    main()

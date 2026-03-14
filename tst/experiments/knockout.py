@@ -1,23 +1,25 @@
 """
-FIXME: Every occurrence of intrinsicEvaluation should be replaced by TkTkT's morphological evaluation pipeline.
+Note: For working versions of these experiments, git checkout c08a7c
+
+FIXME: Every occurrence of intrinsicEvaluation and morphologyGenerator() should be replaced by TkTkT's morphological evaluation pipeline.
 """
 from tst.tokenisation.robbert_tokenizer import robbert_tokenizer, getMergeList_RobBERT
-from tst.configs import setupEnglish, setupDutch, setupGerman
+from tst.configs import setupEnglish, setupDutch, setupGerman, PROJECT
 
 import math
 
 from tktkt.interfaces.tokenisers import prepare_tokenise_decode
 from tktkt.util.timing import timeit
-from tktkt.evaluation.morphological import ConfusionMatrix, compareSplits_cursors
+from tktkt.evaluation.morphological import compareSplits_cursors
 from tktkt.models.huggingface.wrapper import HuggingFaceTokeniser
 from tktkt.factories.evaluators import evaluateTokeniserOnMorphology
-from tktkt.factories.preprocessors import Preprocessor, BoundariesFromSpacesPretokeniser, RobertaSpaceMarker
+from tktkt.factories.preprocessors import BoundariesFromSpacesPretokeniser, RobertaSpaceMarker
 
 from fiject import *  # Fiject project found at https://github.com/bauwenst/fiject
 from fiject.visuals.tables import ColumnStyle, Table
 
 from bpe_knockout.model.vocabulariser import *
-from bpe_knockout.util.datahandlers.wordfiles import ACCENTS
+from bpe_knockout.util.wordfiles import ACCENTS
 
 
 print("Loading tests...")
@@ -139,10 +141,10 @@ def test_onlyTrivials():
             bte.merge_graph.knockout(trivial.childType())
 
         # Evaluate
-        results = evaluateTokeniserOnMorphology("onlytrivials", Pℛ𝒪𝒥ℰ𝒞𝒯.config.morphologies, bte, has_freemorphsplit=True)  # reweighting_function=lambda x: x
+        results = evaluateTokeniserOnMorphology("onlytrivials", PROJECT.config.morphologies, bte, has_freemorphsplit=True)  # reweighting_function=lambda x: x
         addEvaluationToTable(table, results,
                              row_prefix=["Dutch", "linear test"], row_names=["nolong"])
-        results = evaluateTokeniserOnMorphology("onlytrivials", Pℛ𝒪𝒥ℰ𝒞𝒯.config.morphologies, bte, has_freemorphsplit=True)  # reweighting_function=lambda x: 1 + math.log10(x))
+        results = evaluateTokeniserOnMorphology("onlytrivials", PROJECT.config.morphologies, bte, has_freemorphsplit=True)  # reweighting_function=lambda x: 1 + math.log10(x))
         addEvaluationToTable(table, results,
                              row_prefix=["Dutch", "log test"], row_names=["nolong"])
 
@@ -159,7 +161,7 @@ def test_iterative():
             class ForIntermediateTests(IntermediateEvaluator):
                 def evaluate(self, tokeniser: Tokeniser, holdout: Holdout, experiment_names: list[str]):
                     results = intrinsicEvaluation([tokeniser], do_whole_word=True,
-                                                  reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=holdout)
+                                                  reweighting_function=PROJECT.config.reweighter, holdout=holdout)
                     addEvaluationToTable(table, results,
                                          row_prefix=[prefix] + experiment_names[:-1],
                                          row_names=[experiment_names[-1]])
@@ -201,7 +203,7 @@ def addEvaluationToTable(table: Table, results: list[TokeniserEvaluation], macro
     if row_names is None:
         row_names = []
 
-    language = Pℛ𝒪𝒥ℰ𝒞𝒯.config.language_name.capitalize()
+    language = PROJECT.config.language_name.capitalize()
     for tid, tokeniser in enumerate(results):
         # Gather data for name imputation
         raw_name = tokeniser.name
@@ -276,7 +278,7 @@ def main_morphsPerWord_Multilingual(include_monomorphemic=True):
 @timeit
 def main_tokenDiffs_Monolingual():
     for mode in modes_to_test:
-        histo = Histogram(f"knockout_tokendiffs_{ReferenceMode.toLetter(mode)}_{Pℛ𝒪𝒥ℰ𝒞𝒯.config.langTag()}", caching=CacheMode.IF_MISSING)
+        histo = Histogram(f"knockout_tokendiffs_{ReferenceMode.toLetter(mode)}_{PROJECT.config.langTag()}", caching=CacheMode.IF_MISSING)
         if histo.needs_computation:
             # TODO: You should kinda treat the confusion matrix as a figure.
             #       Will allow caching and re-displaying when loading from cache.
@@ -406,7 +408,7 @@ def main_effectiveDropoutRate_Multilingual():
 #     """
 #     Test all combinations of annealing and knockout on intrinsic metrics (morphological Pr-Re-F1).
 #     """
-#     table = Table(f"bte-intrinsic-modes_{Pℛ𝒪𝒥ℰ𝒞𝒯.config.langTag()}", caching=CacheMode.IF_MISSING)
+#     table = Table(f"bte-intrinsic-modes_{PROJECT.config.langTag()}", caching=CacheMode.IF_MISSING)
 #     if table.needs_computation:
 #         import itertools
 #         # Construct possible tokenisers
@@ -427,7 +429,7 @@ def main_effectiveDropoutRate_Multilingual():
 #         print("Expected wait time:", 2*total_stages, "minutes.")
 #         tkzrs = [BTE(BteInitConfig(knockout=m1, anneal=m2, do_swap_stages=m3)) for m1, m2, m3 in fullsets]
 #         results = intrinsicEvaluation(tkzrs, do_whole_word=True,
-#                                       reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
+#                                       reweighting_function=PROJECT.config.reweighter)
 #         addEvaluationToTable(table, results)
 #
 #     commitEvaluationTable(table)
@@ -475,13 +477,13 @@ def main_intrinsicMultilingual():
             bpe_dropout.backend.backend_tokenizer.model.dropout = DROPOUT_RATE
 
             results = intrinsicEvaluation([bpe], do_whole_word=True, verbose=True,
-                                          reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
+                                          reweighting_function=PROJECT.config.reweighter)
             addEvaluationToTable(table, results,
                                  row_prefix=[name_of_language, "BPE"],
                                  row_names=[ROW_NAME_BASE])
 
             results = intrinsicEvaluation([bpe_dropout]*DROPOUT_TESTS, do_whole_word=True, verbose=True,
-                                          reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
+                                          reweighting_function=PROJECT.config.reweighter)
             addEvaluationToTable(table, results, macro_average_all=True,
                                  row_prefix=[name_of_language, "BPE"],
                                  row_names=["dropout"])
@@ -497,14 +499,14 @@ def main_intrinsicMultilingual():
 
             # Using full test set
             results = intrinsicEvaluation([bte_knockout], do_whole_word=True, verbose=True,  #, bte_knockout_keeplong, bte_knockout_weighted],
-                                            reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=None)
+                                            reweighting_function=PROJECT.config.reweighter, holdout=None)
             addEvaluationToTable(table, results,
                                  row_prefix=[name_of_language, "BPE-knockout"],
                                  row_names=[ROW_NAME_BASE, "keep long", "weighted"])
 
             # Using partial test set
             results = intrinsicEvaluation([bte_knockout_holdout], do_whole_word=True, verbose=True,
-                                            reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=holdout)
+                                            reweighting_function=PROJECT.config.reweighter, holdout=holdout)
             addEvaluationToTable(table, results,
                                  row_prefix=[name_of_language, "BPE-knockout"],
                                  row_names=["holdout"])
@@ -514,11 +516,11 @@ def main_intrinsicMultilingual():
 
 # @timeit
 # def main_intrinsicMonolingual_KeepLong():
-#     table = Table(f"bte-intrinsic-keeplong_{Pℛ𝒪𝒥ℰ𝒞𝒯.config.langTag()}", caching=CacheMode.IF_MISSING)
+#     table = Table(f"bte-intrinsic-keeplong_{PROJECT.config.langTag()}", caching=CacheMode.IF_MISSING)
 #     if table.needs_computation:
 #         results = intrinsicEvaluation(
 #             [BTE(BteInitConfig(knockout=mode, keep_long_merges=True)) for mode in modes_to_test], do_whole_word=True,
-#             reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter
+#             reweighting_function=PROJECT.config.reweighter
 #         )
 #         addEvaluationToTable(table, results)
 #
@@ -528,7 +530,7 @@ def main_intrinsicMultilingual():
 @timeit
 def main_intrinsicHoldout_Monolingual():
     # Use the legacy CELEX dataset in the project config to reproduce the paper results.
-    table = Table(f"bte-intrinsic-holdout_{Pℛ𝒪𝒥ℰ𝒞𝒯.config.langTag()}", caching=CacheMode.IF_MISSING)
+    table = Table(f"bte-intrinsic-holdout_{PROJECT.config.langTag()}", caching=CacheMode.IF_MISSING)
     if table.needs_computation:
         HOLDOUTS = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
         mode = modes_to_test[0]
@@ -536,7 +538,7 @@ def main_intrinsicHoldout_Monolingual():
             holdout = Holdout(f)
             results = intrinsicEvaluation(
                 [BTE(FullBPEKnockoutConfig(knockout=KnockoutConfig(reference=mode)), holdout=holdout)], do_whole_word=True,
-                reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter, holdout=holdout
+                reweighting_function=PROJECT.config.reweighter, holdout=holdout
             )
             addEvaluationToTable(table, results,
                                  row_prefix=["BPE-knockout"], row_names=[f"{int(f*100)}-{100-int(f*100)}"])
@@ -548,9 +550,9 @@ def main_intrinsicHoldout_Monolingual():
 def main_intrinsicWeightedTraining_Monolingual():
     from bpe_knockout.model.inspection import BTE_NoTrivialKnockout
 
-    table = Table(f"bte-intrinsic-weightedtraining_{Pℛ𝒪𝒥ℰ𝒞𝒯.config.langTag()}", caching=CacheMode.IF_MISSING)
+    table = Table(f"bte-intrinsic-weightedtraining_{PROJECT.config.langTag()}", caching=CacheMode.IF_MISSING)
     if table.needs_computation:
-        old_config = Pℛ𝒪𝒥ℰ𝒞𝒯.config
+        old_config = PROJECT.config
         ###
 
         # for mode in modes_to_test:
@@ -558,9 +560,9 @@ def main_intrinsicWeightedTraining_Monolingual():
 
         for cls in [BTE, BTE_NoTrivialKnockout]:
             tokenisers = []
-            Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter = lambda x: x
+            PROJECT.config.reweighter = lambda x: x
             tokenisers.append(cls(FullBPEKnockoutConfig(knockout=KnockoutConfig(reference=mode), weighted_training=True)))
-            Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter = lambda x: 1 + math.log10(x)
+            PROJECT.config.reweighter = lambda x: 1 + math.log10(x)
             tokenisers.append(cls(FullBPEKnockoutConfig(knockout=KnockoutConfig(reference=mode), weighted_training=True)))
 
             results_idweighted = intrinsicEvaluation(
@@ -584,7 +586,7 @@ def main_intrinsicWeightedTraining_Monolingual():
                                  row_names=["id-trained", "log-trained"])
 
         ###
-        Pℛ𝒪𝒥ℰ𝒞𝒯.config = old_config
+        PROJECT.config = old_config
 
     commitEvaluationTable(table)
 
@@ -605,7 +607,7 @@ def main_deleteRandomMerges_Monolingual():
 
     SAMPLES = 10
 
-    graph = LineGraph(name=f"delete-random-types_{Pℛ𝒪𝒥ℰ𝒞𝒯.config.langTag()}", caching=CacheMode.IF_MISSING)
+    graph = LineGraph(name=f"delete-random-types_{PROJECT.config.langTag()}", caching=CacheMode.IF_MISSING)
     if graph.needs_computation:
         def pruneIndices(merge_indices: tuple[int]):
             # , job_id=[1]):
@@ -689,7 +691,7 @@ def main_deleteLastMerges_Monolingual():
     Same test except you just trim the merge list.
     You can re-use the same tokeniser for this.
     """
-    graph = LineGraph(name=f"delete-last-types_{Pℛ𝒪𝒥ℰ𝒞𝒯.config.langTag()}", caching=CacheMode.IF_MISSING)
+    graph = LineGraph(name=f"delete-last-types_{PROJECT.config.langTag()}", caching=CacheMode.IF_MISSING)
     if graph.needs_computation:
         bte = BTE(FullBPEKnockoutConfig(), quiet=True, execution_policy=ExecutionPolicy.POSTPONED)
         initial_merges = len(bte.merge_graph.merges)
@@ -825,7 +827,7 @@ def main_wholeWordCeiling_Multilingual():
     if table.needs_computation:
         for language in getAllConfigs():
             unique_morphs = set()
-            weights = lexiconWeights(Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
+            weights = lexiconWeights(PROJECT.config.reweighter)
             cm   = ConfusionMatrix()
             cm_w = ConfusionMatrix()
 
@@ -899,7 +901,7 @@ def main_blameThreshold_Monolingual():
 
 @timeit
 def main_intrinsicDropout_Monolingual():
-    language = Pℛ𝒪𝒥ℰ𝒞𝒯.config
+    language = PROJECT.config
     vocab_and_merges = defaultTokeniserFiles()
     table = Table(f"bte-intrinsic-dropout_{language.langTag()}", caching=CacheMode.IF_MISSING)
 
@@ -915,7 +917,7 @@ def main_intrinsicDropout_Monolingual():
             bpe_dropout = HuggingFaceTokeniser(vocab_and_merges.toFastBPE(), for_single_words=True)
             bpe_dropout.backend.backend_tokenizer.model.dropout = p
 
-            results = intrinsicEvaluation([bpe_dropout]*TRIALS, do_whole_word=True, verbose=False, reweighting_function=Pℛ𝒪𝒥ℰ𝒞𝒯.config.reweighter)
+            results = intrinsicEvaluation([bpe_dropout]*TRIALS, do_whole_word=True, verbose=False, reweighting_function=PROJECT.config.reweighter)
             addEvaluationToTable(table, results, macro_average_all=True,
                                  row_prefix=[language.language_name.capitalize(), "BPE-dropout"],
                                  row_names=[str(p)])

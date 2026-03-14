@@ -1,15 +1,20 @@
+from tst.configs import ImputablePath
+
+# Types
 from datasets import load_dataset, Dataset, IterableDataset
+from langcodes import Language
 from tktkt.util.types import NamedIterable
 from torch.utils.data import DataLoader
 from tokenizers import Regex
 import tokenizers.normalizers as tn
 import tokenizers.pre_tokenizers as tp
 
+# Utlities
 from tktkt.models.word.vocabularisation import CountWords, CountingConfig
 from tktkt.factories.preprocessors import TraditionalPreprocessor
 
-from .wordfiles import *
-from .unicode import punctuation_regex_str
+from bpe_knockout.util.wordfiles import *
+from bpe_knockout.util.unicode import punctuation_regex_str
 
 
 def logger(msg: str):
@@ -92,3 +97,14 @@ def punctuationPretokeniserExceptHyphens():
         return " ".join([w.strip() for w, _ in pretokeniser.pre_tokenize_str(normalizer.normalize_str(s))])
 
     return wordSeparator
+
+
+class OscarWordFile(ImputablePath):
+
+    def impute(self, language: Language):
+        print(f"{language.display_name()} lemma weights not found. Counting...")
+        dataloader, size = generateDataloader_Oscar(langtag=language.to_tag(),
+                                                    sentence_preprocessor=punctuationPretokeniserExceptHyphens(),
+                                                    size_limit=30_000_000)
+        counts = dataloaderToCounts(dataloader, self.path.stem)  # Takes about 28h30m (English), 4h30m (Dutch), ...
+        counts.rename(self.path)
