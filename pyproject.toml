@@ -31,7 +31,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-full = [  # These are not optional, but if you have these packages as editable installs, you don't want to let pip install them again!
+full = [
+
+]
+github = [  # These are not optional, but if you have these packages as editable installs, you don't want to let pip install them again!
     "tktkt[github] @ git+https://github.com/bauwenst/TkTkT",
     "modest[github] @ git+https://github.com/bauwenst/MoDeST",
 ]
