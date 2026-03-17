@@ -1,4 +1,4 @@
-# version: 3.1
+# version: 3.2
 name: Publish to PyPI
 
 on:
@@ -30,7 +30,10 @@ jobs:
       - name: Install Hatch
         run: pip install hatch
 
-      - name: Check version matches tag
+      - name: Erase dependencies on source code    # If you don't do this, you will get an HTTP 400 status code :(
+        run: sed -i "/git+https/d" pyproject.toml  # You don't need to escape a + for sed to see it as a literal.
+
+      - name: Check if TOML version matches tag
         run: |
           TAG_VERSION=${{ github.event.inputs.tag || github.ref_name }}
           PROJECT_VERSION=$(hatch version)
