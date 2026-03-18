@@ -1,4 +1,4 @@
-# version: 3.2
+# version: 3.3
 name: Publish to PyPI
 
 on:
@@ -29,9 +29,6 @@ jobs:
 
       - name: Install Hatch
         run: pip install hatch
-
-      - name: Erase dependencies on source code    # If you don't do this, you will get an HTTP 400 status code :(
-        run: sed -i "/git+https/d" pyproject.toml  # You don't need to escape a + for sed to see it as a literal.
 
       - name: Check if TOML version matches tag
         run: |
@@ -64,6 +61,16 @@ jobs:
           fi
       
           sed -i "s/^version\\s*=\\s*.*?\\n/version = \"$TAG_VERSION\"\\n/" pyproject.toml
+
+      - name: Erase dependencies on source code    # If you don't do this, you will get an HTTP 400 status code :(
+        run: sed -i "/git+https/d" pyproject.toml  # You don't need to escape a + for sed to see it as a literal.
+
+      - name: Fix relative image links in README
+        run: |
+          REPO=${{ github.repository }}
+          TAG=${{ github.event.inputs.tag || github.ref_name }}
+          export REPO TAG
+          [ -f README.md ] && perl -pi -e 's#(<img[^>]*src=")(?!https?://)(\.?/)?([^"]*)"#$1https://raw.githubusercontent.com/$ENV{REPO}/$ENV{TAG}/$3"#g' README.md
 
       - name: Publish to PyPI
         env:
