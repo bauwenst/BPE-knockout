@@ -62,8 +62,8 @@ class VocabCounter:
     def __init__(self, input_handles: Iterable[Iterable[str]], dictionary_mode: bool=False,
                  marker: BoundaryMarker=SennrichSpaceMarker, preprocessor: Preprocessor=DEFAULT_PREPROCESSOR):
         self.forward_index = dict()  # tuple of word characters -> token ID
-        self.inverse_index = []      # token ID (list index) -> tuple of word characters
-        self.counter = []            # token ID (list index) -> count in corpus
+        self.inverse_index: list[tuple[str,...]] = []      # token ID (list index) -> tuple of word characters
+        self.counter: list[int] = []            # token ID (list index) -> count in corpus
         self.marker = marker
         self.preprocessor = preprocessor
 
@@ -112,21 +112,9 @@ class VocabCounter:
     def __len__(self):
         return len(self.counter)
 
-    class Iterator:
-        def __init__(self, vocab):
-            self.vocab = vocab
-            self.pos = 0
-
-        def __next__(self):
-            if self.pos < len(self.vocab.counter):
-                rv = (self.pos, self.vocab.inverse_index[self.pos], self.vocab.counter[self.pos])
-                self.pos += 1
-                return rv
-            else:
-                raise StopIteration
-
     def __iter__(self):
-        return self.Iterator(self)
+        for i in range(len(self.counter)):
+            yield i, self.inverse_index[i], self.counter[i]
 
 
 class PairStats:
@@ -135,7 +123,7 @@ class PairStats:
     around a heap of operations, with additional functions for updating counts
     when a new operation has been selected.
     """
-    def __init__(self, vocab, probabilistic: bool):
+    def __init__(self, vocab: VocabCounter, probabilistic: bool):
         self.vocab = vocab
         self.probabilistic = probabilistic
 
@@ -147,15 +135,15 @@ class PairStats:
                 raw_stats[pair] += count * freq
                 self.vocab_entries_for_pair[pair].add(pos)
 
-        # For probabilistic BPE we need the counts of the produced items
+        # For probabilistic BPE we need the counts of the unigrams, not just the pairs.
         if self.probabilistic:
-            self.produced_count = defaultdict(int)
+            self.produced_count: dict[str,int] = defaultdict(int)
             self.n_running_symbols = 0
             # Store the counts of the initial units (characters)
             for _, word, freq in tqdm(self.vocab, total=len(self.vocab)):
                 for unit in word:
                     self.produced_count[unit] += freq
-                    self.n_running_symbols += freq
+                    self.n_running_symbols    += freq
 
         # stats_heap will contain pairs (freq, word)
         self.stats_heap = HeapWithInverseIndex(value_score_function=self._get_scoring_function(),
@@ -164,7 +152,7 @@ class PairStats:
         for pair in tqdm([(i[1], i[0]) for i in raw_stats.items()], desc="HEAP", total=len(raw_stats)):
             self.stats_heap.insert(pair)
 
-    def get_pair_stats_from_word(self, word, filter_elems=None):
+    def get_pair_stats_from_word(self, word: tuple[str, ...], filter_elems=None):
         """
         Computes the statistics for pairs in a word. If filter_elems is given,
         only pairs involving these elements are returned.
@@ -202,10 +190,31 @@ class PairStats:
     def __len__(self):
         return len(self.stats_heap)
 
-    def probabilistic_score_laplace(self, unit, new_unit_count):
-        total_count = self.n_running_symbols
-        normalization = total_count - new_unit_count
-        first_count = self.produced_count[unit[0]] - new_unit_count
+    def probabilistic_score_laplace(self, unit: tuple[str,str], new_unit_count: int):
+        """
+        Equation 6 in the paper shows the score formula
+
+            C_n(xy) * ln( P_n(xy) / ( P_n(x)P_n(y) ) )
+
+        which equals, using MLE estimators
+
+            C_n(xy) * ln( C_n(xy)/|T_n|  / ( C_n(x)/|T_n| * C_n(y)/|T_n| ) )
+            = C_n(xy) * ln( |T_n| * C_n(xy)  / ( C_n(x) * C_n(y) ) )
+            = C_n(xy) * [ ln C_n(xy) - ln C_n(x) - ln C_n(y) + ln( |T_{n-1}| - C_n(xy) ) ]
+
+        where
+            C_n(xy) = C_{n-1}(x,y) when x != y;
+            |T_n| =   |T_{n-1}| - C_n(xy) = |T_{n-1}|  - C_{n-1}(x,y);
+            C_n(x) = C_{n-1}(x) - C_n(xy) = C_{n-1}(x) - C_{n-1}(x,y);
+            C_n(y) = similar
+
+        except the ratios are computed using Laplace smoothing, so C'_n(t) = C_n(t) + 1 and |T'_n| = |T_n| + |V|.
+
+        :param new_unit_count: count of xy in the new corpus (equal to the count of the pair (x,y) in the old corpus if y != x).
+        :param unit: the pair (x,y) itself.
+        """
+        normalization = self.n_running_symbols      - new_unit_count
+        first_count  = self.produced_count[unit[0]] - new_unit_count
         second_count = self.produced_count[unit[1]] - new_unit_count
         score = new_unit_count * (math.log(new_unit_count + 1) -
                                   math.log(first_count + 1) -
@@ -216,8 +225,7 @@ class PairStats:
     def _get_compare_function(self):
         # We include the full tuple in the comparisons in order to break ties
         if self.probabilistic:
-            return lambda a, b: (self.probabilistic_score_laplace(a[1], a[0]), a[1]) > \
-                (self.probabilistic_score_laplace(b[1], b[0]), b[1])
+            return lambda a, b: (self.probabilistic_score_laplace(a[1], a[0]), a[1]) > (self.probabilistic_score_laplace(b[1], b[0]), b[1])
         else:
             return lambda a, b: (sum(a[0]), a[1]) > (b[0], b[1])
 
@@ -239,9 +247,9 @@ class PairStats:
         pair_str = first + second
 
         if self.probabilistic:
-            self.n_running_symbols -= freq
-            self.produced_count[first] -= freq
-            self.produced_count[second] -= freq
+            self.n_running_symbols        -= freq
+            self.produced_count[first]    -= freq
+            self.produced_count[second]   -= freq
             self.produced_count[pair_str] += freq
 
         # This approach is taken from the original implementation. We could

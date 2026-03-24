@@ -1,4 +1,4 @@
-<img src="doc/logo.png">
+<img src="doc/logo.png" alt="BPE-knockout">
 
 Repo hosting the implementation of BPE-knockout and ReBPE tokenisation, as well as the intrinsic evaluations for the NAACL 2024 
 paper [*"BPE-knockout: Pruning Pre-existing BPE Tokenisers with Backwards-compatible Morphological Semi-supervision"*](https://aclanthology.org/2024.naacl-long.324/).
@@ -42,8 +42,8 @@ The resulting object is indeed a HuggingFace tokeniser, but internally it works 
 If you are only interested in using the BPE-knockout and ReBPE tokenisers, I recommend you to just install 
 the [TkTkT package](https://github.com/bauwenst/TkTkT). It has this package as a dependency.
 
-*Warning:* If you do decide to manually install this package, don't forget to add the `[full,github]` suffix 
-(`pip install "bpe_knockout[full,github] @ git+..."`) in case you don't have an installation for any of my other packages.
+*Warning:* If you do decide to manually install this package, don't forget to add the `[all]` suffix 
+(`pip install bpe_knockout[all]`) in case you don't have an installation for any of my other packages.
 
 ### Reproducing the paper
 If you want to run experiments from the paper (and/or have access to the word count files), this means you want to download
@@ -56,12 +56,12 @@ For this purpose, run:
 git clone https://github.com/bauwenst/BPE-knockout
 cd BPE-knockout
 git checkout c09a7
-pip install -e .[full,github]
+pip install -e .[all]
 ```
 *Warning*:
 - If you're using conda or venv, don't forget to activate your environment before running any calls to `pip install`.
 - If you have an editable installation of my other packages `TkTkT` and/or `Fiject` and would like to keep it, do *not* 
-  include the `[full,github]` suffix.
+  include the `[all]` suffix.
 
 ## More usage examples
 ### Saving and loading tokeniser after knockout

@@ -31,12 +31,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-full = [
-
+all = [  # All my other packages, on PyPI.
+    "tktkt[all]",
+    "modest_bauwenst[all]"
 ]
-github = [  # These are not optional, but if you have these packages as editable installs, you don't want to let pip install them again!
-    "tktkt[github] @ git+https://github.com/bauwenst/TkTkT",
-    "modest[github] @ git+https://github.com/bauwenst/MoDeST",
+github = [  # All other packages not on PyPI yet.
 ]
 tests = [
     "scipy",
@@ -46,6 +45,10 @@ tests = [
     "datasets >= 2.10.1",
     "requests",
 ]
+
+[project.urls]
+Repository = "https://github.com/bauwenst/BPE-knockout"
+"Bug Tracker" = "https://github.com/bauwenst/BPE-knockout/issues"
 
 # Include morphological data and tokeniser files.
 [tool.setuptools.package-data]
