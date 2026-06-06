@@ -5,7 +5,8 @@ rules using its two parents. This involves two additional problems solved here:
     2. A way of deciding which types to knock out of the vocabulary. I came up with "blame ratio", see below.
 """
 from abc import ABC, abstractmethod
-from typing import Any, Self
+from typing import Any
+from typing_extensions import Self
 from collections import Counter
 from pathlib import Path
 from dataclasses import dataclass, asdict
