@@ -126,6 +126,27 @@ class MergeGraph:
         self.next_merge += 1
         return new_merge
 
+    def getAncestors(self, typ: str) -> set[str]:
+        if typ not in self.vocab:
+            return set()
+
+        ancestors = {typ}
+        for merge in self.merges_of[typ]:  # For types in the alphabet, this loop just doesn't run. For other types it runs once.
+            for parent in merge.parts:
+                ancestors |= self.getAncestors(parent)
+        return ancestors
+
+    def getDescendants(self, typ: str) -> set[str]:
+        frontier    = {typ}  # open set
+        descendants = set()  # closed set
+        while frontier:
+            current_type = frontier.pop()
+            descendants.add(current_type)
+
+            affected_types = {m.childType() for m in self.merges_with[current_type]}
+            frontier |= affected_types - descendants
+        return descendants
+
     def knockout(self, type_to_delete: str) -> list[Merge]:
         """
         Rewire all the merges that involve the given type, and then cut it out of the graph.
@@ -196,14 +217,7 @@ class MergeGraph:
         if not cascade:
             types_to_delete = {type_to_delete}
         else:  # You might think that cascaded knockout can be done recursively, but it's more difficult than that since the BPE merge graph is a DAG, not a tree.
-            frontier        = {type_to_delete}  # open set
-            types_to_delete = set()             # closed set
-            while frontier:
-                current_type = frontier.pop()
-                types_to_delete.add(current_type)
-
-                affected_types = {m.childType() for m in self.merges_with[current_type]}
-                frontier |= affected_types - types_to_delete
+            types_to_delete = self.getDescendants(type_to_delete)
 
         # Now detach the arcs pointing into each vertex and out of each vertex.
         for type_to_delete in types_to_delete:
